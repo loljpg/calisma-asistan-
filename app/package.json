@@ -1,0 +1,19 @@
+{
+  "name": "calisma-asistani",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "YKS çalışma asistanı – Capacitor ile paketlenen Android uygulaması",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/local-notifications": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.0"
+  }
+}
