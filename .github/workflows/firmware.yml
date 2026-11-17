@@ -1,0 +1,68 @@
+name: Masa saati yazılımı (ESP32 CYD)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "firmware/**"
+      - ".github/workflows/firmware.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+
+      - name: PlatformIO kur
+        run: pip install --upgrade platformio "esptool<5"
+
+      - name: Derle (ILI9341 ve ST7789)
+        working-directory: firmware
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DFW_BUILD=${{ github.run_number }}
+        run: pio run -e cyd -e cyd_st7789
+
+      - name: Dosyaları hazırla
+        working-directory: firmware
+        run: |
+          mkdir -p ../dist
+          BOOT_APP0=$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -n 1)
+          test -n "$BOOT_APP0"
+          for env in cyd cyd_st7789; do
+            B=.pio/build/$env
+            cp "$B/firmware.bin" "../dist/firmware-$env.bin"
+            esptool.py --chip esp32 merge_bin -o "../dist/ilk-kurulum-$env.bin" \
+              --flash_mode dio --flash_freq 40m --flash_size 4MB \
+              0x1000 "$B/bootloader.bin" 0x8000 "$B/partitions.bin" \
+              0xe000 "$BOOT_APP0" 0x10000 "$B/firmware.bin"
+          done
+          ls -la ../dist
+
+      - name: Yayınla
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: fw-v${{ github.run_number }}
+          name: Masa saati fw-v${{ github.run_number }}
+          make_latest: "false"
+          body: |
+            **İlk yükleme:** `ilk-kurulum-cyd.bin` dosyasını ESPFlash ile **0x0** adresine yaz.
+            Ekran beyaz, karışık ya da renkler tersse `ilk-kurulum-cyd_st7789.bin` dosyasını dene.
+
+            Sonraki sürümler kart Wi-Fi'ye bağlıyken kendiliğinden yüklenir
+            (`firmware-*.bin` dosyaları bunun içindir, elle yüklemene gerek yok).
+          files: dist/*.bin

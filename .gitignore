@@ -3,3 +3,4 @@ app/android/
 app/www/vendor/
 *.apk
 .DS_Store
+firmware/.pio/

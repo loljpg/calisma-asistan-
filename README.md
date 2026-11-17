@@ -1,6 +1,6 @@
 # Çalışma Asistanı
 
-YKS'ye hazırlık için kişisel çalışma asistanı. Telefon uygulaması ödevleri, deneme ve quiz sonuçlarını tutar, Claude ile günlük çalışma planı hazırlar. Sonraki sürümde ESP32 masa saati (CYD) aynı veriyle çalışacak.
+YKS'ye hazırlık için kişisel çalışma asistanı. Telefon uygulaması ödevleri, deneme ve quiz sonuçlarını tutar, Claude ile günlük çalışma planı hazırlar. ESP32 masa saati (CYD) aynı veriyle çalışır: saat, hava durumu, günün planı ve kronometre.
 
 <img src="app/resources/icon-preview.png" width="96" alt="Uygulama ikonu">
 
@@ -30,6 +30,8 @@ Ayarlar → Bulut ve masa saati bölümünden Firebase hesabına bağlanınca:
 - Tüm veriler buluta yedeklenir; yeni telefonda "Buluttan geri yükle" ile geri gelir.
 
 Firebase kurulumu ve veri yapısı: [docs/firebase.md](docs/firebase.md)
+
+Masa saatine yazılım yükleme ve ilk kurulum: [firmware/README.md](firmware/README.md)
 
 ## Nasıl derleniyor
 
