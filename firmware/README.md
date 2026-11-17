@@ -5,6 +5,8 @@ powerbank yeterli.
 
 ## Ekranlar
 
+<img src="onizleme.png" width="640" alt="Ekranların yaklaşık önizlemesi">
+
 | Ekran | Ne gösterir |
 | --- | --- |
 | **Ana** | Saat, tarih, Sakarya hava durumu, şimdiki/sıradaki oturum, günlük hedef çubuğu |

@@ -761,8 +761,9 @@ static const char* TAB_LABELS[] = {"Ana", "Program", "Kronometre"};
 
 static void drawTabs() {
   card(8, 198, 304, 38, 19, COL_CARD, COL_LINE);
+  static const int TX[] = {12, 84, 174}, TW[] = {68, 86, 104};
   for (int i = 0; i < 3; i++) {
-    int x = 12 + i * 90, w = 86;
+    int x = TX[i], w = TW[i];
     bool on = (int)screen == i;
     if (on) tft.fillSmoothRoundRect(x, 202, w, 30, 15, COL_CARD_ON, COL_CARD);
     text(TAB_LABELS[i], x + w / 2, 217, F_SMALL, on ? COL_TEXT : COL_MUTED, on ? COL_CARD_ON : COL_CARD, MC_DATUM);
@@ -924,14 +925,14 @@ static void drawPlan(bool full) {
     bool late = !done && now >= 0 && toMin(it.saat) + it.dk < now;
     uint16_t timeCol = it.durum == "ertelendi" || late ? COL_WARN : COL_TEXT;
     text(it.saat, 18, y + 18, F_TEXT, timeCol, bg, ML_DATUM);
-    tft.fillSmoothCircle(76, y + 18, 4, dersColor(it.ders), bg);
-    String ders = fit(it.ders, F_TEXT, 110);
+    tft.fillSmoothCircle(81, y + 18, 4, dersColor(it.ders), bg);
+    String ders = fit(it.ders, F_TEXT, 105);
     int dw = textW(ders, F_TEXT);
-    text(ders, 86, y + 18, F_TEXT, done ? COL_MUTED : COL_TEXT, bg, ML_DATUM);
-    if (done) tft.drawFastHLine(86, y + 19, dw, COL_MUTED);
+    text(ders, 91, y + 18, F_TEXT, done ? COL_MUTED : COL_TEXT, bg, ML_DATUM);
+    if (done) tft.drawFastHLine(91, y + 19, dw, COL_MUTED);
     String sub = it.durum == "ertelendi" ? String("Ertelendi") : it.konu;
     if (sub.length()) {
-      int sx = 86 + dw + 8;
+      int sx = 91 + dw + 8;
       text(fit(sub, F_SMALL, 266 - sx), sx, y + 18, F_SMALL, COL_MUTED, bg, ML_DATUM);
     }
     if (done) {
@@ -948,12 +949,12 @@ static void drawPlan(bool full) {
 static void drawTimerDigits() {
   uint32_t sec = swElapsedMs() / 1000;
   bigText(fmtClock(sec), 10, 58, 300, swRunning ? COL_ACCENT : COL_TEXT, COL_BG, true);
-  tft.fillRect(20, 122, 280, 28, COL_BG);
+  tft.fillRect(20, 118, 280, 32, COL_BG);
   if (swDk > 0) {
-    progressBar(20, 124, 280, 6, (int)(sec * 100 / (uint32_t)(swDk * 60)), COL_ACCENT, COL_BG);
-    text("Planlanan " + String(swDk) + " dk", 20, 134, F_SMALL, COL_MUTED, COL_BG);
+    progressBar(20, 121, 280, 6, (int)(sec * 100 / (uint32_t)(swDk * 60)), COL_ACCENT, COL_BG);
+    text("Planlanan " + String(swDk) + " dk", 20, 129, F_SMALL, COL_MUTED, COL_BG);
   } else if (pomoBreak) {
-    text("Mola zamanı: 5 dakika ara ver", 160, 128, F_SMALL, COL_WARN, COL_BG, TC_DATUM);
+    text("Mola zamanı: 5 dakika ara ver", 160, 125, F_SMALL, COL_WARN, COL_BG, TC_DATUM);
   }
 }
 
@@ -1215,8 +1216,8 @@ static void runCalibration() {
 
 static void onTap(int x, int y) {
   if (y >= 196) {
-    if (x < 102) go(SCR_HOME);
-    else if (x < 192) go(SCR_PLAN);
+    if (x < 82) go(SCR_HOME);
+    else if (x < 172) go(SCR_PLAN);
     else if (x < 280) go(SCR_TIMER);
     else go(SCR_SETTINGS);
     return;
