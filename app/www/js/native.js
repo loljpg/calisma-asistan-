@@ -18,14 +18,31 @@ function notifications() {
 }
 
 let appPlugin = null;
+function app() {
+  if (appPlugin) return appPlugin;
+  const register = capExports()?.registerPlugin;
+  if (!register || !isNative()) return null;
+  appPlugin = register('App');
+  return appPlugin;
+}
+
 // Android geri tuşu. handler false döndürürse uygulama kapanır.
 export function onBackButton(handler) {
-  const register = capExports()?.registerPlugin;
-  if (!register || !isNative()) return;
-  appPlugin = register('App');
-  appPlugin.addListener('backButton', () => {
-    if (handler() === false) appPlugin.exitApp();
+  const p = app();
+  if (!p) return;
+  p.addListener('backButton', () => {
+    if (handler() === false) p.exitApp();
   });
+}
+
+// Uygulama öne geldiğinde handler(true), arka plana geçtiğinde handler(false).
+export function onAppState(handler) {
+  const p = app();
+  if (p) {
+    p.addListener('appStateChange', ({ isActive }) => handler(!!isActive));
+  } else {
+    document.addEventListener('visibilitychange', () => handler(document.visibilityState === 'visible'));
+  }
 }
 
 export async function initSystemBars() {

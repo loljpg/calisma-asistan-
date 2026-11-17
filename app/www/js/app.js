@@ -3,6 +3,7 @@ import { store } from './store.js';
 import * as L from './logic.js';
 import { icon, toast, openSheet, closeSheet, sheetOpen } from './ui.js';
 import * as native from './native.js';
+import { syncNow, isSignedIn, syncState } from './sync.js';
 import * as today from './views/today.js';
 import * as program from './views/program.js';
 import * as exams from './views/exams.js';
@@ -101,7 +102,13 @@ document.addEventListener('submit', (e) => {
   e.preventDefault();
   const fn = resolve('forms', form.dataset.form);
   if (!fn) return;
-  const data = Object.fromEntries(new FormData(form));
+  let fd;
+  try {
+    fd = new FormData(form, e.submitter || undefined);
+  } catch {
+    fd = new FormData(form);
+  }
+  const data = Object.fromEntries(fd);
   Promise.resolve()
     .then(() => fn(data, form, app))
     .catch(report);
@@ -155,6 +162,37 @@ function refreshNotifications() {
   }, 1200);
 }
 
+// ---------- Bulut eşitleme ----------
+let syncTimer = null;
+let lastOnline = false;
+function scheduleSync(delay = 4000) {
+  if (!isSignedIn()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => runSync(), delay);
+}
+
+async function runSync(opts) {
+  try {
+    await syncNow(opts);
+  } catch (e) {
+    console.warn('Eşitleme', e);
+  }
+  afterSync();
+}
+
+// Eşitlemeden sonra sadece gerekeni yeniler; ayarlarda yazı yazarken odak kaybolmasın.
+function afterSync() {
+  const online = L.deviceOnline(syncState.status);
+  if (app.route === 'today' && online !== lastOnline && !sheetOpen()) render();
+  lastOnline = online;
+  if (app.route === 'settings') settings.refreshSyncInfo();
+}
+app.syncNow = (opts) => syncNow(opts).finally(afterSync);
+
+setInterval(() => {
+  if (document.visibilityState === 'visible') scheduleSync(0);
+}, 30000);
+
 // ---------- Güncelleme ----------
 async function checkUpdate(force = false) {
   if (!native.isNative() && !force) return null;
@@ -176,9 +214,15 @@ if (views[startView]) app.route = startView;
 store.subscribe(() => {
   render();
   refreshNotifications();
+  scheduleSync();
 });
 render();
 refreshNotifications();
+scheduleSync(500);
+native.onAppState((active) => {
+  if (active) scheduleSync(0);
+  else if (isSignedIn()) runSync({ flush: true });
+});
 native.initSystemBars();
 native.onBackButton(() => {
   if (sheetOpen()) {

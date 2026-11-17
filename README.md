@@ -21,6 +21,16 @@ Uygulamada iki plan modu var (Ayarlar → Claude):
 
 API anahtarı sadece telefonda saklanır ve yedeğe yazılmaz.
 
+## Bulut ve masa saati
+
+Ayarlar → Bulut ve masa saati bölümünden Firebase hesabına bağlanınca:
+
+- Bugünün planı ve özeti masa saatine gönderilir,
+- Masa saatinde atılan tikler ve kronometre süreleri uygulamaya işlenir,
+- Tüm veriler buluta yedeklenir; yeni telefonda "Buluttan geri yükle" ile geri gelir.
+
+Firebase kurulumu ve veri yapısı: [docs/firebase.md](docs/firebase.md)
+
 ## Nasıl derleniyor
 
 `main` dalına `app/` altında bir değişiklik gönderildiğinde GitHub Actions:
@@ -36,6 +46,7 @@ Uygulama HTML, CSS ve JavaScript ile yazıldı (`app/www`), derleme adımı yok.
 | `app/www/js/logic.js` | Tarih, net, istatistik, plan doğrulama gibi saf mantık |
 | `app/www/js/store.js` | Telefonda veri saklama ve yedek |
 | `app/www/js/ai.js` | Claude API bağlantısı |
+| `app/www/js/cloud.js`, `sync.js` | Firebase girişi ve eşitleme |
 | `app/www/js/views/` | Bugün, Program, Denemeler, İstatistik, Ayarlar ekranları |
 | `app/resources/` | Uygulama ikonu ve onu üreten betik |
 

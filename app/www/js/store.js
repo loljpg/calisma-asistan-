@@ -17,7 +17,9 @@ export function defaults() {
       accent: '#7DD3FC',
       notifications: true,
       notifyBefore: 5,
-      lastUpdateCheck: 0
+      lastUpdateCheck: 0,
+      // Firebase: { dbUrl, apiKey, email, uid, idToken, refreshToken, expiresAt }
+      cloud: null
     },
     hours: { 0: { ...weekend }, 1: { ...weekday }, 2: { ...weekday }, 3: { ...weekday }, 4: { ...weekday }, 5: { ...weekday }, 6: { ...weekend } },
     tasks: [],
@@ -26,18 +28,33 @@ export function defaults() {
     plans: {},
     sessions: [],
     timer: null,
-    notifIds: []
+    notifIds: [],
+    processedEvents: []
   };
 }
 
+// Firebase boş dizileri silebilir, ardışık sayısal anahtarlı nesneleri diziye çevirebilir.
+// Buradan geçen her veri uygulamanın beklediği şekle getirilir.
+const asArray = (v) => (Array.isArray(v) ? v.filter((x) => x != null) : v && typeof v === 'object' ? Object.values(v) : []);
+
 function migrate(s) {
   const d = defaults();
-  return {
+  const out = {
     ...d,
     ...s,
     settings: { ...d.settings, ...(s.settings || {}) },
-    hours: { ...d.hours, ...(s.hours || {}) }
+    hours: { ...d.hours }
   };
+  const hours = s.hours || {};
+  for (let i = 0; i < 7; i++) if (hours[i] && typeof hours[i] === 'object') out.hours[i] = { ...d.hours[i], ...hours[i] };
+  for (const k of ['tasks', 'exams', 'tests', 'sessions', 'notifIds', 'processedEvents']) out[k] = asArray(s[k]);
+  out.exams = out.exams.map((e) => ({ ...e, dersler: asArray(e.dersler) }));
+  out.plans = {};
+  for (const [date, p] of Object.entries(s.plans || {})) {
+    if (p && typeof p === 'object') out.plans[date] = { not: '', ...p, items: asArray(p.items) };
+  }
+  if (!out.timer || typeof out.timer !== 'object') out.timer = null;
+  return out;
 }
 
 export const store = {
@@ -75,11 +92,17 @@ export const store = {
     return () => this.listeners.delete(fn);
   },
 
-  // API anahtarı yedeğe yazılmaz.
-  exportJSON() {
+  // Yedeklenecek veri: API anahtarı ve bulut oturum bilgileri hariç.
+  backupData() {
     const data = JSON.parse(JSON.stringify(this.state));
     data.settings.apiKey = '';
-    return JSON.stringify({ app: 'calisma-asistani', exportedAt: new Date().toISOString(), data });
+    delete data.settings.cloud;
+    delete data.notifIds;
+    return data;
+  },
+
+  exportJSON() {
+    return JSON.stringify({ app: 'calisma-asistani', exportedAt: new Date().toISOString(), data: this.backupData() });
   },
 
   importJSON(text) {
@@ -90,10 +113,12 @@ export const store = {
       throw new Error('Yedek okunamadı. Metnin tamamını yapıştırdığından emin ol.');
     }
     const data = o && o.data ? o.data : o;
-    if (!data || typeof data !== 'object' || !data.plans || !data.settings) throw new Error('Bu metin bir yedek değil.');
-    const apiKey = this.state.settings.apiKey;
+    if (!data || typeof data !== 'object' || !data.settings) throw new Error('Bu metin bir yedek değil.');
+    const keep = { apiKey: this.state.settings.apiKey, cloud: this.state.settings.cloud, notifIds: this.state.notifIds };
     this.state = migrate(data);
-    if (!this.state.settings.apiKey) this.state.settings.apiKey = apiKey;
+    if (!this.state.settings.apiKey) this.state.settings.apiKey = keep.apiKey;
+    this.state.settings.cloud = keep.cloud;
+    this.state.notifIds = keep.notifIds || [];
     this.save();
     for (const l of this.listeners) l(this.state);
   }

@@ -3,6 +3,57 @@ import { store } from '../store.js';
 import { icon, esc, radio, openSheet, closeSheet, sheetHead, toast, copyText } from '../ui.js';
 import { askClaude, MODELS } from '../ai.js';
 import { BUILD, ensureNotifPermission } from '../native.js';
+import * as L from '../logic.js';
+import { syncState, isSignedIn, connect, disconnect, restoreFromCloud } from '../sync.js';
+
+function syncText() {
+  if (syncState.error) return `Hata: ${syncState.error}`;
+  return syncState.lastSync ? L.agoText(syncState.lastSync) : 'Henüz eşitlenmedi';
+}
+
+function deviceText() {
+  const st = syncState.status;
+  if (!st?.lastSeen) return 'Henüz bağlanmadı';
+  const when = L.agoText(Number(st.lastSeen));
+  return `${L.deviceOnline(st) ? 'Bağlı' : 'Çevrimdışı'} · ${when}${st.fw ? ` · ${st.fw}` : ''}`;
+}
+
+// Eşitlemeden sonra sadece durum yazılarını günceller (app.js çağırır).
+export function refreshSyncInfo() {
+  const a = document.querySelector('[data-sync-status]');
+  const b = document.querySelector('[data-device-status]');
+  if (a) a.textContent = syncText();
+  if (b) b.textContent = deviceText();
+}
+
+function cloudSection(app) {
+  const c = app.s.settings.cloud || {};
+  if (!isSignedIn()) {
+    return `
+  <h2 class="set-title">Bulut ve masa saati</h2>
+  <form class="set-group glass form" data-form="settings:cloudLogin" style="padding:16px">
+    <p class="hint">Firebase’i kurduktan sonra bilgileri gir. Masa saati de aynı e-posta ve şifreyle bağlanacak. Verilerin ayrıca buluta yedeklenir.</p>
+    <label class="field">Veritabanı adresi<input class="input" name="dbUrl" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://…firebasedatabase.app" value="${esc(c.dbUrl || '')}" required></label>
+    <label class="field">Web API anahtarı<input class="input" name="apiKey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="AIza…" value="${esc(c.apiKey || '')}" required></label>
+    <label class="field">E-posta<input class="input" name="email" type="email" autocomplete="username" autocapitalize="off" value="${esc(c.email || '')}" required></label>
+    <label class="field">Şifre<input class="input" name="password" type="password" autocomplete="current-password" minlength="6" required></label>
+    <div class="btn-row">
+      <button class="btn glass" type="submit" name="mode" value="create">Hesap oluştur</button>
+      <button class="btn primary" type="submit" name="mode" value="login">Giriş yap</button>
+    </div>
+  </form>`;
+  }
+  return `
+  <h2 class="set-title">Bulut ve masa saati</h2>
+  <div class="set-group glass">
+    <div class="set-row"><span class="lbl">Hesap</span><span class="muted small">${esc(c.email)}</span></div>
+    <div class="set-row"><span class="lbl">Son eşitleme</span><span class="muted small" data-sync-status>${esc(syncText())}</span></div>
+    <div class="set-row"><span class="lbl">Masa saati</span><span class="muted small" data-device-status>${esc(deviceText())}</span></div>
+    <div class="set-row"><span class="lbl">Eşitle</span><button class="btn glass" data-action="settings:syncNow">${icon('refresh', 16)} Şimdi</button></div>
+    <div class="set-row"><span class="lbl">Buluttan geri yükle</span><button class="btn glass" data-action="settings:restoreSheet">${icon('download', 16)} Yükle</button></div>
+    <div class="set-row"><span class="lbl">Bu telefonda</span><button class="btn danger" data-action="settings:cloudLogout">Çıkış yap</button></div>
+  </div>`;
+}
 
 const ACCENTS = [
   ['#7DD3FC', 'Mavi'],
@@ -64,6 +115,8 @@ export function render(app) {
     </div>
   </div>
 
+  ${cloudSection(app)}
+
   <h2 class="set-title">Veri</h2>
   <div class="set-group glass">
     <div class="set-row"><span class="lbl">Yedeği kopyala</span><button class="btn glass" data-action="settings:exportData">${icon('copy', 16)} Kopyala</button></div>
@@ -74,7 +127,6 @@ export function render(app) {
   <div class="set-group glass">
     <div class="set-row"><span class="lbl">Sürüm</span><span class="muted">${BUILD ? `v${BUILD}` : 'Geliştirme'}</span></div>
     <div class="set-row"><span class="lbl">Güncellemeler</span><button class="btn glass" data-action="settings:checkUpdate">${icon('refresh', 16)} Denetle</button></div>
-    <div class="set-row stack"><span class="lbl">Masa saati (ESP32)</span><p class="hint">Firebase bağlantısı ve cihaz eşleştirme bir sonraki sürümde gelecek.</p></div>
   </div>`;
 }
 
@@ -128,6 +180,45 @@ export const actions = {
     );
   },
 
+  async syncNow(el, app) {
+    el.disabled = true;
+    try {
+      await app.syncNow({ force: true });
+      toast(syncState.applied ? `Eşitlendi. Masa saatinden ${syncState.applied} kayıt alındı.` : 'Eşitlendi.');
+    } finally {
+      el.disabled = false;
+    }
+  },
+
+  restoreSheet() {
+    openSheet(
+      `${sheetHead('Buluttan geri yükle')}
+      <p class="hint" style="margin-bottom:16px">Buluttaki son yedek bu telefondaki verilerin yerine geçer. Yeni bir telefona geçtiysen ya da uygulamayı yeniden kurduysan kullan.</p>
+      <div class="btn-row">
+        <button class="btn glass" data-action="ui:closeSheet">Vazgeç</button>
+        <button class="btn primary" data-action="settings:cloudRestore">${icon('download', 16)} Geri yükle</button>
+      </div>`,
+      'Buluttan geri yükle'
+    );
+  },
+
+  async cloudRestore(el) {
+    el.disabled = true;
+    try {
+      await restoreFromCloud();
+      closeSheet();
+      toast('Buluttaki yedek yüklendi.');
+    } finally {
+      el.disabled = false;
+    }
+  },
+
+  cloudLogout(el, app) {
+    disconnect();
+    app.render();
+    toast('Bu telefonda buluttan çıkış yapıldı. Verilerin telefonda duruyor.');
+  },
+
   async checkUpdate(el, app) {
     el.disabled = true;
     try {
@@ -145,6 +236,22 @@ export const actions = {
 };
 
 export const forms = {
+  async cloudLogin(data, form, app) {
+    const buttons = [...form.querySelectorAll('button')];
+    buttons.forEach((b) => {
+      b.disabled = true;
+    });
+    try {
+      await connect({ ...data, create: data.mode === 'create' });
+      app.render();
+      toast(data.mode === 'create' ? 'Hesap oluşturuldu ve buluta bağlandı.' : 'Buluta bağlandı.');
+    } finally {
+      buttons.forEach((b) => {
+        b.disabled = false;
+      });
+    }
+  },
+
   importData(data) {
     store.importJSON(data.yedek || '');
     closeSheet();

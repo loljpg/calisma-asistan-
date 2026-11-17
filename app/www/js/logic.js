@@ -346,6 +346,75 @@ export function timerElapsedMs(t, now = Date.now()) {
   return (t.acc || 0) + (t.startedAt ? now - t.startedAt : 0);
 }
 
+// ---------- Masa saati (ESP32) ----------
+// Cihazın göstereceği bugünün özeti. Firebase'de users/{uid}/device/view altına yazılır.
+export function deviceView(state, now = new Date()) {
+  const today = dateStr(now);
+  const items = (state.plans[today]?.items || [])
+    .filter((i) => i.durum !== 'tasindi')
+    .map((i) => ({ id: i.id, saat: i.saat, ders: i.ders, konu: i.konu || '', dk: i.dk, durum: i.durum }));
+  return {
+    date: today,
+    items,
+    studiedMin: Math.round(minutesOn(state.sessions, today)),
+    goalMin: Number(state.settings.dailyGoalMin) || 300,
+    streak: streak(state.sessions, today),
+    examDays: examCountdown(state.settings.examDate, today)
+  };
+}
+
+// Cihazdan gelen olayları (tamamlama, geri alma, kronometre oturumu) uygular.
+// Aynı olay iki kez gelirse ikinci kez uygulanmaz. Uygulanan olay sayısını döndürür.
+export function applyDeviceEvents(state, events, now = new Date()) {
+  if (!Array.isArray(state.processedEvents)) state.processedEvents = [];
+  const seen = new Set(state.processedEvents);
+  const list = Object.entries(events || {})
+    .filter(([key, e]) => e && typeof e === 'object' && !seen.has(key))
+    .sort((a, b) => (Number(a[1].at) || 0) - (Number(b[1].at) || 0));
+  let applied = 0;
+  for (const [key, e] of list) {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(e.date)) ? e.date : dateStr(now);
+    const it = e.itemId ? findItem(state, date, String(e.itemId)) : null;
+    if (e.type === 'complete' && it && it.durum !== 'tamam') {
+      completeItem(state, date, it.id);
+      applied++;
+    } else if (e.type === 'uncomplete' && it && it.durum === 'tamam') {
+      uncompleteItem(state, date, it.id);
+      applied++;
+    } else if (e.type === 'session') {
+      const sec = Math.round(Number(e.sec));
+      if (sec >= 60 && sec <= 6 * 3600) {
+        state.sessions.push({
+          id: uid(), tarih: date,
+          ders: String(it?.ders || e.ders || 'Diğer').slice(0, 40),
+          konu: String(it?.konu || e.konu || '').slice(0, 120),
+          sec, itemId: it ? it.id : null, taskId: it?.taskId || null, kaynak: 'cihaz',
+          end: Number(e.at) || Date.now()
+        });
+        if (it) it.durum = 'tamam';
+        applied++;
+      }
+    }
+    state.processedEvents.push(key);
+  }
+  state.processedEvents = state.processedEvents.slice(-300);
+  return applied;
+}
+
+// Cihaz son 3 dakika içinde haber verdiyse bağlı sayılır.
+export function deviceOnline(status, now = Date.now()) {
+  const t = Number(status?.lastSeen);
+  return Number.isFinite(t) && t > 0 && now - t < 3 * 60 * 1000;
+}
+
+export function agoText(ms, now = Date.now()) {
+  const d = Math.max(0, Math.round((now - ms) / 1000));
+  if (d < 60) return 'az önce';
+  if (d < 3600) return `${Math.floor(d / 60)} dk önce`;
+  if (d < 86400) return `${Math.floor(d / 3600)} sa önce`;
+  return `${Math.floor(d / 86400)} gün önce`;
+}
+
 // ---------- Bildirimler ----------
 export function notificationsFor(state, now = new Date(), beforeMin = 5) {
   const out = [];

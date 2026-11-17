@@ -2,6 +2,7 @@
 import * as L from '../logic.js';
 import { icon, esc, options, radio, openSheet, setSheet, closeSheet, sheetHead, toast, copyText } from '../ui.js';
 import { askClaude, MODELS } from '../ai.js';
+import { isSignedIn, syncState } from '../sync.js';
 
 let dayOffset = 0; // 0: bugün, 1: yarın
 let pending = null; // Claude'dan gelen, henüz uygulanmamış plan
@@ -40,6 +41,7 @@ export function render(app) {
     <div class="chips">
       ${cd === null ? '<button class="chip" style="border:none" data-action="ui:go" data-route="settings">Sınav tarihini ayarla</button>' : `<span class="chip">Sınava ${cd} gün</span>`}
       <span class="chip">${doneN}/${todayItems.length} oturum</span>
+      ${isSignedIn() && L.deviceOnline(syncState.status) ? '<span class="chip ok"><span class="led"></span>Masa saati bağlı</span>' : ''}
     </div>
   </section>
   ${t ? timerCard(t) : ''}
