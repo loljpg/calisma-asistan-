@@ -7,8 +7,8 @@ let type = 'TYT';
 
 export function render(app) {
   return `
-  ${pageHead('Denemeler', 'Sonuçlar ve kazanımlar', `<button class="icon-btn glass" data-action="exams:add" aria-label="Sonuç ekle">${icon('plus')}</button>`)}
-  <div class="seg glass" role="group" aria-label="Sonuç türü">
+  ${pageHead('Denemeler', 'Sonuçlar ve kazanımlar', `<button class="icon-btn surface" data-action="exams:add" aria-label="Sonuç ekle">${icon('plus')}</button>`)}
+  <div class="seg surface" role="group" aria-label="Sonuç türü">
     <button aria-pressed="${tab === 'exams'}" data-action="exams:tab" data-tab="exams">Denemeler</button>
     <button aria-pressed="${tab === 'tests'}" data-action="exams:tab" data-tab="tests">Quiz ve testler</button>
   </div>
@@ -18,13 +18,13 @@ export function render(app) {
 // ---------- Denemeler ----------
 function examsView(app) {
   const list = app.s.exams.filter((e) => e.tur === type).sort((a, b) => (a.tarih < b.tarih ? -1 : 1));
-  const typeSeg = `<div class="seg small glass" role="group" aria-label="Sınav">
+  const typeSeg = `<div class="seg small surface" role="group" aria-label="Sınav">
     <button aria-pressed="${type === 'TYT'}" data-action="exams:type" data-type="TYT">TYT</button>
     <button aria-pressed="${type === 'AYT'}" data-action="exams:type" data-type="AYT">AYT</button>
   </div>`;
   if (!list.length) {
     return `${typeSeg}
-    <div class="empty glass">
+    <div class="empty surface">
       <b>Henüz ${type} denemesi yok</b>
       <p>Deneme sonuçlarını girdiğinde net gelişimini burada görürsün. Claude da zayıf derslerini plana öncelikli koyar.</p>
       <button class="btn primary" data-action="exams:add">${icon('plus', 16)} Deneme ekle</button>
@@ -39,7 +39,7 @@ function examsView(app) {
   const max = Math.max(10, ...nets) * 1.1;
   return `
   ${typeSeg}
-  <section class="card glass" aria-label="Net gelişimi">
+  <section class="card surface" aria-label="Net gelişimi">
     <div class="spread">
       <div style="display:flex;flex-direction:column;gap:4px">
         <span class="eyebrow">${type} net · ${esc(last.ad)}</span>
@@ -58,7 +58,7 @@ function examsView(app) {
       .map((x) => {
         const n = L.net(x.d, x.y);
         const pct = x.max ? Math.max(0, Math.min(100, Math.round((n / x.max) * 100))) : 0;
-        return `<div class="card tight glass">
+        return `<div class="card tight surface">
           <span class="muted small">${esc(x.ders)}</span>
           <b style="font-size:18px">${L.fmtNum(n)}${x.max ? ` <span class="muted small">/ ${x.max}</span>` : ''}</b>
           ${x.max ? `<div class="progress thin"><i style="width:${pct}%"></i></div>` : ''}
@@ -69,7 +69,7 @@ function examsView(app) {
   <h2 class="set-title">Tüm ${type} denemeleri</h2>
   <div class="list">
     ${[...list].reverse().map((e) => `
-      <div class="row glass"><button class="row-main" data-action="exams:examSheet" data-id="${e.id}">
+      <div class="row surface"><button class="row-main" data-action="exams:examSheet" data-id="${e.id}">
         <div class="row-time"><b>${L.fmtNum(L.examNet(e))}</b><span>net</span></div>
         <div class="row-body"><div class="row-title"><span class="t">${esc(e.ad)}</span></div><span class="row-sub">${L.longDate(e.tarih)}</span></div>
       </button></div>`).join('')}
@@ -112,7 +112,7 @@ function testsView(app) {
   const tests = [...app.s.tests].sort((a, b) => (a.tarih < b.tarih ? 1 : -1));
   if (!tests.length) {
     return `
-    <div class="empty glass">
+    <div class="empty surface">
       <b>Henüz quiz ya da test yok</b>
       <p>Quiz ve kazanım kavrama testi sonuçlarını ekle. %60'ın altında kalan konular zayıf olarak işaretlenir ve plana öncelikli girer.</p>
       <button class="btn primary" data-action="exams:add">${icon('plus', 16)} Sonuç ekle</button>
@@ -120,14 +120,14 @@ function testsView(app) {
   }
   const weak = L.weakTopics(app.s.tests);
   return `
-  ${weak.length ? `<section class="card tight glass" aria-label="Zayıf kazanımlar">
-    <div style="display:flex;align-items:center;gap:8px;color:var(--warn)">${icon('alert', 16)}<h2 style="font-size:15px;color:#FFFFFF">Zayıf kazanımlar</h2></div>
+  ${weak.length ? `<section class="card tight surface" aria-label="Zayıf kazanımlar">
+    <div style="display:flex;align-items:center;gap:8px;color:var(--warn)">${icon('alert', 16)}<h2 style="font-size:15px;color:var(--text)">Zayıf kazanımlar</h2></div>
     <div class="chips">${weak.map((t) => `<span class="chip warn">${esc(t.ders)} · ${esc(t.konu)} · %${L.testPct(t)}</span>`).join('')}</div>
   </section>` : ''}
   <div class="list">
     ${tests.map((t) => {
       const pct = L.testPct(t);
-      return `<div class="row glass"><button class="row-main" data-action="exams:testSheet" data-id="${t.id}">
+      return `<div class="row surface"><button class="row-main" data-action="exams:testSheet" data-id="${t.id}">
         <div class="row-time"><b style="color:${pct < 60 ? 'var(--warn)' : 'inherit'}">%${pct}</b><span>${t.dogru}/${t.toplam}</span></div>
         <div class="row-body">
           <div class="row-title"><span class="dot" style="background:${L.dersRenk(t.ders)}"></span><span class="t">${esc(t.ders)} · ${esc(t.konu)}</span></div>
@@ -176,7 +176,7 @@ export const actions = {
     openSheet(
       `${sheetHead(e.ad, `${e.tur} · ${L.longDate(e.tarih)}`)}
       <div class="list" style="margin-bottom:14px">
-        ${e.dersler.map((x) => `<div class="spread card tight glass"><span>${esc(x.ders)}</span><span class="muted small">${x.d} D · ${x.y} Y</span><b>${L.fmtNum(L.net(x.d, x.y))}</b></div>`).join('')}
+        ${e.dersler.map((x) => `<div class="spread card tight surface"><span>${esc(x.ders)}</span><span class="muted small">${x.d} D · ${x.y} Y</span><b>${L.fmtNum(L.net(x.d, x.y))}</b></div>`).join('')}
       </div>
       <div class="spread" style="margin-bottom:16px"><span class="muted">Toplam net</span><b style="font-size:24px">${L.fmtNum(L.examNet(e))}</b></div>
       <button class="btn danger block" data-action="exams:removeExam" data-id="${e.id}">${icon('trash', 16)} Denemeyi sil</button>`,

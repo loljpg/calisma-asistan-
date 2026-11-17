@@ -46,11 +46,19 @@ const app = {
   closeSheet
 };
 
+// Tema: 'auto' telefonun açık/koyu ayarını izler.
+const darkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+let appliedDark = null;
 function applyTheme() {
-  const st = store.state.settings;
-  document.documentElement.style.setProperty('--accent', st.accent || '#7DD3FC');
-  document.body.classList.toggle('reduce', !!st.reduceEffects);
+  const pref = store.state.settings.theme || 'auto';
+  const dark = pref === 'dark' || (pref === 'auto' && !!darkQuery?.matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  if (dark === appliedDark) return;
+  appliedDark = dark;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#111214' : '#F5F4F0');
+  native.setSystemBars(dark);
 }
+darkQuery?.addEventListener?.('change', applyTheme);
 
 function renderTabs() {
   tabEl.innerHTML = TABS.map(
@@ -223,7 +231,6 @@ native.onAppState((active) => {
   if (active) scheduleSync(0);
   else if (isSignedIn()) runSync({ flush: true });
 });
-native.initSystemBars();
 native.onBackButton(() => {
   if (sheetOpen()) {
     closeSheet();

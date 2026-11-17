@@ -58,6 +58,7 @@ struct Config {
   bool calibrated = false, swapXY = false;
   int x1 = 400, x2 = 3480, y1 = 520, y2 = 3520;
   bool pomodoro = false;
+  int theme = 0;  // 0 otomatik (gece koyu), 1 açık, 2 koyu
 };
 
 static SemaphoreHandle_t mtx;
@@ -134,29 +135,21 @@ static String fmtClock(uint32_t sec) {
   return String(b);
 }
 
-static const char* GUN[] = {"Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"};
-static const char* AY[] = {"Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"};
-
-static String dateLine() {
-  struct tm t;
-  if (!localNow(t)) return "Saat ayarlanıyor…";
-  return String(GUN[t.tm_wday]) + ", " + String(t.tm_mday) + " " + AY[t.tm_mon];
-}
-
+// Telefondaki uygulamayla aynı ders renkleri (logic.js DERS_RENK)
 static uint16_t dersColor(const String& d) {
-  if (d == "Türkçe") return RGB(249, 168, 212);
-  if (d == "Edebiyat") return RGB(240, 171, 252);
-  if (d == "Matematik") return RGB(125, 211, 252);
-  if (d == "Geometri") return RGB(147, 197, 253);
-  if (d == "Fizik") return RGB(165, 180, 252);
-  if (d == "Kimya") return RGB(110, 231, 183);
-  if (d == "Biyoloji") return RGB(134, 239, 172);
-  if (d == "Tarih") return RGB(253, 186, 116);
-  if (d == "Coğrafya") return RGB(252, 211, 77);
-  if (d == "Felsefe") return RGB(196, 181, 253);
-  if (d == "Din Kültürü") return RGB(253, 230, 138);
-  if (d == "İngilizce") return RGB(103, 232, 249);
-  return RGB(203, 213, 225);
+  if (d == "Türkçe") return RGB(217, 80, 142);
+  if (d == "Edebiyat") return RGB(180, 85, 201);
+  if (d == "Matematik") return RGB(47, 134, 209);
+  if (d == "Geometri") return RGB(75, 104, 214);
+  if (d == "Fizik") return RGB(115, 87, 214);
+  if (d == "Kimya") return RGB(30, 156, 116);
+  if (d == "Biyoloji") return RGB(90, 158, 54);
+  if (d == "Tarih") return RGB(217, 115, 43);
+  if (d == "Coğrafya") return RGB(201, 148, 21);
+  if (d == "Felsefe") return RGB(142, 98, 201);
+  if (d == "Din Kültürü") return RGB(168, 133, 54);
+  if (d == "İngilizce") return RGB(28, 147, 168);
+  return RGB(138, 143, 152);
 }
 
 static String normalizeDbUrl(String s) {
@@ -187,6 +180,7 @@ static void loadConfig() {
   cfg.y1 = prefs.getInt("cy1", cfg.y1);
   cfg.y2 = prefs.getInt("cy2", cfg.y2);
   cfg.pomodoro = prefs.getBool("pomo", false);
+  cfg.theme = constrain(prefs.getInt("theme", 0), 0, 2);
   String ob = prefs.getString("outbox", "");
   prefs.end();
   outbox.clear();
@@ -215,6 +209,7 @@ static void saveConfig() {
   prefs.putInt("cy1", cfg.y1);
   prefs.putInt("cy2", cfg.y2);
   prefs.putBool("pomo", cfg.pomodoro);
+  prefs.putInt("theme", cfg.theme);
   prefs.end();
 }
 
@@ -582,6 +577,21 @@ static void netTask(void*) {
 // ============================================================================
 // Ekran ve dokunmatik (çekirdek 1)
 // ============================================================================
+// "Sentez" tasarımı. Sıra: bg, grid, surface, line, lineStrong, text, muted, faint, red, redSoft,
+// redLine, ink, onInk, inkMuted, ink2, inkLine, track, ok, cloud
+static const Palette PAL_DAY = {
+    RGB(245, 244, 240), RGB(232, 231, 226), RGB(255, 255, 255), RGB(226, 224, 217), RGB(207, 205, 198),
+    RGB(22, 23, 26),    RGB(110, 111, 119), RGB(154, 155, 162), RGB(207, 68, 40),   RGB(251, 241, 237),
+    RGB(229, 152, 137), RGB(22, 23, 26),    RGB(255, 255, 255), RGB(169, 170, 178), RGB(38, 39, 44),
+    RGB(52, 53, 59),    RGB(236, 234, 228), RGB(47, 158, 107),  RGB(200, 202, 208)};
+static const Palette PAL_NIGHT = {
+    RGB(17, 18, 20),    RGB(27, 28, 31),    RGB(27, 28, 32),    RGB(44, 45, 51),    RGB(58, 59, 65),
+    RGB(237, 237, 239), RGB(142, 143, 151), RGB(110, 111, 119), RGB(226, 92, 64),   RGB(42, 30, 27),
+    RGB(136, 63, 50),   RGB(38, 39, 44),    RGB(255, 255, 255), RGB(160, 161, 169), RGB(52, 53, 59),
+    RGB(68, 69, 76),    RGB(44, 45, 51),    RGB(61, 190, 133),  RGB(96, 98, 106)};
+const Palette* th = &PAL_DAY;
+static bool darkNow = false;
+
 static TFT_eSPI tft;
 static TFT_eSprite spr(&tft);
 static bool sprOk = false;
@@ -619,6 +629,34 @@ static bool wakeOnly() {
 static volatile bool portalRequested = false, calibRequested = false;
 static bool upcomingSoon = false;
 
+// --- Tema ---
+static const char* THEME_NAMES[] = {"Otomatik", "Açık", "Koyu"};
+
+static bool isNightHour() {
+  struct tm t;
+  return localNow(t) && (t.tm_hour >= NIGHT_FROM || t.tm_hour < NIGHT_TO);
+}
+static bool wantDark() { return cfg.theme == 2 || (cfg.theme == 0 && isNightHour()); }
+static void applyPalette() {
+  darkNow = wantDark();
+  th = darkNow ? &PAL_NIGHT : &PAL_DAY;
+}
+
+// --- Kareli zemin ---
+// (x, y, w, h) ekran koordinatıdır; (ox, oy) çizilen yüzeyin ekrandaki sol üst köşesi.
+template <typename G>
+static void gridLines(G& g, int ox, int oy, int x, int y, int w, int h) {
+  for (int gx = ((x + GRID_STEP - 1) / GRID_STEP) * GRID_STEP; gx < x + w; gx += GRID_STEP)
+    g.drawFastVLine(gx - ox, y - oy, h, COL_GRID);
+  for (int gy = ((y + GRID_STEP - 1) / GRID_STEP) * GRID_STEP; gy < y + h; gy += GRID_STEP)
+    g.drawFastHLine(x - ox, gy - oy, w, COL_GRID);
+}
+
+static void clearBg(int x, int y, int w, int h) {
+  tft.fillRect(x, y, w, h, COL_BG);
+  gridLines(tft, 0, 0, x, y, w, h);
+}
+
 // --- Yazı ---
 static const uint8_t* curFont = nullptr;
 static void useFont(const uint8_t* f) {
@@ -655,31 +693,34 @@ static String fit(const String& s, const uint8_t* f, int maxW) {
 }
 
 // Büyük rakamlar (saat, kronometre) titremesin diye ara bellekte çizilir.
-static void bigText(const String& s, int x, int y, int w, uint16_t fg, uint16_t bg, bool center) {
+static const int BIG_H = 56;
+static void bigText(const String& s, int x, int y, int w, uint16_t fg, uint16_t bg, bool center, bool grid) {
   if (!sprOk) {
-    tft.fillRect(x, y, w, 58, bg);
+    if (grid) clearBg(x, y, w, BIG_H);
+    else tft.fillRect(x, y, w, BIG_H, bg);
     text(s, center ? x + w / 2 : x, y, F_BIG, fg, bg, center ? TC_DATUM : TL_DATUM);
     return;
   }
   spr.fillSprite(bg);
+  if (grid) gridLines(spr, x, y, x, y, w, BIG_H);
   spr.setTextColor(fg, bg);
   spr.setTextDatum(center ? TC_DATUM : TL_DATUM);
   spr.drawString(s, center ? w / 2 : 0, 0);
-  spr.pushSprite(x, y, 0, 0, w, 58);
+  spr.pushSprite(x, y, 0, 0, w, BIG_H);
 }
 
 // --- Şekiller ---
-static void card(int x, int y, int w, int h, int r, uint16_t fill, uint16_t border) {
-  tft.fillSmoothRoundRect(x, y, w, h, r, border, COL_BG);
-  tft.fillSmoothRoundRect(x + 1, y + 1, w - 2, h - 2, r - 1, fill, border);
-  if (w > 2 * r + 4) tft.drawFastHLine(x + r, y + 1, w - 2 * r, COL_HI);
+static void card(int x, int y, int w, int h, int r, uint16_t fill, uint16_t border, uint16_t under) {
+  tft.fillSmoothRoundRect(x, y, w, h, r, border, under);
+  if (fill != border) tft.fillSmoothRoundRect(x + 1, y + 1, w - 2, h - 2, r - 1, fill, border);
 }
+static void card(int x, int y, int w, int h, int r, uint16_t fill, uint16_t border) { card(x, y, w, h, r, fill, border, COL_BG); }
 
-static void progressBar(int x, int y, int w, int h, int pct, uint16_t col, uint16_t bg) {
+static void progressBar(int x, int y, int w, int h, int pct, uint16_t col, uint16_t track, uint16_t bg) {
   pct = constrain(pct, 0, 100);
-  tft.fillSmoothRoundRect(x, y, w, h, h / 2, COL_LINE, bg);
+  tft.fillSmoothRoundRect(x, y, w, h, h / 2, track, bg);
   int fw = w * pct / 100;
-  if (fw >= h) tft.fillSmoothRoundRect(x, y, fw, h, h / 2, col, COL_LINE);
+  if (fw >= h) tft.fillSmoothRoundRect(x, y, fw, h, h / 2, col, track);
 }
 
 static void checkMark(int cx, int cy, uint16_t col, uint16_t bg) {
@@ -687,46 +728,76 @@ static void checkMark(int cx, int cy, uint16_t col, uint16_t bg) {
   tft.drawWideLine(cx - 1, cy + 4, cx + 6, cy - 4, 2.5, col, bg);
 }
 
+static void checkBox(int cx, int cy, bool on, uint16_t bg) {
+  if (on) {
+    tft.fillSmoothRoundRect(cx - 10, cy - 10, 20, 20, 5, COL_TEXT, bg);
+    checkMark(cx, cy, COL_SURFACE, COL_TEXT);
+  } else {
+    tft.fillSmoothRoundRect(cx - 10, cy - 10, 20, 20, 5, COL_LINE_STRONG, bg);
+    tft.fillSmoothRoundRect(cx - 8, cy - 8, 16, 16, 4, bg, COL_LINE_STRONG);
+  }
+}
+
 static void drawGear(int cx, int cy, uint16_t col, uint16_t bg) {
   for (int i = 0; i < 8; i++) {
     float a = i * PI / 4;
-    tft.fillSmoothCircle(cx + (int)(8 * cos(a)), cy + (int)(8 * sin(a)), 2, col, bg);
+    tft.fillSmoothCircle(cx + (int)(7 * cos(a)), cy + (int)(7 * sin(a)), 2, col, bg);
   }
-  tft.fillSmoothCircle(cx, cy, 7, col, bg);
-  tft.fillSmoothCircle(cx, cy, 3, bg, col);
+  tft.fillSmoothCircle(cx, cy, 6, col, bg);
+  tft.fillSmoothCircle(cx, cy, 2, bg, col);
 }
 
-static void cloudShape(int cx, int cy, uint16_t col) {
-  tft.fillSmoothCircle(cx - 5, cy + 1, 6, col, COL_CARD);
-  tft.fillSmoothCircle(cx + 4, cy - 2, 7, col, COL_CARD);
-  tft.fillSmoothRoundRect(cx - 12, cy + 1, 24, 8, 4, col, COL_CARD);
+// Renkli nokta + küçük büyük harfli etiket
+static void dotLabel(const String& s, int x, int y, uint16_t dot, uint16_t col, uint16_t bg) {
+  tft.fillSmoothCircle(x + 3, y + 9, 3, dot, bg);
+  text(s, x + 12, y, F_SMALL, col, bg);
 }
 
-static void weatherIcon(int cx, int cy, int code) {
-  const uint16_t sun = COL_WARN, cloud = RGB(203, 213, 225);
+static void cloudShape(int cx, int cy, uint16_t col, uint16_t bg) {
+  tft.fillSmoothCircle(cx - 5, cy + 1, 6, col, bg);
+  tft.fillSmoothCircle(cx + 4, cy - 2, 7, col, bg);
+  tft.fillSmoothRoundRect(cx - 12, cy + 1, 24, 8, 4, col, bg);
+}
+
+static void sunRing(int cx, int cy, int r, uint16_t bg) {
+  tft.fillSmoothCircle(cx, cy, r, COL_RED, bg);
+  tft.fillSmoothCircle(cx, cy, r - 3, bg, COL_RED);
+}
+
+static void weatherIcon(int cx, int cy, int code, uint16_t bg) {
   if (code == 0) {
+    sunRing(cx, cy, 8, bg);
     for (int i = 0; i < 8; i++) {
       float a = i * PI / 4;
-      tft.drawWideLine(cx + 10 * cos(a), cy + 10 * sin(a), cx + 13 * cos(a), cy + 13 * sin(a), 2, sun, COL_CARD);
+      tft.drawWideLine(cx + 12 * cos(a), cy + 12 * sin(a), cx + 15 * cos(a), cy + 15 * sin(a), 2, COL_RED, bg);
     }
-    tft.fillSmoothCircle(cx, cy, 7, sun, COL_CARD);
   } else if (code <= 2) {
-    tft.fillSmoothCircle(cx - 5, cy - 4, 7, sun, COL_CARD);
-    cloudShape(cx + 3, cy + 2, cloud);
+    sunRing(cx - 5, cy - 4, 7, bg);
+    cloudShape(cx + 3, cy + 3, COL_CLOUD, bg);
   } else if (code == 45 || code == 48) {
-    for (int i = 0; i < 3; i++) tft.drawWideLine(cx - 11, cy - 5 + i * 6, cx + 11, cy - 5 + i * 6, 2.5, cloud, COL_CARD);
+    for (int i = 0; i < 3; i++) tft.drawWideLine(cx - 11, cy - 5 + i * 6, cx + 11, cy - 5 + i * 6, 2.5, COL_CLOUD, bg);
   } else {
-    cloudShape(cx, cy - 3, cloud);
+    cloudShape(cx, cy - 3, COL_CLOUD, bg);
     if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
-      for (int i = -1; i <= 1; i++) tft.drawWideLine(cx + i * 6, cy + 9, cx + i * 6 - 2, cy + 14, 2, COL_ACCENT, COL_CARD);
+      for (int i = -1; i <= 1; i++) tft.drawWideLine(cx + i * 6, cy + 9, cx + i * 6 - 2, cy + 14, 2, COL_MUTED, bg);
     } else if ((code >= 71 && code <= 77) || code == 85 || code == 86) {
-      for (int i = -1; i <= 1; i++) tft.fillSmoothCircle(cx + i * 6, cy + 12, 2, COL_TEXT, COL_CARD);
+      for (int i = -1; i <= 1; i++) tft.fillSmoothCircle(cx + i * 6, cy + 12, 2, COL_MUTED, bg);
     } else if (code >= 95) {
-      tft.drawWideLine(cx + 1, cy + 7, cx - 3, cy + 12, 2.5, COL_WARN, COL_CARD);
-      tft.drawWideLine(cx - 3, cy + 12, cx + 3, cy + 12, 2.5, COL_WARN, COL_CARD);
-      tft.drawWideLine(cx + 3, cy + 12, cx - 1, cy + 17, 2.5, COL_WARN, COL_CARD);
+      tft.drawWideLine(cx + 1, cy + 7, cx - 3, cy + 12, 2.5, COL_RED, bg);
+      tft.drawWideLine(cx - 3, cy + 12, cx + 3, cy + 12, 2.5, COL_RED, bg);
+      tft.drawWideLine(cx + 3, cy + 12, cx - 1, cy + 17, 2.5, COL_RED, bg);
     }
   }
+}
+
+enum BtnStyle { BTN_SURFACE, BTN_INK, BTN_INK_PRIMARY };
+static void button(int x, int y, int w, int h, const String& label, BtnStyle st) {
+  uint16_t under = st == BTN_SURFACE ? COL_BG : COL_INK;
+  uint16_t fill = st == BTN_INK_PRIMARY ? COL_ON_INK : (st == BTN_INK ? COL_INK2 : COL_SURFACE);
+  uint16_t border = st == BTN_INK_PRIMARY ? COL_ON_INK : (st == BTN_INK ? COL_INK_LINE : COL_LINE_STRONG);
+  uint16_t fg = st == BTN_INK_PRIMARY ? INK_TEXT : (st == BTN_INK ? COL_ON_INK : COL_TEXT);
+  card(x, y, w, h, 10, fill, border, under);
+  text(label, x + w / 2, y + h / 2, F_TEXT, fg, fill, MC_DATUM);
 }
 
 // --- Veriyi ekrana hazırlama ---
@@ -757,75 +828,104 @@ static std::vector<Item> displayItems(int& studied, View& snapshot) {
 static bool planIsToday(const View& v) { return v.valid && v.date.length() && v.date == todayStr(); }
 
 // --- Ortak parçalar ---
+static const int TAB_Y = 202;
 static const char* TAB_LABELS[] = {"Ana", "Program", "Kronometre"};
+static const int TAB_CX[] = {46, 126, 218};
 
 static void drawTabs() {
-  card(8, 198, 304, 38, 19, COL_CARD, COL_LINE);
-  static const int TX[] = {12, 84, 174}, TW[] = {68, 86, 104};
+  tft.fillRect(0, TAB_Y, SCREEN_W, SCREEN_H - TAB_Y, COL_SURFACE);
+  tft.drawFastHLine(0, TAB_Y, SCREEN_W, COL_LINE);
   for (int i = 0; i < 3; i++) {
-    int x = TX[i], w = TW[i];
     bool on = (int)screen == i;
-    if (on) tft.fillSmoothRoundRect(x, 202, w, 30, 15, COL_CARD_ON, COL_CARD);
-    text(TAB_LABELS[i], x + w / 2, 217, F_SMALL, on ? COL_TEXT : COL_MUTED, on ? COL_CARD_ON : COL_CARD, MC_DATUM);
+    text(TAB_LABELS[i], TAB_CX[i], 219, F_SMALL, on ? COL_TEXT : COL_FAINT, COL_SURFACE, MC_DATUM);
+    if (on) tft.fillSmoothCircle(TAB_CX[i], 233, 2, COL_RED, COL_SURFACE);
   }
   bool on = screen == SCR_SETTINGS;
-  if (on) tft.fillSmoothCircle(295, 217, 14, COL_CARD_ON, COL_CARD);
-  drawGear(295, 217, on ? COL_TEXT : COL_MUTED, on ? COL_CARD_ON : COL_CARD);
+  drawGear(295, 219, on ? COL_TEXT : COL_FAINT, COL_SURFACE);
+  if (on) tft.fillSmoothCircle(295, 233, 2, COL_RED, COL_SURFACE);
 }
 
 static void toast(const String& msg) {
-  card(16, 6, 288, 32, 16, COL_CARD_ON, COL_ACCENT);
-  text(fit(msg, F_SMALL, 268), 160, 22, F_SMALL, COL_TEXT, COL_CARD_ON, MC_DATUM);
+  card(16, 6, 288, 32, 10, COL_INK, COL_INK);
+  text(fit(msg, F_SMALL, 268), 160, 22, F_SMALL, COL_ON_INK, COL_INK, MC_DATUM);
   toastUntil = millis() + 2500;
 }
 
+static void fullClear() {
+  clearBg(0, 0, SCREEN_W, TAB_Y);
+  drawTabs();
+}
+
 // --- Ana ekran ---
+static const char* GUN_UP[] = {"PAZAR", "PAZARTESİ", "SALI", "ÇARŞAMBA", "PERŞEMBE", "CUMA", "CUMARTESİ"};
+static const char* AY_UP[] = {"OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"};
+
+static void drawDate() {
+  clearBg(10, 6, 222, 24);
+  struct tm t;
+  String s = localNow(t) ? String(GUN_UP[t.tm_wday]) + ", " + String(t.tm_mday) + " " + AY_UP[t.tm_mon] : String("SAAT AYARLANIYOR…");
+  text(s, 14, 10, F_SMALL, COL_MUTED, COL_BG);
+}
+
 static void drawClock() {
   struct tm t;
   char b[6] = "--:--";
   if (localNow(t)) strftime(b, sizeof b, "%H:%M", &t);
-  bigText(b, 10, 8, 220, COL_TEXT, COL_BG, false);
+  bigText(b, 10, 32, 222, COL_TEXT, COL_BG, false, true);
 }
 
 static void drawWeatherCard() {
-  card(234, 8, 78, 84, 16, COL_CARD, COL_LINE);
+  card(236, 8, 76, 84, 14, COL_SURFACE, COL_LINE);
   Weather w;
   {
     Lock l;
     w = weather;
   }
   if (w.valid) {
-    weatherIcon(273, 26, w.code);
-    text(String((int)roundf(w.temp)) + "°", 273, 44, F_TITLE, COL_TEXT, COL_CARD, TC_DATUM);
+    weatherIcon(274, 26, w.code, COL_SURFACE);
+    text(String((int)roundf(w.temp)) + "°", 274, 42, F_TITLE, COL_TEXT, COL_SURFACE, TC_DATUM);
   } else {
-    text("—", 273, 30, F_TITLE, COL_MUTED, COL_CARD, TC_DATUM);
+    text("–", 274, 30, F_TITLE, COL_FAINT, COL_SURFACE, TC_DATUM);
   }
-  text(WEATHER_CITY, 273, 72, F_SMALL, COL_MUTED, COL_CARD, TC_DATUM);
+  text(WEATHER_CITY, 274, 72, F_SMALL, COL_MUTED, COL_SURFACE, TC_DATUM);
+}
+
+// Ana ekrandaki koyu kronometre kartında yalnızca değişen kısım (saniyede bir).
+static void drawNowTimerTick() {
+  const int X = 8, Y = 100, W = 304;
+  int wMax = textW("0:00:00", F_TITLE);
+  tft.fillRect(X + W - 14 - wMax - 2, Y + 24, wMax + 2, 34, COL_INK);
+  text(fmtClock(swElapsedMs() / 1000), X + W - 14, Y + 26, F_TITLE, COL_ON_INK, COL_INK, TR_DATUM);
+  if (swDk > 0) progressBar(X + 14, Y + 78, W - 28, 4, (int)(swElapsedMs() / 600 / swDk), COL_ON_INK, COL_INK_LINE, COL_INK);
 }
 
 static void drawNowCard() {
-  const int X = 8, Y = 100, W = 304, H = 92;
-  card(X, Y, W, H, 18, COL_CARD, COL_LINE);
+  const int X = 8, Y = 100, W = 304, H = 94;
   int studied = 0;
   View v;
   std::vector<Item> items = displayItems(studied, v);
-  String label, line1, line2, right;
-  uint16_t labelCol = COL_ACCENT;
 
+  if (swRunning || swElapsedMs() > 0) {
+    card(X, Y, W, H, 14, COL_INK, COL_INK);
+    dotLabel(swRunning ? "KRONOMETRE" : "DURAKLATILDI", X + 14, Y + 10, swRunning ? COL_RED : COL_INK_MUTED, COL_INK_MUTED, COL_INK);
+    int maxW = W - 28 - textW("0:00:00", F_TITLE) - 14;
+    text(fit(swDers.length() ? swDers : String("Serbest çalışma"), F_TEXT, maxW), X + 14, Y + 32, F_TEXT, COL_ON_INK, COL_INK);
+    text(fit(swKonu, F_SMALL, maxW), X + 14, Y + 54, F_SMALL, COL_INK_MUTED, COL_INK);
+    drawNowTimerTick();
+    return;
+  }
+
+  card(X, Y, W, H, 14, COL_SURFACE, COL_LINE);
+  String label, line1, line2;
+  uint16_t dot = COL_FAINT;
   if (!hasCreds()) {
     label = "KURULUM";
     line1 = "Telefonla eşleştirilmedi";
     line2 = "Ayarlar → Wi-Fi ve hesap";
-  } else if (swRunning || swElapsedMs() > 0) {
-    label = swRunning ? "KRONOMETRE" : "DURAKLATILDI";
-    line1 = swDers.length() ? swDers : "Serbest çalışma";
-    line2 = swKonu;
-    right = fmtClock(swElapsedMs() / 1000);
   } else if (!planIsToday(v)) {
     label = "PLAN";
     line1 = v.valid ? "Bugünkü plan henüz gelmedi" : "Bugün için plan yok";
     line2 = v.valid ? "Telefondaki uygulamayı bir kez aç" : "Telefondaki uygulamadan plan oluştur";
-    labelCol = COL_MUTED;
   } else {
     int now = minutesOfDay();
     const Item* pick = nullptr;
@@ -840,49 +940,46 @@ static void drawNowCard() {
     }
     if (pick) {
       label = current ? "ŞİMDİ" : "SIRADAKİ";
+      dot = current ? COL_RED : COL_MUTED;
       line1 = pick->saat + " · " + pick->ders;
       line2 = pick->konu.length() ? pick->konu : String(pick->dk) + " dk";
     } else {
       label = "BUGÜN";
+      dot = COL_OK;
       line1 = items.empty() ? "Plan boş" : "Bugünkü oturumlar bitti";
-      line2 = v.streak > 0 ? String(v.streak) + " gün seri" : "";
-      labelCol = COL_OK;
+      if (v.streak > 0) line2 = String(v.streak) + " gün seri";
     }
   }
-
-  text(label, X + 14, Y + 10, F_SMALL, labelCol, COL_CARD);
-  String goal = fmtMin(studied) + " / " + fmtMin(v.goalMin);
-  if (right.length()) text(right, X + W - 14, Y + 26, F_TITLE, COL_ACCENT, COL_CARD, TR_DATUM);
-  else text(goal, X + W - 14, Y + 10, F_SMALL, COL_MUTED, COL_CARD, TR_DATUM);
-  int maxW = right.length() ? W - 28 - textW(right, F_TITLE) - 10 : W - 28;
-  text(fit(line1, F_TEXT, maxW), X + 14, Y + 30, F_TEXT, COL_TEXT, COL_CARD);
-  text(fit(line2, F_SMALL, maxW), X + 14, Y + 52, F_SMALL, COL_MUTED, COL_CARD);
-  int pct = v.goalMin > 0 ? studied * 100 / v.goalMin : 0;
-  progressBar(X + 14, Y + 76, W - 28, 6, pct, COL_ACCENT, COL_CARD);
+  dotLabel(label, X + 14, Y + 10, dot, COL_MUTED, COL_SURFACE);
+  text(fmtMin(studied) + " / " + fmtMin(v.goalMin), X + W - 14, Y + 10, F_SMALL, COL_MUTED, COL_SURFACE, TR_DATUM);
+  text(fit(line1, F_TEXT, W - 28), X + 14, Y + 32, F_TEXT, COL_TEXT, COL_SURFACE);
+  text(fit(line2, F_SMALL, W - 28), X + 14, Y + 54, F_SMALL, COL_MUTED, COL_SURFACE);
+  progressBar(X + 14, Y + 78, W - 28, 4, v.goalMin > 0 ? studied * 100 / v.goalMin : 0, COL_TEXT, COL_TRACK, COL_SURFACE);
 }
 
 static void drawHome(bool full) {
-  if (full) {
-    tft.fillScreen(COL_BG);
-    drawTabs();
-  }
+  if (full) fullClear();
+  drawDate();
   drawClock();
-  tft.fillRect(10, 68, 222, 26, COL_BG);
-  text(dateLine(), 14, 70, F_TEXT, COL_MUTED, COL_BG);
   drawWeatherCard();
   drawNowCard();
 }
 
 // --- Program ekranı ---
-static const int ROWS = 4, ROW_Y = 38, ROW_H = 36, ROW_GAP = 3;
+static const int ROWS = 4, ROW_Y = 38, ROW_H = 39;
 static std::vector<Item> shownItems;
 
+static void scrollButton(int x, bool up, bool enabled) {
+  card(x, 6, 30, 26, 9, COL_SURFACE, COL_LINE);
+  uint16_t c = enabled ? COL_TEXT : COL_LINE_STRONG;
+  int cx = x + 15;
+  if (up) tft.fillTriangle(cx, 13, cx - 6, 24, cx + 6, 24, c);
+  else tft.fillTriangle(cx, 25, cx - 6, 14, cx + 6, 14, c);
+}
+
 static void drawPlan(bool full) {
-  if (full) {
-    tft.fillScreen(COL_BG);
-    drawTabs();
-  }
-  tft.fillRect(0, 0, SCREEN_W, 196, COL_BG);
+  if (full) fullClear();
+  else clearBg(0, 0, SCREEN_W, TAB_Y);
   int studied = 0;
   View v;
   std::vector<Item> items = displayItems(studied, v);
@@ -890,117 +987,110 @@ static void drawPlan(bool full) {
   shownItems = items;
   int n = items.size();
   int done = 0;
-  for (auto& it : items) if (it.durum == "tamam") done++;
+  for (auto& it : items)
+    if (it.durum == "tamam") done++;
 
-  text("Bugünün planı", 14, 10, F_TEXT, COL_TEXT, COL_BG);
+  text("Bugünün planı", 12, 4, F_TITLE, COL_TEXT, COL_BG);
   int countRight = 306;
   if (n > ROWS) {
     planScroll = constrain(planScroll, 0, n - ROWS);
-    card(244, 6, 30, 26, 13, COL_CARD, COL_LINE);
-    card(280, 6, 30, 26, 13, COL_CARD, COL_LINE);
-    uint16_t upCol = planScroll > 0 ? COL_TEXT : COL_LINE, dnCol = planScroll < n - ROWS ? COL_TEXT : COL_LINE;
-    tft.fillTriangle(259, 13, 252, 24, 266, 24, upCol);
-    tft.fillTriangle(295, 25, 288, 14, 302, 14, dnCol);
-    countRight = 236;
+    scrollButton(246, true, planScroll > 0);
+    scrollButton(282, false, planScroll < n - ROWS);
+    countRight = 238;
   } else {
     planScroll = 0;
   }
   if (n) text(String(done) + "/" + String(n), countRight, 13, F_SMALL, COL_MUTED, COL_BG, TR_DATUM);
 
   if (!n) {
-    String msg = !hasCreds() ? "Telefonla eşleştirilmedi" : "Bugün için plan yok";
-    text(msg, 160, 100, F_TEXT, COL_TEXT, COL_BG, MC_DATUM);
-    text("Plan telefondaki uygulamadan gelir", 160, 126, F_SMALL, COL_MUTED, COL_BG, MC_DATUM);
+    card(8, 64, 304, 92, 14, COL_SURFACE, COL_LINE);
+    text(!hasCreds() ? "Telefonla eşleştirilmedi" : "Bugün için plan yok", 160, 98, F_TEXT, COL_TEXT, COL_SURFACE, MC_DATUM);
+    text("Plan telefondaki uygulamadan gelir", 160, 124, F_SMALL, COL_MUTED, COL_SURFACE, MC_DATUM);
     return;
   }
 
+  int vis = std::min(ROWS, n - planScroll);
+  card(8, ROW_Y, 304, ROW_H * vis, 12, COL_SURFACE, COL_LINE);
   int now = minutesOfDay();
-  for (int i = 0; i < ROWS && planScroll + i < n; i++) {
+  for (int i = 0; i < vis; i++) {
     const Item& it = items[planScroll + i];
-    int y = ROW_Y + i * (ROW_H + ROW_GAP);
-    bool done = it.durum == "tamam";
+    int y = ROW_Y + i * ROW_H, cy = y + ROW_H / 2;
+    bool isDone = it.durum == "tamam";
     bool active = swItemId.length() && swItemId == it.id;
-    uint16_t bg = active ? COL_CARD_ON : COL_CARD;
-    card(8, y, 304, ROW_H, 12, bg, active ? COL_ACCENT : COL_LINE);
-    bool late = !done && now >= 0 && toMin(it.saat) + it.dk < now;
-    uint16_t timeCol = it.durum == "ertelendi" || late ? COL_WARN : COL_TEXT;
-    text(it.saat, 18, y + 18, F_TEXT, timeCol, bg, ML_DATUM);
-    tft.fillSmoothCircle(81, y + 18, 4, dersColor(it.ders), bg);
-    String ders = fit(it.ders, F_TEXT, 105);
+    bool late = !isDone && now >= 0 && toMin(it.saat) + it.dk < now;
+    uint16_t bg = active ? COL_RED_SOFT : COL_SURFACE;
+    if (i) tft.drawFastHLine(9, y, 302, COL_LINE);
+    if (active) {
+      tft.fillSmoothRoundRect(11, y + 3, 298, ROW_H - 6, 8, COL_RED_SOFT, COL_SURFACE);
+      tft.fillRect(11, y + 8, 3, ROW_H - 16, COL_RED);
+    }
+    text(it.saat, 15, cy, F_TEXT, late || it.durum == "ertelendi" ? COL_RED : COL_TEXT, bg, ML_DATUM);
+    tft.fillSmoothCircle(86, cy, 4, dersColor(it.ders), bg);
+    String ders = fit(it.ders, F_TEXT, 100);
     int dw = textW(ders, F_TEXT);
-    text(ders, 91, y + 18, F_TEXT, done ? COL_MUTED : COL_TEXT, bg, ML_DATUM);
-    if (done) tft.drawFastHLine(91, y + 19, dw, COL_MUTED);
+    text(ders, 96, cy, F_TEXT, isDone ? COL_MUTED : COL_TEXT, bg, ML_DATUM);
+    if (isDone) tft.drawFastHLine(96, cy + 1, dw, COL_MUTED);
     String sub = it.durum == "ertelendi" ? String("Ertelendi") : it.konu;
     if (sub.length()) {
-      int sx = 91 + dw + 8;
-      text(fit(sub, F_SMALL, 266 - sx), sx, y + 18, F_SMALL, COL_MUTED, bg, ML_DATUM);
+      int sx = 96 + dw + 8;
+      text(fit(sub, F_SMALL, 266 - sx), sx, cy, F_SMALL, active || it.durum == "ertelendi" ? COL_RED : COL_MUTED, bg, ML_DATUM);
     }
-    if (done) {
-      tft.fillSmoothCircle(290, y + 18, 11, COL_OK, bg);
-      checkMark(290, y + 18, COL_ON_ACCENT, COL_OK);
-    } else {
-      tft.fillSmoothCircle(290, y + 18, 11, COL_MUTED, bg);
-      tft.fillSmoothCircle(290, y + 18, 9, bg, COL_MUTED);
-    }
+    checkBox(290, cy, isDone, bg);
   }
+  tft.fillRect(74, ROW_Y + 1, 2, ROW_H * vis - 2, COL_RED_LINE);  // defter kenar çizgisi
 }
 
 // --- Kronometre ekranı ---
 static void drawTimerDigits() {
   uint32_t sec = swElapsedMs() / 1000;
-  bigText(fmtClock(sec), 10, 58, 300, swRunning ? COL_ACCENT : COL_TEXT, COL_BG, true);
-  tft.fillRect(20, 118, 280, 32, COL_BG);
+  bigText(fmtClock(sec), 14, 64, 292, COL_ON_INK, COL_INK, true, false);
+  tft.fillRect(20, 121, 280, 31, COL_INK);
   if (swDk > 0) {
-    progressBar(20, 121, 280, 6, (int)(sec * 100 / (uint32_t)(swDk * 60)), COL_ACCENT, COL_BG);
-    text("Planlanan " + String(swDk) + " dk", 20, 129, F_SMALL, COL_MUTED, COL_BG);
+    int pct = (int)(sec * 100 / (uint32_t)(swDk * 60));
+    progressBar(22, 125, 276, 4, pct, COL_ON_INK, COL_INK_LINE, COL_INK);
+    text("Planlanan " + String(swDk) + " dk", 22, 133, F_SMALL, COL_INK_MUTED, COL_INK);
+    text("%" + String(pct), 298, 133, F_SMALL, COL_INK_MUTED, COL_INK, TR_DATUM);
   } else if (pomoBreak) {
-    text("Mola zamanı: 5 dakika ara ver", 160, 125, F_SMALL, COL_WARN, COL_BG, TC_DATUM);
+    text("Mola zamanı: 5 dakika ara ver", 160, 130, F_SMALL, COL_RED, COL_INK, TC_DATUM);
   }
-}
-
-static void button(int x, int y, int w, int h, const String& label, bool primary) {
-  uint16_t fill = primary ? COL_ACCENT : COL_CARD;
-  card(x, y, w, h, h / 2, fill, primary ? COL_ACCENT : COL_LINE);
-  text(label, x + w / 2, y + h / 2, F_TEXT, primary ? COL_ON_ACCENT : COL_TEXT, fill, MC_DATUM);
 }
 
 static void drawTimer(bool full) {
-  if (full) {
-    tft.fillScreen(COL_BG);
-    drawTabs();
-  }
-  tft.fillRect(0, 0, SCREEN_W, 58, COL_BG);
-  text("KRONOMETRE", 14, 10, F_SMALL, COL_ACCENT, COL_BG);
-  uint16_t pf = cfg.pomodoro ? COL_ACCENT : COL_CARD;
-  card(206, 4, 106, 26, 13, pf, cfg.pomodoro ? COL_ACCENT : COL_LINE);
-  text("Pomodoro", 259, 17, F_SMALL, cfg.pomodoro ? COL_ON_ACCENT : COL_MUTED, pf, MC_DATUM);
+  if (full) fullClear();
+  card(8, 6, 304, 190, 16, COL_INK, COL_INK);
+  bool started = swElapsedMs() > 0;
+  dotLabel(swRunning || !started ? "KRONOMETRE" : "DURAKLATILDI", 22, 16, swRunning ? COL_RED : COL_INK_MUTED, COL_INK_MUTED, COL_INK);
+  if (cfg.pomodoro) card(210, 11, 92, 26, 9, COL_ON_INK, COL_ON_INK, COL_INK);
+  else card(210, 11, 92, 26, 9, COL_INK2, COL_INK_LINE, COL_INK);
+  text("Pomodoro", 256, 24, F_SMALL, cfg.pomodoro ? INK_TEXT : COL_INK_MUTED, cfg.pomodoro ? COL_ON_INK : COL_INK2, MC_DATUM);
   String label = "Serbest çalışma";
   if (swDers.length()) {
     label = swDers;
     if (swKonu.length()) label += " · " + swKonu;
   }
-  text(fit(label, F_TEXT, 292), 14, 32, F_TEXT, COL_TEXT, COL_BG);
+  text(fit(label, F_TEXT, 276), 22, 40, F_TEXT, COL_ON_INK, COL_INK);
   drawTimerDigits();
-  bool started = swElapsedMs() > 0;
-  button(8, 152, 144, 38, swRunning ? "Duraklat" : (started ? "Devam et" : "Başlat"), true);
-  button(160, 152, 74, 38, "Bitir", false);
-  button(242, 152, 70, 38, "Sıfırla", false);
+  button(18, 156, 138, 32, swRunning ? "Duraklat" : (started ? "Devam et" : "Başlat"), BTN_INK_PRIMARY);
+  button(162, 156, 70, 32, "Bitir", BTN_INK);
+  button(238, 156, 64, 32, "Sıfırla", BTN_INK);
 }
 
 // --- Ayarlar ekranı ---
-static const char* SET_ROWS[] = {"Wi-Fi ve hesap ayarları", "Dokunmatiği yeniden ayarla", "Renkleri ters çevir", "Güncellemeyi denetle"};
+static const int SET_Y = 6, SET_RH = 30, SET_N = 5;
+static const char* SET_ROWS[] = {"Wi-Fi ve hesap ayarları", "Dokunmatiği yeniden ayarla", "Tema", "Renkleri ters çevir", "Güncellemeyi denetle"};
 
 static void drawSettings(bool full) {
-  if (full) {
-    tft.fillScreen(COL_BG);
-    drawTabs();
-  }
-  tft.fillRect(0, 0, SCREEN_W, 196, COL_BG);
-  for (int i = 0; i < 4; i++) {
-    int y = 8 + i * 36;
-    card(8, y, 304, 32, 12, COL_CARD, COL_LINE);
-    text(SET_ROWS[i], 20, y + 16, F_SMALL, COL_TEXT, COL_CARD, ML_DATUM);
-    if (i == 2) text(cfg.invert ? "Açık" : "Kapalı", 300, y + 16, F_SMALL, COL_MUTED, COL_CARD, MR_DATUM);
+  if (full) fullClear();
+  else clearBg(0, 0, SCREEN_W, TAB_Y);
+  card(8, SET_Y, 304, SET_RH * SET_N, 12, COL_SURFACE, COL_LINE);
+  for (int i = 0; i < SET_N; i++) {
+    int y = SET_Y + i * SET_RH;
+    if (i) tft.drawFastHLine(20, y, 280, COL_LINE);
+    text(SET_ROWS[i], 20, y + SET_RH / 2, F_SMALL, COL_TEXT, COL_SURFACE, ML_DATUM);
+    String val;
+    if (i == 2) val = THEME_NAMES[constrain(cfg.theme, 0, 2)];
+    if (i == 3) val = cfg.invert ? "Açık" : "Kapalı";
+    if (val.length()) text(val, 300, y + SET_RH / 2, F_SMALL, COL_MUTED, COL_SURFACE, MR_DATUM);
   }
   String net, ota;
   bool ok;
@@ -1012,10 +1102,10 @@ static void drawSettings(bool full) {
   }
   String l1 = "fw-" + String(FW_BUILD) + " · " FW_VARIANT;
   if (WiFi.status() == WL_CONNECTED) l1 += " · " + WiFi.localIP().toString() + " · " + String(WiFi.RSSI()) + " dBm";
-  text(fit(l1, F_SMALL, 296), 12, 156, F_SMALL, COL_MUTED, COL_BG);
+  text(fit(l1, F_SMALL, 296), 12, 162, F_SMALL, COL_MUTED, COL_BG);
   String l2 = ota;
   if (!l2.length()) l2 = "Bulut: " + net + " · Işık " + String(analogRead(PIN_LDR));
-  text(fit(l2, F_SMALL, 296), 12, 176, F_SMALL, ok || ota.length() ? COL_MUTED : COL_WARN, COL_BG);
+  text(fit(l2, F_SMALL, 296), 12, 180, F_SMALL, ok || ota.length() ? COL_MUTED : COL_RED, COL_BG);
 }
 
 static void drawScreen(bool full) {
@@ -1037,11 +1127,11 @@ static void drawOta() {
   static int lastShown = -2;
   int p = otaProgress;
   if (p == lastShown) return;
-  if (lastShown < 0) tft.fillScreen(COL_BG);
+  if (lastShown < 0) clearBg(0, 0, SCREEN_W, SCREEN_H);
   lastShown = p;
   text("Yazılım güncelleniyor", 160, 80, F_TITLE, COL_TEXT, COL_BG, MC_DATUM);
-  progressBar(40, 112, 240, 10, p, COL_ACCENT, COL_BG);
-  tft.fillRect(40, 130, 240, 24, COL_BG);
+  progressBar(40, 112, 240, 6, p, COL_TEXT, COL_TRACK, COL_BG);
+  clearBg(40, 128, 240, 26);
   text("%" + String(p), 160, 140, F_TEXT, COL_MUTED, COL_BG, MC_DATUM);
   text("Kapatma, bitince yeniden başlayacak", 160, 172, F_SMALL, COL_MUTED, COL_BG, MC_DATUM);
 }
@@ -1185,13 +1275,13 @@ static void runCalibration() {
   const int px[3] = {20, 300, 20}, py[3] = {20, 20, 220};
   int rx[3], ry[3];
   for (int i = 0; i < 3; i++) {
-    tft.fillScreen(COL_BG);
+    clearBg(0, 0, SCREEN_W, SCREEN_H);
     text("Dokunmatik ayarı", 160, 92, F_TITLE, COL_TEXT, COL_BG, MC_DATUM);
     text("Artının ortasına dokun (" + String(i + 1) + "/3)", 160, 124, F_SMALL, COL_MUTED, COL_BG, MC_DATUM);
-    text("Atlamak için BOOT tuşuna bas", 160, 148, F_SMALL, COL_LINE, COL_BG, MC_DATUM);
-    tft.drawFastHLine(px[i] - 12, py[i], 25, COL_ACCENT);
-    tft.drawFastVLine(px[i], py[i] - 12, 25, COL_ACCENT);
-    tft.drawCircle(px[i], py[i], 8, COL_ACCENT);
+    text("Atlamak için BOOT tuşuna bas", 160, 148, F_SMALL, COL_FAINT, COL_BG, MC_DATUM);
+    tft.drawFastHLine(px[i] - 12, py[i], 25, COL_RED);
+    tft.drawFastVLine(px[i], py[i] - 12, 25, COL_RED);
+    tft.drawCircle(px[i], py[i], 8, COL_RED);
     if (!waitTap(rx[i], ry[i])) {
       Lock l;
       cfg.calibrated = true;  // varsayılan değerlerle devam
@@ -1215,10 +1305,10 @@ static void runCalibration() {
 }
 
 static void onTap(int x, int y) {
-  if (y >= 196) {
-    if (x < 82) go(SCR_HOME);
+  if (y >= TAB_Y - 2) {
+    if (x < 86) go(SCR_HOME);
     else if (x < 172) go(SCR_PLAN);
-    else if (x < 280) go(SCR_TIMER);
+    else if (x < 272) go(SCR_TIMER);
     else go(SCR_SETTINGS);
     return;
   }
@@ -1229,7 +1319,7 @@ static void onTap(int x, int y) {
     case SCR_PLAN: {
       int n = shownItems.size();
       if (n > ROWS && y < 34) {
-        if (x >= 244 && x < 276 && planScroll > 0) {
+        if (x >= 242 && x < 279 && planScroll > 0) {
           planScroll--;
           drawPlan(false);
         } else if (x >= 280 && planScroll < n - ROWS) {
@@ -1239,7 +1329,7 @@ static void onTap(int x, int y) {
         return;
       }
       for (int i = 0; i < ROWS && planScroll + i < n; i++) {
-        int ry = ROW_Y + i * (ROW_H + ROW_GAP);
+        int ry = ROW_Y + i * ROW_H;
         if (y >= ry && y < ry + ROW_H) {
           const Item it = shownItems[planScroll + i];
           if (x >= 262) toggleItem(it);
@@ -1250,14 +1340,14 @@ static void onTap(int x, int y) {
       break;
     }
     case SCR_TIMER:
-      if (y < 34 && x >= 206) {
+      if (y < 42 && x >= 204) {
         cfg.pomodoro = !cfg.pomodoro;
         pomoCount = swElapsedMs() / 1000 / POMODORO_WORK_SEC;
         pomoBreak = false;
         saveConfig();
         drawTimer(false);
-      } else if (y >= 150 && y < 192) {
-        if (x < 152) {
+      } else if (y >= 150 && y < 194) {
+        if (x < 159) {
           if (swRunning) {
             swAccMs = swElapsedMs();
             swRunning = false;
@@ -1266,7 +1356,7 @@ static void onTap(int x, int y) {
             swRunning = true;
           }
           drawTimer(false);
-        } else if (x < 238) {
+        } else if (x < 235) {
           if (swElapsedMs() > 0) finishTimer();
         } else {
           resetTimer();
@@ -1275,16 +1365,21 @@ static void onTap(int x, int y) {
       }
       break;
     case SCR_SETTINGS:
-      if (y >= 8 && y < 152) {
-        int row = (y - 8) / 36;
+      if (y >= SET_Y && y < SET_Y + SET_RH * SET_N) {
+        int row = (y - SET_Y) / SET_RH;
         if (row == 0) portalRequested = true;
         else if (row == 1) calibRequested = true;
         else if (row == 2) {
+          cfg.theme = (cfg.theme + 1) % 3;
+          saveConfig();
+          applyPalette();
+          drawSettings(true);
+        } else if (row == 3) {
           cfg.invert = !cfg.invert;
           tft.invertDisplay(cfg.invert);
           saveConfig();
           drawSettings(false);
-        } else if (row == 3) {
+        } else if (row == 4) {
           setOtaMsg("Güncelleme denetleniyor…");
           wantOta = true;
           drawSettings(false);
@@ -1360,9 +1455,7 @@ static void updateLeds() {
 }
 
 static void updateBacklight() {
-  struct tm t;
-  bool night = localNow(t) && (t.tm_hour >= 22 || t.tm_hour < 7);
-  bool dim = night && (int32_t)(millis() - wakeUntil) > 0;
+  bool dim = isNightHour() && (int32_t)(millis() - wakeUntil) > 0;
   if (dim != blDim) {
     blDim = dim;
     ledcWrite(0, dim ? 40 : 255);
@@ -1373,8 +1466,8 @@ static void updateBacklight() {
 // Kurulum portalı (WiFiManager, engellemeyen kip)
 // ============================================================================
 static void drawPortalScreen() {
-  tft.fillScreen(COL_BG);
-  text("Kurulum", 14, 8, F_TITLE, COL_TEXT, COL_BG);
+  clearBg(0, 0, SCREEN_W, SCREEN_H);
+  text("Kurulum", 14, 6, F_TITLE, COL_TEXT, COL_BG);
   const char* lines[] = {
     "1. Telefonda Wi-Fi ayarlarını aç ve",
     "   \"" PORTAL_NAME "\" ağına bağlan.",
@@ -1383,8 +1476,8 @@ static void drawPortalScreen() {
     "4. Altta Firebase bilgilerini doldur, Save.",
     "Sayfa açılmazsa tarayıcıda: 192.168.4.1",
   };
-  for (int i = 0; i < 6; i++) text(lines[i], 14, 46 + i * 23, F_SMALL, i == 5 ? COL_ACCENT : COL_MUTED, COL_BG);
-  button(212, 196, 100, 38, "Vazgeç", false);
+  for (int i = 0; i < 6; i++) text(lines[i], 14, 46 + i * 23, F_SMALL, i == 5 ? COL_TEXT : COL_MUTED, COL_BG);
+  button(212, 196, 100, 38, "Vazgeç", BTN_SURFACE);
 }
 
 static void waitNetIdle() {
@@ -1474,10 +1567,10 @@ static void runPortal(bool force) {
 // Başlangıç ve döngü
 // ============================================================================
 static void splash(const String& msg) {
-  tft.fillScreen(COL_BG);
+  clearBg(0, 0, SCREEN_W, SCREEN_H);
   text("Çalışma Saati", 160, 96, F_TITLE, COL_TEXT, COL_BG, MC_DATUM);
   text(msg, 160, 130, F_SMALL, COL_MUTED, COL_BG, MC_DATUM);
-  text("fw-" + String(FW_BUILD), 160, 220, F_SMALL, COL_LINE, COL_BG, MC_DATUM);
+  text("fw-" + String(FW_BUILD), 160, 220, F_SMALL, COL_FAINT, COL_BG, MC_DATUM);
 }
 
 void setup() {
@@ -1494,11 +1587,12 @@ void setup() {
   setLed(0, 0, 0);
 
   loadConfig();
+  applyPalette();
 
   tft.init();
   tft.setRotation(1);
   tft.invertDisplay(cfg.invert);
-  tft.fillScreen(COL_BG);
+  clearBg(0, 0, SCREEN_W, SCREEN_H);
   ledcSetup(0, 5000, 8);
   ledcAttachPin(PIN_BL, 0);
   ledcWrite(0, 255);
@@ -1570,6 +1664,11 @@ void loop() {
     }
     if (minute != lastMinute) {
       lastMinute = minute;
+      if (wantDark() != darkNow) {  // otomatik temada 22:00 ve 07:00 geçişleri
+        applyPalette();
+        toastUntil = 0;
+        drawScreen(true);
+      }
       // Yaklaşan oturum (2 dk içinde) LED ile haber verilir.
       upcomingSoon = false;
       int studied;
@@ -1590,7 +1689,7 @@ void loop() {
     if (sec != lastSec) {
       lastSec = sec;
       if (screen == SCR_TIMER && !toastUntil) drawTimerDigits();
-      if (screen == SCR_HOME && swRunning && !toastUntil) drawNowCard();
+      if (screen == SCR_HOME && swRunning && !toastUntil) drawNowTimerTick();
       if (swRunning && cfg.pomodoro) {
         if (sec >= (uint32_t)(pomoCount + 1) * POMODORO_WORK_SEC) {
           pomoCount++;

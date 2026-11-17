@@ -5,20 +5,24 @@ powerbank yeterli.
 
 ## Ekranlar
 
-<img src="onizleme.png" width="640" alt="Ekranların yaklaşık önizlemesi">
+<img src="onizleme.png" width="720" alt="Ekranların yaklaşık önizlemesi: üstte gündüz, altta gece">
 
 | Ekran | Ne gösterir |
 | --- | --- |
 | **Ana** | Saat, tarih, Sakarya hava durumu, şimdiki/sıradaki oturum, günlük hedef çubuğu |
 | **Program** | Günün planı. Sağdaki daireye dokun: tamamlandı / geri al. Satıra dokun: o dersle kronometre |
 | **Kronometre** | Başlat / Duraklat, Bitir (telefona oturum olarak gider), Sıfırla, Pomodoro (25 dk'da mola uyarısı) |
-| **Ayarlar** (dişli) | Wi-Fi ve hesap, dokunmatik ayarı, renkleri ters çevirme, güncelleme, bağlantı bilgisi |
+| **Ayarlar** (dişli) | Wi-Fi ve hesap, dokunmatik ayarı, tema, renkleri ters çevirme, güncelleme, bağlantı bilgisi |
 
 **BOOT tuşu:** kısa bas → sonraki ekran, 2 saniye bas → Ayarlar.
 
 **Işık:** yeşil = kronometre çalışıyor, mavi yanıp sönme = 2 dk içinde oturum başlıyor ya da
 Pomodoro molası, kırmızı = buluta bağlanamıyor. Ekran 22:00–07:00 arası kısılır; ilk dokunuş
 yalnızca ekranı açar.
+
+**Tema:** telefondaki uygulamayla aynı "Sentez" tasarımı. *Otomatik* (varsayılan) gündüz açık
+kâğıt, 22:00–07:00 arası koyu görünüm kullanır. Ayarlar → *Tema* satırına her dokunuş
+Otomatik / Açık / Koyu arasında geçer.
 
 ## İlk yükleme (telefondan, OTG ile)
 
@@ -67,6 +71,6 @@ Ayrıntılar: [docs/firebase.md](../docs/firebase.md).
 ## Geliştirme notları
 
 - PlatformIO, `espressif32@6.9.0` (Arduino core 2.0.x). Ortamlar: `cyd` (ILI9341), `cyd_st7789`.
-- Türkçe harfler için yazı tipleri `tools/make_fonts.py` ile Inter'den üretilir
-  (`src/fonts.h`). Inter, SIL Open Font License 1.1 ile dağıtılır.
+- Türkçe harfler için yazı tipleri `tools/make_fonts.py` ile üretilir (`src/fonts.h`):
+  arayüz Inter, başlıklar ve büyük rakamlar Lora. İkisi de SIL Open Font License 1.1.
 - Derleme ve sürüm yayınlama `.github/workflows/firmware.yml` ile GitHub'da yapılır.

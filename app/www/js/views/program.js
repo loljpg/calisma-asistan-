@@ -6,10 +6,10 @@ let tab = 'tasks';
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
 export function render(app) {
-  const right = tab === 'tasks' ? `<button class="icon-btn glass" data-action="program:add" aria-label="Ödev ekle">${icon('plus')}</button>` : '';
+  const right = tab === 'tasks' ? `<button class="icon-btn surface" data-action="program:add" aria-label="Ödev ekle">${icon('plus')}</button>` : '';
   return `
   ${pageHead('Program', 'Ödevler ve çalışma saatleri', right)}
-  <div class="seg glass" role="group" aria-label="Bölüm">
+  <div class="seg surface" role="group" aria-label="Bölüm">
     <button aria-pressed="${tab === 'tasks'}" data-action="program:tab" data-tab="tasks">Ödevler</button>
     <button aria-pressed="${tab === 'hours'}" data-action="program:tab" data-tab="hours">Çalışma saatleri</button>
   </div>
@@ -20,7 +20,7 @@ function tasksView(app) {
   const s = app.s;
   if (!s.tasks.length) {
     return `
-    <div class="empty glass">
+    <div class="empty surface">
       <b>Henüz ödev yok</b>
       <p>Haftalık ödevlerini ekle. Claude plan yaparken son günü yaklaşanları öne alır ve kalan süreyi günlere dağıtır.</p>
       <button class="btn primary" data-action="program:add">${icon('plus', 16)} Ödev ekle</button>
@@ -51,7 +51,7 @@ function taskCard(t, app) {
     ? `<div class="progress thin"><i style="width:${pct}%"></i></div><span class="muted small">${spent} / ${t.dk} dk</span>`
     : spent ? `<span class="muted small">${spent} dk çalışıldı</span>` : '';
   return `
-  <button class="task glass" data-action="program:edit" data-id="${t.id}">
+  <button class="task surface" data-action="program:edit" data-id="${t.id}">
     <div class="task-top"><span class="chip"><span class="dot" style="background:${L.dersRenk(t.ders)}"></span>${esc(t.ders)}</span>${right}</div>
     <b>${esc(t.konu)}</b>
     ${t.not ? `<span class="muted small">${esc(t.not)}</span>` : ''}
@@ -63,7 +63,7 @@ function hoursView(app) {
   const s = app.s;
   return `
   <form class="form" data-form="program:hours">
-    <div class="card glass">
+    <div class="card surface">
       ${DAY_ORDER.map((d) => {
         const h = s.hours[d];
         const g = L.GUNLER[d];
@@ -101,7 +101,7 @@ function openTaskSheet(app, id) {
       </div>
       <button class="btn primary block" type="submit">${t ? 'Kaydet' : 'Ekle'}</button>
       ${t ? `<div class="btn-row">
-        <button class="btn glass" type="button" data-action="program:toggleDone" data-id="${t.id}">${icon(t.done ? 'undo' : 'check', 16)} ${t.done ? 'Geri al' : 'Tamamlandı'}</button>
+        <button class="btn surface" type="button" data-action="program:toggleDone" data-id="${t.id}">${icon(t.done ? 'undo' : 'check', 16)} ${t.done ? 'Geri al' : 'Tamamlandı'}</button>
         <button class="btn danger" type="button" data-action="program:remove" data-id="${t.id}">${icon('trash', 16)} Sil</button>
       </div>` : ''}
     </form>`,

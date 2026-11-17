@@ -1,8 +1,9 @@
 """TFT_eSPI için yumuşak (anti-aliased) yazı tipleri üretir: python3 make_fonts.py
 
 TFT_eSPI'nin yerleşik yazı tiplerinde Türkçe harfler (ç ğ ı İ ö ş ü) yok. Bu betik
-Inter yazı tipinden gereken harfleri .vlw biçiminde çizip src/fonts.h dosyasına yazar.
-Inter, SIL Open Font License 1.1 ile dağıtılır (gömülü kullanım serbest).
+gereken harfleri .vlw biçiminde çizip src/fonts.h dosyasına yazar.
+Arayüz: Inter. Başlıklar ve büyük rakamlar: Lora (SemiBold). İkisi de SIL Open Font
+License 1.1 ile dağıtılır (gömülü kullanım serbest).
 """
 import struct
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 INTER = Path("/usr/share/fonts/opentype/inter")
+LORA = Path("/usr/share/fonts/truetype/google-fonts/Lora-Variable.ttf")
 OUT = Path(__file__).resolve().parent.parent / "src" / "fonts.h"
 
 TEXT = (
@@ -19,22 +21,32 @@ TEXT = (
 DIGITS = " 0123456789:-"
 
 FONTS = [
-    # (C adı, dosya, piksel boyutu, karakterler)
+    # (C adı, dosya, piksel boyutu, karakterler); "lora" = Lora SemiBold (600)
     ("F_SMALL", "Inter-Medium.otf", 15, TEXT),
     ("F_TEXT", "Inter-SemiBold.otf", 18, TEXT),
-    ("F_TITLE", "Inter-Bold.otf", 26, TEXT),
-    ("F_BIG", "Inter-Bold.otf", 76, DIGITS),
+    ("F_TITLE", "lora", 24, TEXT),
+    ("F_BIG", "lora", 72, DIGITS),
 ]
 # Büyük rakamlarda üst/alt boşluk bırakılmaz: 58 piksellik ara belleğe sığsın.
 TIGHT = {"F_BIG"}
 
 
+def load(path, size):
+    if path == "lora":
+        font = ImageFont.truetype(str(LORA), size)
+        font.set_variation_by_axes([600])
+        return font
+    return ImageFont.truetype(str(INTER / path), size)
+
+
 def build(path, size, chars, tight=False):
-    font = ImageFont.truetype(str(INTER / path), size)
-    feats = ["tnum"]  # rakamlar eşit genişlikte: saat yazısı kaymasın
+    font = load(path, size)
     ascent, descent = font.getmetrics()
     glyphs = []
     for ch in sorted(set(chars), key=ord):
+        # Rakamlar eşit genişlikte (saat yazısı kaymasın); diğer harfler normal
+        # (tnum boşluğu da rakam genişliğine çıkarıyor).
+        feats = ["tnum"] if ch.isdigit() else []
         adv = round(font.getlength(ch, features=feats))
         left, top, right, bottom = font.getbbox(ch, anchor="ls", features=feats)
         w, h = max(0, right - left), max(0, bottom - top)
@@ -60,7 +72,7 @@ def build(path, size, chars, tight=False):
 def main():
     lines = [
         "// Bu dosya tools/make_fonts.py ile üretildi, elle değiştirme.",
-        "// Yazı tipi: Inter (SIL Open Font License 1.1) — https://rsms.me/inter/",
+        "// Yazı tipleri: Inter (rsms.me/inter) ve Lora (Cyreal), SIL Open Font License 1.1",
         "#pragma once",
         "#include <Arduino.h>",
         "",

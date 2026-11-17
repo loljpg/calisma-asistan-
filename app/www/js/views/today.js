@@ -28,10 +28,10 @@ export function render(app) {
   return `
   <header class="page-head">
     <div><span class="sub">${L.longDate(today)}</span><h1>Bugün</h1></div>
-    <button class="icon-btn glass" data-action="ui:go" data-route="settings" aria-label="Ayarlar">${icon('settings')}</button>
+    <button class="icon-btn surface" data-action="ui:go" data-route="settings" aria-label="Ayarlar">${icon('settings')}</button>
   </header>
   ${app.updateInfo?.newer ? updateBanner(app.updateInfo) : ''}
-  <section class="card glass" aria-label="Bugünün özeti">
+  <section class="card surface" aria-label="Bugünün özeti">
     <div class="spread">
       <span class="eyebrow">Bugün çalışılan</span>
       <span class="chip">${icon('flame', 14)} ${L.streak(s.sessions, today)} gün seri</span>
@@ -47,37 +47,37 @@ export function render(app) {
   ${t ? timerCard(t) : ''}
   <div class="section-head">
     <h2>${dayOffset ? 'Yarının planı' : 'Bugünün planı'}</h2>
-    <button class="btn glass" data-action="today:aiSheet">${icon('sparkles', 16)} ${items.length ? 'Düzenle' : 'Planla'}</button>
+    <button class="btn surface" data-action="today:aiSheet">${icon('sparkles', 16)} ${items.length ? 'Düzenle' : 'Planla'}</button>
   </div>
-  <div class="seg small glass" role="group" aria-label="Gün seçimi">
+  <div class="seg small surface" role="group" aria-label="Gün seçimi">
     <button aria-pressed="${dayOffset === 0}" data-action="today:day" data-off="0">Bugün</button>
     <button aria-pressed="${dayOffset === 1}" data-action="today:day" data-off="1">Yarın</button>
   </div>
   ${items.length ? `<div class="list">${items.map((i) => row(i, date, t, nowMin)).join('')}</div>` : emptyState(date === today)}
-  ${plan?.not ? `<div class="note glass">${icon('sparkles', 18)}<p>${esc(plan.not)}</p></div>` : ''}
+  ${plan?.not ? `<div class="note surface">${icon('sparkles', 18)}<p>${esc(plan.not)}</p></div>` : ''}
   <div class="btn-row">
-    <button class="btn glass" data-action="today:addItem">${icon('plus', 16)} Oturum ekle</button>
-    ${t ? '' : `<button class="btn glass" data-action="today:freeTimer">${icon('timer', 16)} Kronometre</button>`}
+    <button class="btn surface" data-action="today:addItem">${icon('plus', 16)} Oturum ekle</button>
+    ${t ? '' : `<button class="btn surface" data-action="today:freeTimer">${icon('timer', 16)} Kronometre</button>`}
   </div>`;
 }
 
 function updateBanner(info) {
-  return `<div class="banner glass">${icon('download', 20)}<p>Yeni sürüm hazır (v${info.latest})</p><a class="btn primary" href="${esc(info.url)}">İndir</a></div>`;
+  return `<div class="banner surface">${icon('download', 20)}<p>Yeni sürüm hazır (v${info.latest})</p><a class="btn primary" href="${esc(info.url)}">İndir</a></div>`;
 }
 
 function timerCard(t) {
   const running = !!t.startedAt;
   return `
-  <section class="card glass" aria-label="Kronometre">
+  <section class="card ink" aria-label="Kronometre">
     <span class="eyebrow">${running ? 'Kronometre çalışıyor' : 'Kronometre duraklatıldı'}</span>
     <div class="timer-row">
       <div><b>${esc(t.ders)}</b><span class="muted small">${esc(t.konu || 'Serbest çalışma')}</span></div>
       <span class="timer-big" data-timer>${L.fmtClock(L.timerElapsedMs(t) / 1000)}</span>
     </div>
     <div class="btn-row">
-      <button class="btn glass" data-action="today:timerToggle">${icon(running ? 'pause' : 'play', 16)} ${running ? 'Duraklat' : 'Devam et'}</button>
+      <button class="btn surface" data-action="today:timerToggle">${icon(running ? 'pause' : 'play', 16)} ${running ? 'Duraklat' : 'Devam et'}</button>
       <button class="btn primary" data-action="today:timerFinish">${icon('stop', 16)} Bitir</button>
-      <button class="icon-btn glass" data-action="today:timerCancel" aria-label="Kronometreyi iptal et">${icon('x', 18)}</button>
+      <button class="icon-btn surface" data-action="today:timerCancel" aria-label="Kronometreyi iptal et">${icon('x', 18)}</button>
     </div>
   </section>`;
 }
@@ -91,7 +91,7 @@ function row(i, date, t, nowMin) {
     ? `<span class="row-sub running">${t.startedAt ? 'Devam ediyor' : 'Duraklatıldı'} · <span data-timer>${L.fmtClock(L.timerElapsedMs(t) / 1000)}</span></span>`
     : `<span class="row-sub">${esc(i.konu || '—')}</span>`;
   return `
-  <div class="row glass${done ? ' is-done' : ''}${active ? ' is-active' : ''}${late ? ' is-late' : ''}">
+  <div class="row surface${done ? ' is-done' : ''}${active ? ' is-active' : ''}${late ? ' is-late' : ''}">
     <button class="row-main" data-action="today:itemSheet" data-id="${i.id}" data-date="${date}">
       <div class="row-time"><b>${i.saat}</b><span>${i.dk} dk</span></div>
       <div class="row-body">
@@ -105,7 +105,7 @@ function row(i, date, t, nowMin) {
 
 function emptyState(isToday) {
   return `
-  <div class="empty glass">
+  <div class="empty surface">
     <b>${isToday ? 'Bugün için plan yok' : 'Yarın için plan yok'}</b>
     <p>Claude ödevlerine, yarım kalan oturumlarına ve deneme sonuçlarına bakarak senin için bir plan hazırlasın ya da oturumları elle ekle.</p>
     <button class="btn primary" data-action="today:aiSheet">${icon('sparkles', 16)} Claude ile planla</button>
@@ -162,12 +162,12 @@ function openItemSheet(app, date, id) {
       ${it.konu ? `<p>${esc(it.konu)}</p>` : ''}
       ${task ? `<p class="hint">Ödev: ${esc(task.konu)}</p>` : ''}
       ${done
-        ? `<button class="btn glass block" data-action="today:toggle" ${ref}>${icon('undo', 16)} Tamamlanmadı olarak işaretle</button>`
+        ? `<button class="btn surface block" data-action="today:toggle" ${ref}>${icon('undo', 16)} Tamamlanmadı olarak işaretle</button>`
         : `${active || s.timer ? '' : `<button class="btn primary block" data-action="today:start" ${ref}>${icon('play', 16)} Kronometreyi başlat</button>`}
-           <button class="btn glass block" data-action="today:toggle" ${ref}>${icon('check', 16)} Tamamlandı</button>
-           ${it.durum === 'ertelendi' ? '' : `<button class="btn glass block" data-action="today:postpone" ${ref}>${icon('forward', 16)} Ertele</button>`}`}
+           <button class="btn surface block" data-action="today:toggle" ${ref}>${icon('check', 16)} Tamamlandı</button>
+           ${it.durum === 'ertelendi' ? '' : `<button class="btn surface block" data-action="today:postpone" ${ref}>${icon('forward', 16)} Ertele</button>`}`}
       <div class="btn-row">
-        <button class="btn glass" data-action="today:edit" ${ref}>${icon('edit', 16)} Düzenle</button>
+        <button class="btn surface" data-action="today:edit" ${ref}>${icon('edit', 16)} Düzenle</button>
         <button class="btn danger" data-action="today:remove" ${ref}>${icon('trash', 16)} Sil</button>
       </div>
     </div>`,
@@ -218,7 +218,7 @@ function showManual(date, text) {
     <div class="form">
       <p class="hint">1. Aşağıdaki metni kopyala. 2. Claude uygulamasında yeni bir sohbete yapıştır. 3. Claude’un cevabının tamamını kopyalayıp alttaki kutuya yapıştır.</p>
       <textarea class="input mono" id="manual-prompt" readonly aria-label="Claude için istek metni">${esc(text)}</textarea>
-      <button class="btn glass block" data-action="today:copyPrompt">${icon('copy', 16)} Metni kopyala</button>
+      <button class="btn surface block" data-action="today:copyPrompt">${icon('copy', 16)} Metni kopyala</button>
       <form class="form" data-form="today:importManual" data-date="${date}">
         <label class="field">Claude’un cevabı<textarea class="input mono" name="cevap" required placeholder='{"tarih": "...", "plan": [...]}'></textarea></label>
         <button class="btn primary block" type="submit">Planı içe aktar</button>
@@ -237,7 +237,7 @@ function showPreview(app, date, parsed, source) {
     <div class="list">
       ${parsed.items
         .map(
-          (p) => `<div class="row glass"><div class="row-main" style="cursor:default">
+          (p) => `<div class="row surface"><div class="row-main" style="cursor:default">
             <div class="row-time"><b>${p.saat}</b><span>${p.dk} dk</span></div>
             <div class="row-body">
               <div class="row-title"><span class="dot" style="background:${L.dersRenk(p.ders)}"></span><span class="t">${esc(p.ders)}</span>${p.carriedId ? '<span class="tag blue">Taşındı</span>' : ''}</div>
@@ -247,9 +247,9 @@ function showPreview(app, date, parsed, source) {
         .join('')}
     </div>
     <p class="hint" style="margin:8px 0 12px">Toplam ${L.fmtMin(total)}${keep ? ` · Tamamladığın ${keep} oturum korunacak` : ''}</p>
-    ${parsed.not ? `<div class="note glass" style="margin-bottom:14px">${icon('sparkles', 18)}<p>${esc(parsed.not)}</p></div>` : ''}
+    ${parsed.not ? `<div class="note surface" style="margin-bottom:14px">${icon('sparkles', 18)}<p>${esc(parsed.not)}</p></div>` : ''}
     <div class="btn-row">
-      <button class="btn glass" data-action="today:aiSheet">${icon('refresh', 16)} Yeniden</button>
+      <button class="btn surface" data-action="today:aiSheet">${icon('refresh', 16)} Yeniden</button>
       <button class="btn primary" data-action="today:applyPending">${icon('check', 16)} Planı uygula</button>
     </div>`,
     'Önerilen plan'
@@ -369,7 +369,7 @@ export const actions = {
       `${sheetHead('Kronometre iptal edilsin mi?')}
       <p class="hint" style="margin-bottom:16px">Geçen süre kaydedilmeden silinir.</p>
       <div class="btn-row">
-        <button class="btn glass" data-action="ui:closeSheet">Vazgeç</button>
+        <button class="btn surface" data-action="ui:closeSheet">Vazgeç</button>
         <button class="btn danger" data-action="today:timerDiscard">${icon('trash', 16)} İptal et</button>
       </div>`,
       'Kronometre iptali'

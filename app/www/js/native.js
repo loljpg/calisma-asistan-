@@ -45,10 +45,11 @@ export function onAppState(handler) {
   }
 }
 
-export async function initSystemBars() {
+// dark: koyu arka plan, yani durum çubuğunda açık renkli simgeler.
+export async function setSystemBars(dark) {
   try {
     const { SystemBars, SystemBarsStyle } = capExports() || {};
-    if (isNative() && SystemBars && SystemBarsStyle) await SystemBars.setStyle({ style: SystemBarsStyle.Dark });
+    if (isNative() && SystemBars && SystemBarsStyle) await SystemBars.setStyle({ style: dark ? SystemBarsStyle.Dark : SystemBarsStyle.Light });
   } catch {
     /* önemli değil */
   }

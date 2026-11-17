@@ -3,7 +3,7 @@
   "appName": "Çalışma Asistanı",
   "webDir": "www",
   "android": {
-    "backgroundColor": "#0A0F24"
+    "backgroundColor": "#F5F4F0"
   },
   "plugins": {
     "CapacitorHttp": {
@@ -11,10 +11,10 @@
     },
     "SystemBars": {
       "insetsHandling": "native",
-      "style": "DARK"
+      "style": "DEFAULT"
     },
     "LocalNotifications": {
-      "iconColor": "#7DD3FC"
+      "iconColor": "#CF4428"
     }
   }
 }

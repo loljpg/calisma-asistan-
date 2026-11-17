@@ -54,7 +54,7 @@ export function openSheet(html, label = 'Pencere') {
   closeSheet(true);
   const wrap = document.createElement('div');
   wrap.className = 'sheet-wrap';
-  wrap.innerHTML = `<div class="sheet-backdrop" data-action="ui:closeSheet"></div><div class="sheet glass-strong" role="dialog" aria-modal="true" aria-label="${esc(label)}"><div class="grabber"></div>${html}</div>`;
+  wrap.innerHTML = `<div class="sheet-backdrop" data-action="ui:closeSheet"></div><div class="sheet surface" role="dialog" aria-modal="true" aria-label="${esc(label)}"><div class="grabber"></div>${html}</div>`;
   document.body.appendChild(wrap);
   requestAnimationFrame(() => requestAnimationFrame(() => wrap.classList.add('open')));
   current = wrap;
@@ -85,7 +85,7 @@ export function closeSheet(immediate = false) {
 export const sheetOpen = () => !!current;
 
 export function sheetHead(title, sub = '') {
-  return `<div class="sheet-head"><div><h2>${esc(title)}</h2>${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</div><button class="icon-btn glass" data-action="ui:closeSheet" aria-label="Kapat">${icon('x', 20)}</button></div>`;
+  return `<div class="sheet-head"><div><h2>${esc(title)}</h2>${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</div><button class="icon-btn surface" data-action="ui:closeSheet" aria-label="Kapat">${icon('x', 20)}</button></div>`;
 }
 
 // ---------- Bildirim balonu ----------

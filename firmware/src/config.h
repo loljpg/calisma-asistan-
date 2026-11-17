@@ -42,18 +42,38 @@
 
 // RGB565 renkleri
 #define RGB(r, g, b) ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
-#define COL_BG RGB(10, 15, 36)
-#define COL_CARD RGB(27, 34, 70)
-#define COL_CARD_ON RGB(54, 64, 122)
-#define COL_LINE RGB(46, 55, 102)
-#define COL_HI RGB(74, 85, 144)
-#define COL_TEXT RGB(255, 255, 255)
-#define COL_MUTED RGB(182, 188, 208)
-#define COL_ACCENT RGB(125, 211, 252)
-#define COL_ON_ACCENT RGB(11, 20, 38)
-#define COL_OK RGB(52, 211, 153)
-#define COL_WARN RGB(253, 186, 116)
-#define COL_ERR RGB(248, 113, 113)
+
+// "Sentez" tasarımı: gündüz açık kâğıt, gece koyu. Renkler main.cpp'deki paletlerden gelir.
+struct Palette {
+  uint16_t bg, grid, surface, line, lineStrong, text, muted, faint, red, redSoft, redLine;
+  uint16_t ink, onInk, inkMuted, ink2, inkLine, track, ok, cloud;
+};
+extern const Palette* th;
+
+#define COL_BG (th->bg)
+#define COL_GRID (th->grid)
+#define COL_SURFACE (th->surface)
+#define COL_LINE (th->line)
+#define COL_LINE_STRONG (th->lineStrong)
+#define COL_TEXT (th->text)
+#define COL_MUTED (th->muted)
+#define COL_FAINT (th->faint)
+#define COL_RED (th->red)
+#define COL_RED_SOFT (th->redSoft)
+#define COL_RED_LINE (th->redLine)
+#define COL_INK (th->ink)
+#define COL_ON_INK (th->onInk)
+#define COL_INK_MUTED (th->inkMuted)
+#define COL_INK2 (th->ink2)
+#define COL_INK_LINE (th->inkLine)
+#define COL_TRACK (th->track)
+#define COL_OK (th->ok)
+#define COL_CLOUD (th->cloud)
+#define INK_TEXT RGB(22, 23, 26)  // beyaz düğme üstündeki yazı
+
+#define GRID_STEP 22
+#define NIGHT_FROM 22  // otomatik temada gece başlangıcı (saat)
+#define NIGHT_TO 7
 
 // ---------- Zamanlama ----------
 #define VIEW_EVERY_MS 30000UL

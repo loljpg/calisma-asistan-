@@ -5,13 +5,14 @@ export const DERSLER = [
   'Tarih', 'Coğrafya', 'Felsefe', 'Din Kültürü', 'İngilizce', 'Diğer'
 ];
 
+// Açık ve koyu temada okunur, orta doygunlukta ders renkleri (masa saati de aynılarını kullanır).
 const DERS_RENK = {
-  'Türkçe': '#F9A8D4', 'Edebiyat': '#F0ABFC', 'Matematik': '#7DD3FC', 'Geometri': '#93C5FD',
-  'Fizik': '#A5B4FC', 'Kimya': '#6EE7B7', 'Biyoloji': '#86EFAC', 'Tarih': '#FDBA74',
-  'Coğrafya': '#FCD34D', 'Felsefe': '#C4B5FD', 'Din Kültürü': '#FDE68A', 'İngilizce': '#67E8F9'
+  'Türkçe': '#D9508E', 'Edebiyat': '#B455C9', 'Matematik': '#2F86D1', 'Geometri': '#4B68D6',
+  'Fizik': '#7357D6', 'Kimya': '#1E9C74', 'Biyoloji': '#5A9E36', 'Tarih': '#D9732B',
+  'Coğrafya': '#C99415', 'Felsefe': '#8E62C9', 'Din Kültürü': '#A88536', 'İngilizce': '#1C93A8'
 };
 export function dersRenk(ders) {
-  return DERS_RENK[ders] || '#CBD5E1';
+  return DERS_RENK[ders] || '#8A8F98';
 }
 
 // Deneme bölümleri. max: bilinen soru sayısı (yoksa null, kontrol edilmez).

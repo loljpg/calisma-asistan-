@@ -43,6 +43,8 @@ Masa saatine yazılım yükleme ve ilk kurulum: [firmware/README.md](firmware/RE
 
 Uygulama HTML, CSS ve JavaScript ile yazıldı (`app/www`), derleme adımı yok.
 
+Tasarım ("Sentez"): monokrom düzen, silik kareli defter dokusu, tek vurgu rengi olarak kırmızı kalem. Açık ve koyu tema var (Ayarlar → Görünüm; *Otomatik* telefonun ayarını izler). Yazı tipleri uygulamanın içinde: arayüz Inter, başlıklar ve büyük rakamlar Lora (ikisi de SIL Open Font License 1.1).
+
 | Klasör | İçerik |
 | --- | --- |
 | `app/www/js/logic.js` | Tarih, net, istatistik, plan doğrulama gibi saf mantık |
@@ -50,6 +52,7 @@ Uygulama HTML, CSS ve JavaScript ile yazıldı (`app/www`), derleme adımı yok.
 | `app/www/js/ai.js` | Claude API bağlantısı |
 | `app/www/js/cloud.js`, `sync.js` | Firebase girişi ve eşitleme |
 | `app/www/js/views/` | Bugün, Program, Denemeler, İstatistik, Ayarlar ekranları |
+| `app/www/css/app.css`, `app/www/fonts/` | Tasarım ve gömülü yazı tipleri |
 | `app/resources/` | Uygulama ikonu ve onu üreten betik |
 
 ## İmza anahtarı hakkında
