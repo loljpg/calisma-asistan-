@@ -60,8 +60,11 @@ jobs:
           name: Masa saati fw-v${{ github.run_number }}
           make_latest: "false"
           body: |
-            **İlk yükleme:** `ilk-kurulum-cyd.bin` dosyasını ESPFlash ile **0x0** adresine yaz.
-            Ekran beyaz, karışık ya da renkler tersse `ilk-kurulum-cyd_st7789.bin` dosyasını dene.
+            **İlk yükleme:** ESPFlash ile **0x0** adresine yaz.
+            - Tek USB'li kart (sadece micro-USB): `ilk-kurulum-cyd.bin`
+            - İki USB'li kart (micro-USB + USB-C): `ilk-kurulum-cyd_st7789.bin`
+
+            İki ucu USB-C olan kablo iki USB'li kartta çalışmaz; micro-USB girişini ya da OTG çevirici + USB-A kablo kullan.
 
             Sonraki sürümler kart Wi-Fi'ye bağlıyken kendiliğinden yüklenir
             (`firmware-*.bin` dosyaları bunun içindir, elle yüklemene gerek yok).

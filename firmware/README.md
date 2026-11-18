@@ -26,17 +26,29 @@ Otomatik / Açık / Koyu arasında geçer.
 
 ## İlk yükleme (telefondan, OTG ile)
 
+Önce kartın hangi model olduğuna bak:
+
+| Kart | Yüklenecek dosya |
+| --- | --- |
+| Tek USB (sadece micro-USB) | `ilk-kurulum-cyd.bin` |
+| İki USB (micro-USB **ve** USB-C) | `ilk-kurulum-cyd_st7789.bin` |
+
 1. [Releases](https://github.com/loljpg/calisma-asistan-/releases) sayfasından en yeni
-   **fw-v…** sürümündeki `ilk-kurulum-cyd.bin` dosyasını indir.
-2. Play Store'dan **ESPFlash** uygulamasını kur. Kartı OTG kablosuyla telefona bağla, USB
-   iznini ver.
+   **fw-v…** sürümündeki doğru dosyayı indir.
+2. Play Store'dan **ESPFlash** uygulamasını kur. Kartı telefona bağla, USB iznini ver.
 3. Dosyayı seç, adres **0x0**, hız 460800 (olmazsa 115200). Yaz.
 4. Bağlanamazsa: kartta **BOOT** tuşunu basılı tut, **RST**'ye bir kez bas, BOOT'u bırak ve
    tekrar dene.
 
-Ekran beyaz kalır, karışık görünür ya da renkler ters olursa aynı adımlarla
-`ilk-kurulum-cyd_st7789.bin` dosyasını yükle (iki USB girişli bazı kartlar bu sürücüyü kullanır).
-Sadece renkler ters ise Ayarlar → *Renkleri ters çevir* yeterli.
+**Kablo:** veri taşıyan bir kablo olmalı (yalnız şarj eden kablolar çalışmaz). İki USB'li kartın
+USB-C girişinde gerekli dirençler yok, bu yüzden **iki ucu USB-C olan kablo çalışmaz**: kart
+ne yazılım alır ne de açılır. Telefondan USB-C → micro-USB kablo kullan ya da telefona USB-C → USB-A
+OTG çevirici takıp normal kablo bağla. Powerbank için de aynısı geçerli: powerbank'in USB-A
+çıkışını kullan.
+
+Ekran beyaz kalır ya da karışık görünürse diğer dosyayı dene. Sadece renkler ters ise
+Ayarlar → *Renkleri ters çevir* yeterli. Kırmızı yerine mavi görüyorsan bunu bildir
+(renk sırası ayarı gerekir).
 
 ## İlk açılış
 
