@@ -4,6 +4,7 @@ import * as L from './logic.js';
 import { icon, toast, openSheet, closeSheet, sheetOpen } from './ui.js';
 import * as native from './native.js';
 import { syncNow, isSignedIn, syncState, pushTimer, startLive, stopLive } from './sync.js';
+import { initBt, pushBt, refreshBt } from './bt.js';
 import * as today from './views/today.js';
 import * as program from './views/program.js';
 import * as exams from './views/exams.js';
@@ -231,15 +232,21 @@ store.subscribe(() => {
   render();
   refreshNotifications();
   pushTimer();
+  pushBt();
   scheduleSync();
 });
 render();
 refreshNotifications();
 scheduleSync(500);
 updateLive();
+initBt(() => {
+  if (app.route === 'settings') settings.refreshSyncInfo();
+  if (app.route === 'today' && !sheetOpen()) render();
+});
 native.onAppState((active) => {
   appActive = active;
   updateLive();
+  if (active) refreshBt().then(() => app.route === 'settings' && settings.refreshSyncInfo());
   if (active) scheduleSync(0);
   else if (isSignedIn()) runSync({ flush: true });
 });

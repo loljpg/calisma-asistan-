@@ -1,0 +1,12 @@
+{
+  "name": "masa-saati",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Masa saatiyle Bluetooth bağlantısı, bildirim ve müzik köprüsü (yalnızca Android)",
+  "main": "index.js",
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  }
+}

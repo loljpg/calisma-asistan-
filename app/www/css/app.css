@@ -343,3 +343,8 @@ select.input option { background: var(--surface); color: var(--text); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* Masa saati: bildirim gösterilecek uygulamaların listesi */
+.app-list { max-height: 55vh; overflow-y: auto; margin-bottom: 16px; }
+.check-row { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+.app-check { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--text); margin: 0 0 0 4px; }

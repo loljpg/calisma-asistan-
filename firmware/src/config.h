@@ -89,3 +89,13 @@ extern const Palette* th;
 #define TIMER_POLL_MS 10000UL      // canlı bağlantı yokken ortak kronometre bu aralıkla okunur
 #define VIEW_POLL_LIVE_MS (5UL * 60UL * 1000UL)  // canlı bağlantı varken plan yine de ara sıra okunur
 #define LONG_PRESS_MS 650
+
+// ---------- Bluetooth (docs/bluetooth.md) ----------
+#define BLE_NAME "CalismaSaati"
+#define BLE_SVC "6e3a0001-5a17-4c2d-9b8e-0c41a5a7c0de"
+#define BLE_RX "6e3a0002-5a17-4c2d-9b8e-0c41a5a7c0de"   // telefon yazar
+#define BLE_TX "6e3a0003-5a17-4c2d-9b8e-0c41a5a7c0de"   // masa saati bildirir
+#define BLE_PAIR_MS (2UL * 60UL * 1000UL)              // Ayarlar → Bluetooth: eşleşme kipi süresi
+#define BANNER_MS 5000                                  // gelen bildirim ekranda bu kadar kalır
+#define ICON_PX 20                                      // bildirim simgesi (20×20)
+#define ART_PX 80                                       // şarkı kapağı (80×80)

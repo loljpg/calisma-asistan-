@@ -26,6 +26,16 @@ function app() {
   return appPlugin;
 }
 
+// Masa saatiyle Bluetooth köprüsü (plugins/masa-saati). Tarayıcıda null.
+let btPlug = null;
+export function btPlugin() {
+  if (btPlug) return btPlug;
+  const register = capExports()?.registerPlugin;
+  if (!register || !isNative()) return null;
+  btPlug = register('MasaSaati');
+  return btPlug;
+}
+
 // Android geri tuşu. handler false döndürürse uygulama kapanır.
 export function onBackButton(handler) {
   const p = app();

@@ -12,7 +12,19 @@ powerbank yeterli.
 | **Ana** | Saat, tarih (6 sn'de bir YKS'ye kalan gün ve seriyle değişir), Sakarya hava durumu, şimdiki/sıradaki oturum, günlük hedef çubuğu |
 | **Program** | Günün planı. Sağdaki kareye dokun: tamamlandı / geri al. Satıra dokun: o dersle kronometre. Satıra **basılı tut**: menü (kronometreyle başlat, ertele, işareti kaldır) |
 | **Kronometre** | Başlat / Duraklat, Bitir (telefona oturum olarak gider), Sıfırla, Pomodoro (25 dk'da mola uyarısı). Telefondaki kronometreyle ortak: birinde başlatınca diğerinde de çalışır |
-| **Ayarlar** (dişli) | Wi-Fi ve hesap, dokunmatik ayarı, tema, renkleri ters çevirme, güncelleme, bağlantı bilgisi |
+| **Müzik** | Telefonda çalan şarkı: kapak, ad, sanatçı, ilerleme. Önceki / oynat-durdur / sonraki, ses − + |
+| **Oyun** | Blok Patlat: yandaki parçayı sürükleyip 8×8 tahtaya bırak, dolan satır ve sütunlar patlar. Skor ve en iyi skor saklanır |
+| **Ayarlar** (dişli) | 1. sayfa: Wi-Fi ve hesap, Bluetooth eşleştirme, tema, kapak rengini temaya uygula. *Diğer ayarlar*: dokunmatik ayarı, renkleri ters çevir, güncelleme, Bluetooth eşleşmesini sil |
+
+Alt çubuktaki simgeler soldan sağa: Ana, Program, Kronometre, Müzik, Oyun, Ayarlar.
+
+**Bildirimler:** telefona gelen bildirim birkaç saniye ekranın üstünde görünür, sonra ana ekranda
+tarihin yanında küçük uygulama simgesi olarak kalır. Simgelere dokununca liste açılır (*Temizle*).
+
+**Bluetooth:** uygulamada Ayarlar → *Masa saatini bul*. İlk eşleşmede masa saatinde bir şey
+yapman gerekmez; başka bir telefonla eşleştirmek için önce masa saatinde Ayarlar → *Bluetooth*'a dokun
+(2 dakika eşleşme kipi). Bluetooth bağlıyken Wi-Fi gerekmez: plan, tikler, kronometre ve saat telefondan gelir.
+Ayrıntılar: [docs/bluetooth.md](../docs/bluetooth.md).
 
 **BOOT tuşu:** kısa bas → sonraki ekran, 2 saniye bas → Ayarlar, 6 saniye bas → kurulum portalı
 (Wi-Fi ve hesap). Açılışta "Dokunmatik ayarı için BOOT'a bas" yazarken basarsan dokunmatik

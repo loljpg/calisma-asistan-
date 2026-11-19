@@ -112,6 +112,20 @@ export async function syncNow({ force = false, flush = false } = {}) {
 }
 
 // ---------- Ortak kronometre ----------
+// Kronometre sürümü buluta ve Bluetooth'a giden kayıtlarda ortaktır.
+export function nextTimerRev() {
+  timerRev = Math.max(Date.now(), timerRev + 1);
+  return timerRev;
+}
+
+// Masa saatinden Bluetooth ile gelen kronometre: uygulanır, buluttaki kayıt da güncellenir.
+export function relayDeviceTimer(r) {
+  if (!r || typeof r !== 'object') return false;
+  const changed = takeRemoteTimer(r);
+  if (isSignedIn() && Number(r.rev) === timerRev) db.put(`${root()}/device/timer`, r).catch(() => {});
+  return changed;
+}
+
 // Telefonda kronometre değiştiyse hemen buluta yazar; masa saati canlı bağlantıyla anında görür.
 let pushing = null;
 export function pushTimer() {
@@ -119,8 +133,7 @@ export function pushTimer() {
   if (pushing) return pushing.then(() => pushTimer());
   const sig = L.timerSig(store.state.timer);
   if (sig === lastTimerSig) return Promise.resolve();
-  timerRev = Math.max(Date.now(), timerRev + 1);
-  const body = L.sharedTimer(store.state, 'phone', timerRev);
+  const body = L.sharedTimer(store.state, 'phone', nextTimerRev());
   pushing = db.put(`${root()}/device/timer`, body)
     .then(() => { lastTimerSig = sig; })
     .catch((e) => { console.warn('Kronometre', e); })

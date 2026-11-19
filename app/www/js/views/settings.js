@@ -1,10 +1,11 @@
 // Ayarlar ekranı.
 import { store } from '../store.js';
-import { icon, esc, radio, openSheet, closeSheet, sheetHead, toast, copyText } from '../ui.js';
+import { icon, esc, radio, openSheet, setSheet, closeSheet, sheetHead, toast, copyText } from '../ui.js';
 import { askClaude, MODELS } from '../ai.js';
 import { BUILD, ensureNotifPermission } from '../native.js';
 import * as L from '../logic.js';
 import { syncState, isSignedIn, connect, disconnect, restoreFromCloud, liveOpen } from '../sync.js';
+import { bt, btText, btActions } from '../bt.js';
 
 const THEMES = [
   ['auto', 'Otomatik'],
@@ -31,6 +32,8 @@ export function refreshSyncInfo() {
   const b = document.querySelector('[data-device-status]');
   if (a) a.textContent = syncText();
   if (b) b.textContent = deviceText();
+  const c = document.querySelector('[data-bt-status]');
+  if (c) c.textContent = btText();
 }
 
 function cloudSection(app) {
@@ -62,6 +65,44 @@ function cloudSection(app) {
   </div>`;
 }
 
+function btSection() {
+  if (!bt.available) return '';
+  const s = bt.state || {};
+  if (!s.paired) {
+    return `
+  <h2 class="set-title">Masa saati · Bluetooth</h2>
+  <div class="set-group surface">
+    <div class="set-row stack">
+      <p class="hint">Wi-Fi olmadan da çalışır: plan, tikler ve kronometre Bluetooth ile gider. Telefona gelen bildirimler ve çalan müzik masa saatinde görünür.</p>
+      <button class="btn primary block" data-action="settings:btPair">${icon('bluetooth', 16)} Masa saatini bul</button>
+    </div>
+  </div>`;
+  }
+  return `
+  <h2 class="set-title">Masa saati · Bluetooth</h2>
+  <div class="set-group surface">
+    <div class="set-row"><span class="lbl">Durum</span><span class="muted small" data-bt-status>${esc(btText())}</span></div>
+    ${s.permission ? '' : `<div class="set-row"><span class="lbl">Bluetooth izni</span><button class="btn primary" data-action="settings:btPermission">İzin ver</button></div>`}
+    ${s.notifAccess ? '' : `<div class="set-row stack"><p class="hint">Bildirimler ve müzik için telefonun “Bildirim erişimi” iznini Çalışma Asistanı’na vermen gerekiyor.</p><button class="btn surface block" data-action="settings:btNotifAccess">${icon('bell', 16)} Bildirim erişimini aç</button></div>`}
+    <div class="set-row"><label for="btNotif">Bildirimleri göster</label><input class="toggle" id="btNotif" type="checkbox" ${s.notif !== false ? 'checked' : ''} data-setting="bt.notif"></div>
+    <div class="set-row"><span class="lbl">Hangi uygulamalar</span><button class="btn surface" data-action="settings:btApps">Seç</button></div>
+    <div class="set-row"><label for="btMedia">Müzik kumandası</label><input class="toggle" id="btMedia" type="checkbox" ${s.media !== false ? 'checked' : ''} data-setting="bt.media"></div>
+    <div class="set-row"><span class="lbl">Eşleşme</span><button class="btn danger" data-action="settings:btUnpair">Kaldır</button></div>
+  </div>`;
+}
+
+function deviceList(devices) {
+  if (!devices.length) {
+    return `<p class="hint" style="margin-bottom:16px">Masa saati bulunamadı. Masa saati açık mı ve yazılımı fw-6 ya da daha yeni mi? Yeni bir telefonla eşleştiriyorsan masa saatinde Ayarlar → Bluetooth’a dokun, sonra tekrar ara.</p>
+      <button class="btn primary block" data-action="settings:btPair">${icon('refresh', 16)} Tekrar ara</button>`;
+  }
+  return `<div class="list">${devices
+    .map(
+      (d) => `<button class="row" data-action="settings:btPairWith" data-address="${esc(d.address)}" data-name="${esc(d.name)}">
+        <span class="row-main"><b>${esc(d.name)}</b><span class="muted small">${esc(d.address)} · sinyal ${d.rssi} dBm</span></span>${icon('bluetooth', 18)}</button>`
+    )
+    .join('')}</div>`;
+}
 
 export function render(app) {
   const st = app.s.settings;
@@ -117,6 +158,7 @@ export function render(app) {
   </div>
 
   ${cloudSection(app)}
+  ${btSection()}
 
   <h2 class="set-title">Veri</h2>
   <div class="set-group surface">
@@ -134,6 +176,13 @@ export function render(app) {
 // data-setting alanlarından gelen değişiklikleri kaydeder (app.js çağırır).
 export function applySetting(el, app) {
   const key = el.dataset.setting;
+  if (key.startsWith('bt.')) {
+    btActions
+      .setOptions({ [key.slice(3)]: el.checked })
+      .then(() => app.render())
+      .catch((e) => toast(e.message || 'Kaydedilemedi.', 'error'));
+    return;
+  }
   let v;
   if (el.type === 'checkbox') v = el.checked;
   else if (el.type === 'number' || key === 'notifyBefore') v = Number(el.value);
@@ -150,6 +199,65 @@ export function applySetting(el, app) {
 }
 
 export const actions = {
+  async btPermission(el, app) {
+    await btActions.requestPermission();
+    app.render();
+  },
+
+  async btPair(el, app) {
+    if (!bt.state?.enabled) {
+      await btActions.openBluetoothSettings();
+      throw new Error('Önce telefonun Bluetooth’unu aç.');
+    }
+    if (!bt.state?.permission) await btActions.requestPermission();
+    const html = (body) => `${sheetHead('Masa saatini bul', 'Masa saati açık ve yakında olsun')}${body}`;
+    openSheet(html('<p class="hint"><span class="spinner"></span> Aranıyor…</p>'), 'Masa saatini bul');
+    const devices = await btActions.scan();
+    setSheet(html(deviceList(devices)), 'Masa saatini bul');
+  },
+
+  async btPairWith(el, app) {
+    const { address, name } = el.dataset;
+    setSheet(`${sheetHead('Bağlanıyor…', name)}<p class="hint"><span class="spinner"></span> Masa saatiyle eşleşiyor. Birkaç saniye sürebilir.</p>`, 'Bağlanıyor');
+    try {
+      await btActions.pair(address, name);
+    } catch (e) {
+      setSheet(`${sheetHead('Eşleşmedi')}<p class="hint" style="margin-bottom:16px">${esc(e.message || 'Bağlanılamadı.')}</p><button class="btn primary block" data-action="settings:btPair">${icon('refresh', 16)} Tekrar dene</button>`, 'Eşleşmedi');
+      return;
+    }
+    closeSheet();
+    app.render();
+    toast(bt.state?.notifAccess ? 'Masa saati eşleşti.' : 'Masa saati eşleşti. Bildirim ve müzik için “Bildirim erişimi” iznini aç.', 'info', 4000);
+  },
+
+  async btUnpair(el, app) {
+    await btActions.unpair();
+    app.render();
+    toast('Eşleşme kaldırıldı.');
+  },
+
+  btNotifAccess() {
+    return btActions.openNotificationAccess();
+  },
+
+  async btApps() {
+    openSheet(`${sheetHead('Hangi uygulamalar', 'Bildirimleri masa saatinde görünecekler')}<p class="hint"><span class="spinner"></span> Uygulamalar okunuyor…</p>`, 'Uygulamalar');
+    const apps = await btActions.listApps();
+    const blocked = new Set(bt.state?.blocked || []);
+    setSheet(
+      `${sheetHead('Hangi uygulamalar', 'Bildirimleri masa saatinde görünecekler')}
+      <form class="form" data-form="settings:btApps">
+        <div class="list app-list">${apps
+          .map(
+            (a) => `<label class="row check-row"><input type="checkbox" class="app-check" name="show" value="${esc(a.pkg)}" ${blocked.has(a.pkg) ? '' : 'checked'}><span class="row-main"><b>${esc(a.name)}</b></span></label>`
+          )
+          .join('')}</div>
+        <button class="btn primary block" type="submit">Kaydet</button>
+      </form>`,
+      'Uygulamalar'
+    );
+  },
+
   async testKey(el, app) {
     const st = app.s.settings;
     if (!st.apiKey) throw new Error('Önce API anahtarını gir.');
@@ -237,6 +345,14 @@ export const actions = {
 };
 
 export const forms = {
+  async btApps(data, form) {
+    const shown = new Set([...form.querySelectorAll('input[name="show"]:checked')].map((i) => i.value));
+    const blocked = [...form.querySelectorAll('input[name="show"]')].map((i) => i.value).filter((v) => !shown.has(v));
+    await btActions.setOptions({ blocked });
+    closeSheet();
+    toast('Kaydedildi.');
+  },
+
   async cloudLogin(data, form, app) {
     const buttons = [...form.querySelectorAll('button')];
     buttons.forEach((b) => {

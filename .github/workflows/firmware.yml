@@ -2,7 +2,7 @@ name: Masa saati yazılımı (ESP32 CYD)
 
 on:
   push:
-    branches: [main]
+    branches: [main, "dev/**"]
     paths:
       - "firmware/**"
       - ".github/workflows/firmware.yml"
@@ -54,6 +54,7 @@ jobs:
           ls -la ../dist
 
       - name: Yayınla
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: fw-v${{ github.run_number }}

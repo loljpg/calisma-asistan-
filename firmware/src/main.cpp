@@ -18,6 +18,8 @@
 #include <TFT_eSPI.h>
 #include <SD.h>
 #include <Update.h>
+#include <NimBLEDevice.h>
+#include <esp_ota_ops.h>
 #include <sys/time.h>
 #include <time.h>
 #include <vector>
@@ -71,6 +73,7 @@ struct Config {
   int x1 = 400, x2 = 3480, y1 = 520, y2 = 3520;
   bool pomodoro = false;
   int theme = 0;  // 0 otomatik (gece koyu), 1 açık, 2 koyu
+  bool coverTheme = true;  // çalan şarkının kapak rengi temaya uygulansın
 };
 
 static SemaphoreHandle_t mtx;
@@ -104,6 +107,15 @@ static long long timerRevSeen = 0;
 
 static bool sdOk = false;
 static Preferences prefs;
+
+// Bluetooth: bağlıyken telefon buluta aracılık eder, kart kendi bulut işlerini durdurur.
+static volatile bool bleConnected = false;  // telefon bağlı
+static volatile bool bleLinked = false;     // eşleşme anahtarı doğrulandı
+static volatile bool fbFlushing = false;    // kuyruk şu an buluta gönderiliyor
+static int bleInflight = 0;                 // Bluetooth'tan gönderilip onayı beklenen olay sayısı
+static bool bleTimerPending = false;
+static uint32_t blePairUntil = 0;           // eşleşme kipi bitişi (millis)
+static bool bleHasToken = false;            // bir telefonla eşleşmiş mi
 
 #define STR_(x) #x
 #define STR(x) STR_(x)
@@ -210,6 +222,7 @@ static void loadConfig() {
   cfg.y2 = prefs.getInt("cy2", cfg.y2);
   cfg.pomodoro = prefs.getBool("pomo", false);
   cfg.theme = constrain(prefs.getInt("theme", 0), 0, 2);
+  cfg.coverTheme = prefs.getBool("cover", true);
   // Kuyruk: fw-4 metin olarak ("outbox"), fw-5 bayt dizisi olarak ("ob2") saklar.
   String ob = prefs.getString("outbox", "");
   size_t n = prefs.getBytesLength("ob2");
@@ -248,6 +261,7 @@ static void saveConfig() {
   prefs.putInt("cy2", cfg.y2);
   prefs.putBool("pomo", cfg.pomodoro);
   prefs.putInt("theme", cfg.theme);
+  prefs.putBool("cover", cfg.coverTheme);
   prefs.end();
 }
 
@@ -665,6 +679,14 @@ static String eventKey(const String& line) {
 // SD'de yüzlerce kayıt birikebilir).
 static void fbFlushOutbox() {
   for (int round = 0; round < 10; round++) {
+    {
+      Lock l;
+      if (bleLinked || bleInflight) return;  // Bluetooth bağlıyken kuyruğu telefon alır
+      fbFlushing = true;
+    }
+    struct Done {
+      ~Done() { fbFlushing = false; }
+    } done;
     std::vector<String> batch = queuePeek(20);
     if (batch.empty()) return;
     String body = "{";
@@ -1097,7 +1119,8 @@ static void netTask(void*) {
     netBusy = true;
     if (WiFi.status() != WL_CONNECTED) {
       liveClose();
-      setNet("Wi-Fi bağlantısı yok", false);
+      if (bleLinked) setNet("Telefon üzerinden (Bluetooth)", true);
+      else setNet("Wi-Fi bağlantısı yok", false);
       if (millis() - lastReconnect > 15000) {
         lastReconnect = millis();
         WiFi.reconnect();
@@ -1124,7 +1147,11 @@ static void netTask(void*) {
       }
       nextWeather = now + (ok ? WEATHER_EVERY_MS : 30000UL);
     }
-    if (hasCreds()) {
+    if (bleLinked) {
+      // Plan, kronometre ve olaylar Bluetooth'tan gidip gelir; bulut akışı bellek için kapatılır.
+      if (live.c) liveClose();
+      setNet("Telefon üzerinden (Bluetooth)", true);
+    } else if (hasCreds()) {
       if (ensureAuth()) {
         fbPushTimer();
         fbFlushOutbox();
@@ -1177,14 +1204,20 @@ static const Palette PAL_NIGHT = {
     RGB(237, 237, 239), RGB(142, 143, 151), RGB(110, 111, 119), RGB(226, 92, 64),   RGB(42, 30, 27),
     RGB(136, 63, 50),   RGB(38, 39, 44),    RGB(255, 255, 255), RGB(160, 161, 169), RGB(52, 53, 59),
     RGB(68, 69, 76),    RGB(44, 45, 51),    RGB(61, 190, 133),  RGB(96, 98, 106)};
-const Palette* th = &PAL_DAY;
+static Palette palCur = PAL_DAY;  // geçerli palet (kapak rengi uygulanmış olabilir)
+const Palette* th = &palCur;
 static bool darkNow = false;
+
+// Çalan şarkının kapak renkleri (telefondan gelir): vurgu ve koyu kart
+static bool accentOn = false;
+static uint8_t accRgb[3] = {207, 68, 40}, darkRgb[3] = {22, 23, 26};
 
 static TFT_eSPI tft;
 static TFT_eSprite spr(&tft);
 static bool sprOk = false;
 
-enum Screen { SCR_HOME = 0, SCR_PLAN = 1, SCR_TIMER = 2, SCR_SETTINGS = 3 };
+enum Screen { SCR_HOME = 0, SCR_PLAN = 1, SCR_TIMER = 2, SCR_MUSIC = 3, SCR_GAME = 4, SCR_SETTINGS = 5 };
+static const int TAB_N = 6;
 static Screen screen = SCR_HOME;
 static int planScroll = 0;
 
@@ -1223,9 +1256,36 @@ static bool isNightHour() {
   return localNow(t) && (t.tm_hour >= NIGHT_FROM || t.tm_hour < NIGHT_TO);
 }
 static bool wantDark() { return cfg.theme == 2 || (cfg.theme == 0 && isNightHour()); }
+static uint8_t mixc(uint8_t a, uint8_t b, float t) { return (uint8_t)((float)a + ((float)b - (float)a) * t + 0.5f); }
+static uint16_t mixRgb(const uint8_t* c, const uint8_t* w, float t) {
+  return RGB(mixc(c[0], w[0], t), mixc(c[1], w[1], t), mixc(c[2], w[2], t));
+}
+
 static void applyPalette() {
   darkNow = wantDark();
-  th = darkNow ? &PAL_NIGHT : &PAL_DAY;
+  palCur = darkNow ? PAL_NIGHT : PAL_DAY;
+  if (accentOn && cfg.coverTheme) {
+    static const uint8_t WHITE[3] = {255, 255, 255};
+    static const uint8_t BG_DAY[3] = {245, 244, 240}, BG_NIGHT[3] = {17, 18, 20};
+    static const uint8_t SF_DAY[3] = {255, 255, 255}, SF_NIGHT[3] = {27, 28, 32};
+    static const uint8_t INK_NIGHT[3] = {38, 39, 44};
+    const uint8_t* bg = darkNow ? BG_NIGHT : BG_DAY;
+    const uint8_t* sf = darkNow ? SF_NIGHT : SF_DAY;
+    uint8_t a[3] = {accRgb[0], accRgb[1], accRgb[2]};
+    float lum = (0.2126f * a[0] + 0.7152f * a[1] + 0.0722f * a[2]) / 255.f;
+    if (darkNow && lum < 0.4f)
+      for (int i = 0; i < 3; i++) a[i] = mixc(a[i], 255, 0.35f);  // koyu zeminde okunsun
+    palCur.red = RGB(a[0], a[1], a[2]);
+    palCur.redSoft = mixRgb(a, sf, darkNow ? 0.80f : 0.88f);
+    palCur.redLine = mixRgb(a, bg, 0.45f);
+    uint8_t d[3];
+    for (int i = 0; i < 3; i++) d[i] = darkNow ? mixc(darkRgb[i], INK_NIGHT[i], 0.35f) : darkRgb[i];
+    palCur.ink = RGB(d[0], d[1], d[2]);
+    palCur.ink2 = mixRgb(d, WHITE, 0.10f);
+    palCur.inkLine = mixRgb(d, WHITE, 0.18f);
+    palCur.inkMuted = mixRgb(d, WHITE, 0.62f);
+  }
+  th = &palCur;
 }
 
 // --- Kareli zemin ---
@@ -1422,21 +1482,59 @@ static std::vector<Item> displayItems(int& studied, View& snapshot) {
 static bool planIsToday(const View& v) { return v.valid && v.date.length() && v.date == todayStr(); }
 
 // --- Ortak parçalar ---
+// Alt çubuk: altı sekme, simgelerle (Ana, Program, Kronometre, Müzik, Oyun, Ayarlar)
 static const int TAB_Y = 202;
-static const char* TAB_LABELS[] = {"Ana", "Program", "Kronometre"};
-static const int TAB_CX[] = {46, 126, 218};
+static int tabCx(int i) { return 27 + i * 160 / 3; }
+
+static void tabIcon(int i, int cx, int cy, uint16_t c, uint16_t bg) {
+  switch (i) {
+    case 0:  // ev
+      tft.fillTriangle(cx - 10, cy - 1, cx, cy - 10, cx + 10, cy - 1, c);
+      tft.fillRect(cx - 7, cy - 1, 14, 9, c);
+      tft.fillRect(cx - 2, cy + 3, 4, 5, bg);
+      break;
+    case 1:  // liste
+      for (int k = 0; k < 3; k++) {
+        int y = cy - 6 + k * 6;
+        tft.fillSmoothCircle(cx - 8, y, 2, c, bg);
+        tft.fillRect(cx - 4, y - 1, 13, 3, c);
+      }
+      break;
+    case 2:  // kronometre
+      tft.fillSmoothCircle(cx, cy + 1, 8, c, bg);
+      tft.fillSmoothCircle(cx, cy + 1, 6, bg, c);
+      tft.fillRect(cx - 2, cy - 10, 5, 3, c);
+      tft.drawWideLine(cx, cy + 1, cx + 3, cy - 3, 2, c, bg);
+      break;
+    case 3:  // nota
+      tft.fillSmoothCircle(cx - 5, cy + 5, 4, c, bg);
+      tft.fillSmoothCircle(cx + 6, cy + 3, 4, c, bg);
+      tft.fillRect(cx - 2, cy - 7, 2, 12, c);
+      tft.fillRect(cx + 9, cy - 9, 2, 12, c);
+      tft.fillTriangle(cx - 2, cy - 7, cx + 11, cy - 10, cx + 11, cy - 6, c);
+      tft.fillTriangle(cx - 2, cy - 7, cx - 2, cy - 3, cx + 11, cy - 6, c);
+      break;
+    case 4:  // bloklar
+      tft.fillRoundRect(cx - 9, cy - 9, 8, 8, 2, c);
+      tft.fillRoundRect(cx + 1, cy - 9, 8, 8, 2, c);
+      tft.fillRoundRect(cx - 9, cy + 1, 8, 8, 2, c);
+      tft.drawRoundRect(cx + 1, cy + 1, 8, 8, 2, c);
+      break;
+    default:
+      drawGear(cx, cy, c, bg);
+      break;
+  }
+}
 
 static void drawTabs() {
   tft.fillRect(0, TAB_Y, SCREEN_W, SCREEN_H - TAB_Y, COL_SURFACE);
   tft.drawFastHLine(0, TAB_Y, SCREEN_W, COL_LINE);
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < TAB_N; i++) {
     bool on = (int)screen == i;
-    text(TAB_LABELS[i], TAB_CX[i], 219, F_SMALL, on ? COL_TEXT : COL_FAINT, COL_SURFACE, MC_DATUM);
-    if (on) tft.fillSmoothCircle(TAB_CX[i], 233, 2, COL_RED, COL_SURFACE);
+    int cx = tabCx(i);
+    tabIcon(i, cx, 218, on ? COL_TEXT : COL_FAINT, COL_SURFACE);
+    if (on) tft.fillSmoothCircle(cx, 234, 2, COL_RED, COL_SURFACE);
   }
-  bool on = screen == SCR_SETTINGS;
-  drawGear(295, 219, on ? COL_TEXT : COL_FAINT, COL_SURFACE);
-  if (on) tft.fillSmoothCircle(295, 233, 2, COL_RED, COL_SURFACE);
 }
 
 static void toast(const String& msg) {
@@ -1448,6 +1546,216 @@ static void toast(const String& msg) {
 static void fullClear() {
   clearBg(0, 0, SCREEN_W, TAB_Y);
   drawTabs();
+}
+
+// --- Telefondan gelen bildirimler ---
+struct Notif {
+  String id, app, title, text;
+  uint32_t icon = 0;
+};
+static std::vector<Notif> notifs;  // en yeni başta
+struct IconImg {
+  uint32_t id = 0, used = 0;
+  uint16_t px[ICON_PX * ICON_PX];
+};
+static std::vector<IconImg*> icons;  // en fazla 12 uygulama simgesi
+static Notif banner;
+static bool notifListOpen = false;
+
+static IconImg* findIcon(uint32_t id) {
+  for (auto* ic : icons)
+    if (ic->id == id) return ic;
+  return nullptr;
+}
+
+// Simge yoksa uygulamanın baş harfi yazılır.
+static void drawAppIcon(uint32_t id, const String& app, int x, int y, uint16_t bg) {
+  IconImg* ic = findIcon(id);
+  if (ic) {
+    ic->used = millis();
+    tft.fillRect(x, y, ICON_PX, ICON_PX, bg);
+    tft.setSwapBytes(true);
+    tft.pushImage(x, y, ICON_PX, ICON_PX, ic->px, (uint16_t)0xF81F);
+    tft.setSwapBytes(false);
+    return;
+  }
+  tft.fillSmoothRoundRect(x, y, ICON_PX, ICON_PX, 5, COL_MUTED, bg);
+  String letter = app.length() ? app.substring(0, ((uint8_t)app[0] & 0x80) ? 2 : 1) : String("?");
+  letter.toUpperCase();
+  text(letter, x + ICON_PX / 2, y + ICON_PX / 2 + 1, F_SMALL, COL_SURFACE, COL_MUTED, MC_DATUM);
+}
+
+static void drawBanner() {
+  card(8, 6, 304, 66, 14, COL_INK, COL_INK);
+  drawAppIcon(banner.icon, banner.app, 20, 18, COL_INK);
+  String title = banner.title, body = banner.text;
+  if (!title.length()) {
+    title = body;
+    body = "";
+  }
+  text(fit(banner.app, F_SMALL, 248), 50, 11, F_SMALL, COL_INK_MUTED, COL_INK);
+  text(fit(title, F_TEXT, 250), 50, 27, F_TEXT, COL_ON_INK, COL_INK);
+  if (body.length()) text(fit(body, F_SMALL, 250), 50, 50, F_SMALL, COL_INK_MUTED, COL_INK);
+}
+
+// Ana ekranın üst satırındaki simgeler: bildirimi olan uygulamalar (en fazla 4).
+static int notifIconsW() {
+  std::vector<uint32_t> seen;
+  for (auto& n : notifs)
+    if (std::find(seen.begin(), seen.end(), n.icon) == seen.end()) seen.push_back(n.icon);
+  int k = std::min<int>(seen.size(), 4);
+  return k ? k * 24 + (seen.size() > 4 ? 22 : 0) : 0;
+}
+
+static void drawNotifIcons() {
+  std::vector<const Notif*> uniq;
+  for (auto& n : notifs) {
+    bool dup = false;
+    for (auto* u : uniq)
+      if (u->icon == n.icon) dup = true;
+    if (!dup) uniq.push_back(&n);
+  }
+  if (uniq.empty()) return;
+  int k = std::min<int>(uniq.size(), 4);
+  int x = 230 - notifIconsW();
+  for (int i = 0; i < k; i++) drawAppIcon(uniq[i]->icon, uniq[i]->app, x + i * 24, 8, COL_BG);
+  if ((int)uniq.size() > 4) text("+" + String(uniq.size() - 4), 230, 18, F_SMALL, COL_MUTED, COL_BG, MR_DATUM);
+}
+
+// Bildirim listesi (ana ekranda simgelere dokununca)
+static void drawNotifList() {
+  card(8, 6, 304, 190, 14, COL_TEXT, COL_TEXT);
+  card(10, 8, 300, 186, 12, COL_SURFACE, COL_SURFACE, COL_TEXT);
+  text("Bildirimler", 22, 14, F_TEXT, COL_TEXT, COL_SURFACE);
+  button(216, 12, 84, 28, "Temizle", BTN_SURFACE, COL_SURFACE);
+  if (notifs.empty()) {
+    text("Bildirim yok", 160, 110, F_SMALL, COL_MUTED, COL_SURFACE, MC_DATUM);
+    return;
+  }
+  for (int i = 0; i < 4 && i < (int)notifs.size(); i++) {
+    const Notif& n = notifs[i];
+    int y = 46 + i * 37;
+    if (i) tft.drawFastHLine(20, y - 2, 280, COL_LINE);
+    drawAppIcon(n.icon, n.app, 20, y + 7, COL_SURFACE);
+    String t = n.title.length() ? n.title : n.app;
+    text(fit(t, F_SMALL, 246), 50, y, F_SMALL, COL_TEXT, COL_SURFACE);
+    text(fit(n.text.length() ? n.text : n.app, F_SMALL, 246), 50, y + 17, F_SMALL, COL_MUTED, COL_SURFACE);
+  }
+}
+
+// --- Telefonda çalan müzik ---
+struct MediaState {
+  bool on = false, playing = false, enabled = true;
+  String app, title, artist;
+  uint32_t pos = 0, dur = 0, at = 0;  // pos: at anındaki konum (ms)
+  int vol = 0, volMax = 15;
+  uint32_t art = 0;
+};
+static MediaState media;
+static uint16_t* artPx = nullptr;
+static uint32_t artId = 0;
+
+static uint32_t mediaPos() {
+  uint32_t p = media.playing ? media.pos + (millis() - media.at) : media.pos;
+  return media.dur ? std::min(p, media.dur) : p;
+}
+
+static String fmtMs(uint32_t ms) {
+  uint32_t s = ms / 1000;
+  char b[12];
+  snprintf(b, sizeof b, "%u:%02u", (unsigned)(s / 60), (unsigned)(s % 60));
+  return String(b);
+}
+
+static const int MU_CTRL_Y = 126, MU_CTRL_H = 38, MU_VOL_Y = 172, MU_VOL_H = 26;
+
+static void glyphPrev(int cx, int cy, uint16_t c) {
+  tft.fillRect(cx - 9, cy - 7, 3, 14, c);
+  tft.fillTriangle(cx + 8, cy - 7, cx + 8, cy + 7, cx - 5, cy, c);
+}
+static void glyphNext(int cx, int cy, uint16_t c) {
+  tft.fillRect(cx + 7, cy - 7, 3, 14, c);
+  tft.fillTriangle(cx - 8, cy - 7, cx - 8, cy + 7, cx + 5, cy, c);
+}
+static void glyphPlay(int cx, int cy, uint16_t c, bool playing) {
+  if (playing) {
+    tft.fillRect(cx - 7, cy - 8, 5, 16, c);
+    tft.fillRect(cx + 2, cy - 8, 5, 16, c);
+  } else {
+    tft.fillTriangle(cx - 5, cy - 9, cx - 5, cy + 9, cx + 9, cy, c);
+  }
+}
+
+static void drawMusicProgress() {
+  tft.fillRect(8, 92, 304, 32, COL_BG);
+  gridLines(tft, 0, 0, 8, 92, 304, 32);
+  int pct = media.dur ? (int)((uint64_t)mediaPos() * 100 / media.dur) : 0;
+  progressBar(12, 96, 296, 4, pct, COL_RED, COL_TRACK, COL_BG);
+  text(fmtMs(mediaPos()), 12, 104, F_SMALL, COL_MUTED, COL_BG);
+  if (media.dur) text(fmtMs(media.dur), 308, 104, F_SMALL, COL_MUTED, COL_BG, TR_DATUM);
+}
+
+static void drawMusicControls() {
+  button(52, MU_CTRL_Y, 60, MU_CTRL_H, "", BTN_SURFACE);
+  glyphPrev(82, MU_CTRL_Y + MU_CTRL_H / 2, COL_TEXT);
+  button(120, MU_CTRL_Y, 80, MU_CTRL_H, "", BTN_PRIMARY);
+  glyphPlay(160, MU_CTRL_Y + MU_CTRL_H / 2, COL_ON_INK, media.playing);
+  button(208, MU_CTRL_Y, 60, MU_CTRL_H, "", BTN_SURFACE);
+  glyphNext(238, MU_CTRL_Y + MU_CTRL_H / 2, COL_TEXT);
+}
+
+static void drawMusicVolume() {
+  button(12, MU_VOL_Y, 44, MU_VOL_H, "", BTN_SURFACE);
+  tft.fillRect(27, MU_VOL_Y + MU_VOL_H / 2 - 1, 14, 3, COL_TEXT);
+  button(264, MU_VOL_Y, 44, MU_VOL_H, "", BTN_SURFACE);
+  tft.fillRect(279, MU_VOL_Y + MU_VOL_H / 2 - 1, 14, 3, COL_TEXT);
+  tft.fillRect(285, MU_VOL_Y + MU_VOL_H / 2 - 7, 3, 15, COL_TEXT);
+  tft.fillRect(62, MU_VOL_Y, 196, MU_VOL_H, COL_BG);
+  int pct = media.volMax > 0 ? media.vol * 100 / media.volMax : 0;
+  progressBar(66, MU_VOL_Y + MU_VOL_H / 2 - 2, 188, 5, pct, COL_TEXT, COL_TRACK, COL_BG);
+}
+
+static void drawCover() {
+  const int X = 12, Y = 8;
+  if (artPx && artId && artId == media.art) {
+    tft.setSwapBytes(true);
+    tft.pushImage(X, Y, ART_PX, ART_PX, artPx);
+    tft.setSwapBytes(false);
+    return;
+  }
+  card(X, Y, ART_PX, ART_PX, 10, COL_SURFACE, COL_LINE);
+  tabIcon(3, X + ART_PX / 2 - 1, Y + ART_PX / 2, COL_LINE_STRONG, COL_SURFACE);
+}
+
+static void drawMusic(bool full) {
+  if (full) fullClear();
+  else clearBg(0, 0, SCREEN_W, TAB_Y);
+  if (!bleLinked || !media.on) {
+    card(8, 40, 304, 110, 14, COL_SURFACE, COL_LINE);
+    String l1, l2;
+    if (!bleLinked) {
+      l1 = "Telefon Bluetooth ile bağlı değil";
+      l2 = "Uygulama → Ayarlar → Masa saatini bul";
+    } else if (!media.enabled) {
+      l1 = "Müzik kumandası kapalı";
+      l2 = "Uygulamanın ayarlarından açabilirsin";
+    } else {
+      l1 = "Telefonda müzik çalmıyor";
+      l2 = "Spotify ya da YouTube Music'te bir şarkı aç";
+    }
+    tabIcon(3, 160, 72, COL_FAINT, COL_SURFACE);
+    text(l1, 160, 100, F_TEXT, COL_TEXT, COL_SURFACE, MC_DATUM);
+    text(fit(l2, F_SMALL, 284), 160, 126, F_SMALL, COL_MUTED, COL_SURFACE, MC_DATUM);
+    return;
+  }
+  drawCover();
+  text(fit(media.title.length() ? media.title : String("Bilinmeyen şarkı"), F_TEXT, 204), 104, 12, F_TEXT, COL_TEXT, COL_BG);
+  text(fit(media.artist, F_SMALL, 204), 104, 38, F_SMALL, COL_MUTED, COL_BG);
+  String app = media.app + (media.playing ? "" : " · duraklatıldı");
+  text(fit(app, F_SMALL, 204), 104, 58, F_SMALL, COL_FAINT, COL_BG);
+  drawMusicProgress();
+  drawMusicControls();
+  drawMusicVolume();
 }
 
 // --- Ana ekran ---
@@ -1473,7 +1781,9 @@ static void drawDate() {
   if (datePhase && extra.length()) s = extra;
   else s = localNow(t) ? String(GUN_UP[t.tm_wday]) + ", " + String(t.tm_mday) + " " + AY_UP[t.tm_mon] : String("SAAT AYARLANIYOR…");
   bool alt = datePhase && extra.length();
-  text(fit(s, F_SMALL, 216), 14, 10, F_SMALL, alt ? COL_RED : COL_MUTED, COL_BG);
+  int iw = notifIconsW();
+  text(fit(s, F_SMALL, 216 - iw - (iw ? 6 : 0)), 14, 10, F_SMALL, alt ? COL_RED : COL_MUTED, COL_BG);
+  drawNotifIcons();
 }
 
 static void drawClock() {
@@ -1700,7 +2010,17 @@ static void drawTimer(bool full) {
 
 // --- Ayarlar ekranı ---
 static const int SET_Y = 6, SET_RH = 30, SET_N = 5;
-static const char* SET_ROWS[] = {"Wi-Fi ve hesap ayarları", "Dokunmatiği yeniden ayarla", "Tema", "Renkleri ters çevir", "Güncellemeyi denetle"};
+static int setPage = 0;
+static const char* SET_ROWS[2][SET_N] = {
+    {"Wi-Fi ve hesap ayarları", "Bluetooth", "Tema", "Kapak rengini temaya uygula", "Diğer ayarlar"},
+    {"Dokunmatiği yeniden ayarla", "Renkleri ters çevir", "Güncellemeyi denetle", "Bluetooth eşleşmesini sil", "Geri"}};
+
+static String bleStatusText() {
+  if (bleLinked) return "Bağlı";
+  if (blePairUntil && (int32_t)(blePairUntil - millis()) > 0) return "Eşleşme kipi";
+  if (!bleHasToken) return "Eşleşmedi";
+  return "Bekleniyor";
+}
 
 static void drawSettings(bool full) {
   if (full) fullClear();
@@ -1709,10 +2029,18 @@ static void drawSettings(bool full) {
   for (int i = 0; i < SET_N; i++) {
     int y = SET_Y + i * SET_RH;
     if (i) tft.drawFastHLine(20, y, 280, COL_LINE);
-    text(SET_ROWS[i], 20, y + SET_RH / 2, F_SMALL, COL_TEXT, COL_SURFACE, ML_DATUM);
     String val;
-    if (i == 2) val = THEME_NAMES[constrain(cfg.theme, 0, 2)];
-    if (i == 3) val = cfg.invert ? "Açık" : "Kapalı";
+    if (setPage == 0) {
+      if (i == 1) val = bleStatusText();
+      if (i == 2) val = THEME_NAMES[constrain(cfg.theme, 0, 2)];
+      if (i == 3) val = cfg.coverTheme ? "Açık" : "Kapalı";
+      if (i == 4) val = "›";
+    } else {
+      if (i == 1) val = cfg.invert ? "Açık" : "Kapalı";
+      if (i == 4) val = "‹";
+    }
+    uint16_t col = (setPage == 1 && i == 3) ? COL_RED : COL_TEXT;
+    text(SET_ROWS[setPage][i], 20, y + SET_RH / 2, F_SMALL, col, COL_SURFACE, ML_DATUM);
     if (val.length()) text(val, 300, y + SET_RH / 2, F_SMALL, COL_MUTED, COL_SURFACE, MR_DATUM);
   }
   String net, ota;
@@ -1728,7 +2056,7 @@ static void drawSettings(bool full) {
   text(fit(l1, F_SMALL, 296), 12, 162, F_SMALL, COL_MUTED, COL_BG);
   String l2 = ota;
   if (!l2.length()) {
-    l2 = "Bulut: " + net + (liveOn ? " (canlı)" : "") + " · SD " + (sdOk ? "var" : "yok");
+    l2 = (bleLinked ? String("Bluetooth bağlı") : "Bulut: " + net + (liveOn ? " (canlı)" : "")) + " · SD " + (sdOk ? "var" : "yok");
     int q = queueCount();
     if (q) l2 += " · " + String(q) + " bekliyor";
   }
@@ -1765,20 +2093,400 @@ static void drawMenu() {
   }
 }
 
+// ============================================================================
+// Blok Patlat (8×8 blok bulmaca)
+// ============================================================================
+// Yandaki üç parçadan birini sürükleyip tahtaya bırak; dolan satır ve sütunlar patlar.
+// Üç parça da kullanılınca yenileri gelir. Hiçbiri sığmazsa oyun biter.
+static const int BP_N = 8, BP_CELL = 23, BP_X = 9, BP_Y = 9;
+static const char* BP_SHAPES[] = {
+    "1",        "11",       "1/1",      "111",      "1/1/1",    "1111",     "1/1/1/1",  "11111",    "1/1/1/1/1",
+    "11/11",    "111/111/111", "111/111", "11/11/11", "11/1.",  "11/.1",    "1./11",    ".1/11",    "111/1..",
+    "111/..1",  "1../111",  "..1/111",  "11/1./1.", "11/.1/.1", "1./1./11", ".1/.1/11", "111/.1.",  ".1./111",
+    "1./11/1.", ".1/11/.1", "11./.11",  ".11/11.",  "1./11/.1", ".1/11/1."};
+static const int BP_SHAPE_N = sizeof(BP_SHAPES) / sizeof(BP_SHAPES[0]);
+
+struct BpPiece {
+  uint8_t shape = 0, w = 0, h = 0, n = 0, color = 1;
+  uint8_t cells[9][2];  // (satır, sütun)
+  bool used = true;
+};
+static uint8_t bpBoard[BP_N][BP_N];
+static BpPiece bpPieces[3];
+static uint32_t bpScore = 0, bpBest = 0;
+static int bpCombo = 0, bpMiss = 0;
+static bool bpOver = false, bpLoaded = false;
+static int bpDrag = -1, bpGhostR = -100, bpGhostC = -100;
+static bool bpGhostOk = false;
+static uint32_t bpResetAsk = 0;
+
+static uint16_t bpColor(int i) {
+  switch (i) {
+    case 1: return RGB(66, 133, 244);
+    case 2: return RGB(52, 168, 83);
+    case 3: return RGB(240, 180, 0);
+    case 4: return RGB(234, 67, 53);
+    case 5: return RGB(255, 112, 67);
+    case 6: return RGB(156, 39, 176);
+    default: return RGB(0, 172, 193);
+  }
+}
+
+static void bpMakePiece(BpPiece& p, int idx) {
+  const char* s = BP_SHAPES[idx];
+  p.shape = idx;
+  p.n = p.w = 0;
+  int r = 0, c = 0;
+  for (; *s; s++) {
+    if (*s == '/') {
+      r++;
+      c = 0;
+      continue;
+    }
+    if (*s == '1' && p.n < 9) {
+      p.cells[p.n][0] = r;
+      p.cells[p.n][1] = c;
+      p.n++;
+    }
+    c++;
+    if (c > p.w) p.w = c;
+  }
+  p.h = r + 1;
+  p.used = false;
+}
+
+static bool bpFits(const BpPiece& p, int r0, int c0) {
+  for (int i = 0; i < p.n; i++) {
+    int r = r0 + p.cells[i][0], c = c0 + p.cells[i][1];
+    if (r < 0 || c < 0 || r >= BP_N || c >= BP_N || bpBoard[r][c]) return false;
+  }
+  return true;
+}
+
+static bool bpPlaceable(const BpPiece& p) {
+  if (p.used) return false;
+  for (int r = 0; r + p.h <= BP_N; r++)
+    for (int c = 0; c + p.w <= BP_N; c++)
+      if (bpFits(p, r, c)) return true;
+  return false;
+}
+
+static bool bpAnyMove() {
+  for (auto& p : bpPieces)
+    if (bpPlaceable(p)) return true;
+  return false;
+}
+
+static void bpNewSet() {
+  for (int tries = 0; tries < 12; tries++) {
+    for (auto& p : bpPieces) {
+      bpMakePiece(p, esp_random() % BP_SHAPE_N);
+      p.color = 1 + esp_random() % 7;
+    }
+    if (bpAnyMove()) break;
+  }
+}
+
+static void bpSave() {
+  Lock l;
+  uint8_t pc[6];
+  for (int k = 0; k < 3; k++) {
+    pc[k * 2] = bpPieces[k].used ? 255 : bpPieces[k].shape;
+    pc[k * 2 + 1] = bpPieces[k].color;
+  }
+  prefs.begin("bp", false);
+  prefs.putBytes("b", bpBoard, sizeof bpBoard);
+  prefs.putBytes("p", pc, sizeof pc);
+  prefs.putUInt("s", bpScore);
+  prefs.putUInt("best", bpBest);
+  prefs.putInt("cb", bpCombo);
+  prefs.end();
+}
+
+static void bpNewGame() {
+  memset(bpBoard, 0, sizeof bpBoard);
+  bpScore = 0;
+  bpCombo = bpMiss = 0;
+  bpOver = false;
+  bpNewSet();
+  bpSave();
+}
+
+static void bpLoad() {
+  uint8_t pc[6];
+  size_t nb, np;
+  {
+    Lock l;
+    prefs.begin("bp", true);
+    nb = prefs.getBytes("b", bpBoard, sizeof bpBoard);
+    np = prefs.getBytes("p", pc, sizeof pc);
+    bpScore = prefs.getUInt("s", 0);
+    bpBest = prefs.getUInt("best", 0);
+    bpCombo = prefs.getInt("cb", 0);
+    prefs.end();
+  }
+  if (nb != sizeof bpBoard || np != sizeof pc) {
+    bpNewGame();
+    return;
+  }
+  bool any = false;
+  for (int k = 0; k < 3; k++) {
+    if (pc[k * 2] >= BP_SHAPE_N) {
+      bpPieces[k].used = true;
+      continue;
+    }
+    bpMakePiece(bpPieces[k], pc[k * 2]);
+    bpPieces[k].color = constrain(pc[k * 2 + 1], 1, 7);
+    any = true;
+  }
+  for (auto& row : bpBoard)
+    for (auto& v : row)
+      if (v > 7) v = 0;
+  if (!any) bpNewSet();
+  bpOver = !bpAnyMove();
+}
+
+static void bpDrawCell(int r, int c, uint16_t col) {
+  int x = BP_X + c * BP_CELL, y = BP_Y + r * BP_CELL;
+  tft.fillRoundRect(x + 1, y + 1, BP_CELL - 2, BP_CELL - 2, 4, col);
+}
+
+// Tahta; sürüklenen parça varsa nereye düşeceği ve patlayacak çizgiler gösterilir.
+static void bpDrawBoard() {
+  bool ghost[BP_N][BP_N] = {};
+  bool clearRow[BP_N] = {}, clearCol[BP_N] = {};
+  uint16_t pcol = 0;
+  if (bpDrag >= 0 && bpGhostOk) {
+    const BpPiece& p = bpPieces[bpDrag];
+    pcol = bpColor(p.color);
+    for (int i = 0; i < p.n; i++) ghost[bpGhostR + p.cells[i][0]][bpGhostC + p.cells[i][1]] = true;
+    for (int r = 0; r < BP_N; r++) {
+      bool full = true;
+      for (int c = 0; c < BP_N; c++)
+        if (!bpBoard[r][c] && !ghost[r][c]) full = false;
+      clearRow[r] = full;
+    }
+    for (int c = 0; c < BP_N; c++) {
+      bool full = true;
+      for (int r = 0; r < BP_N; r++)
+        if (!bpBoard[r][c] && !ghost[r][c]) full = false;
+      clearCol[c] = full;
+    }
+  }
+  for (int r = 0; r < BP_N; r++)
+    for (int c = 0; c < BP_N; c++) {
+      uint16_t col;
+      if (ghost[r][c]) col = (clearRow[r] || clearCol[c]) ? pcol : tft.alphaBlend(120, pcol, COL_TRACK);
+      else if (bpBoard[r][c]) col = (clearRow[r] || clearCol[c]) ? pcol : bpColor(bpBoard[r][c]);
+      else col = COL_TRACK;
+      bpDrawCell(r, c, col);
+    }
+}
+
+static void bpDrawSlot(int k) {
+  int y0 = 80 + k * 40;
+  tft.fillRect(202, y0, 112, 40, COL_BG);
+  gridLines(tft, 0, 0, 202, y0, 112, 40);
+  const BpPiece& p = bpPieces[k];
+  if (p.used) return;
+  const int m = 8;
+  int x0 = 258 - p.w * m / 2, yy = y0 + 20 - p.h * m / 2;
+  uint16_t col = bpColor(p.color);
+  if (bpDrag == k) col = tft.alphaBlend(90, col, COL_BG);
+  else if (!bpPlaceable(p)) col = tft.alphaBlend(70, col, COL_BG);
+  for (int i = 0; i < p.n; i++) tft.fillRoundRect(x0 + p.cells[i][1] * m, yy + p.cells[i][0] * m, m - 1, m - 1, 2, col);
+}
+
+static void bpDrawPanel() {
+  clearBg(200, 0, 120, 78);
+  text("SKOR", 206, 8, F_SMALL, COL_MUTED, COL_BG);
+  text(String(bpScore), 206, 24, F_TITLE, COL_TEXT, COL_BG);
+  text("En iyi " + String(bpBest), 206, 56, F_SMALL, COL_MUTED, COL_BG);
+  // Yeni oyun düğmesi (iki kez dokununca)
+  card(280, 6, 32, 28, 9, bpResetAsk ? COL_RED_SOFT : COL_SURFACE, bpResetAsk ? COL_RED : COL_LINE);
+  tft.drawSmoothArc(296, 20, 7, 5, 60, 360, bpResetAsk ? COL_RED : COL_TEXT, bpResetAsk ? COL_RED_SOFT : COL_SURFACE, true);
+  tft.fillTriangle(296, 9, 302, 13, 296, 17, bpResetAsk ? COL_RED : COL_TEXT);
+  if (bpCombo > 1) text("Kombo x" + String(bpCombo), 312, 56, F_SMALL, COL_RED, COL_BG, TR_DATUM);
+}
+
+static void bpDrawOver() {
+  card(22, 58, 160, 92, 14, COL_INK, COL_INK);
+  text("Oyun bitti", 102, 74, F_TEXT, COL_ON_INK, COL_INK, TC_DATUM);
+  text("Skor " + String(bpScore), 102, 98, F_SMALL, COL_INK_MUTED, COL_INK, TC_DATUM);
+  button(42, 116, 120, 28, "Yeniden", BTN_INK_PRIMARY);
+}
+
+static void drawGame(bool full) {
+  if (!bpLoaded) {
+    bpLoad();
+    bpLoaded = true;
+  }
+  if (full) fullClear();
+  card(BP_X - 3, BP_Y - 3, BP_N * BP_CELL + 6, BP_N * BP_CELL + 6, 8, COL_SURFACE, COL_LINE);
+  bpDrawBoard();
+  bpDrawPanel();
+  for (int k = 0; k < 3; k++) bpDrawSlot(k);
+  if (bpOver) bpDrawOver();
+}
+
+static void bpClearLines(int& lines) {
+  bool row[BP_N], col[BP_N];
+  lines = 0;
+  for (int r = 0; r < BP_N; r++) {
+    row[r] = true;
+    for (int c = 0; c < BP_N; c++)
+      if (!bpBoard[r][c]) row[r] = false;
+    if (row[r]) lines++;
+  }
+  for (int c = 0; c < BP_N; c++) {
+    col[c] = true;
+    for (int r = 0; r < BP_N; r++)
+      if (!bpBoard[r][c]) col[c] = false;
+    if (col[c]) lines++;
+  }
+  if (!lines) return;
+  for (int r = 0; r < BP_N; r++)
+    for (int c = 0; c < BP_N; c++)
+      if (row[r] || col[c]) bpDrawCell(r, c, COL_ON_INK);
+  delay(110);
+  for (int r = 0; r < BP_N; r++)
+    for (int c = 0; c < BP_N; c++)
+      if (row[r] || col[c]) bpBoard[r][c] = 0;
+}
+
+static void gameDown(int x, int y) {
+  if (bpOver) {
+    if (x >= 42 && x < 162 && y >= 110 && y < 150) {
+      bpNewGame();
+      drawGame(false);
+    }
+    return;
+  }
+  if (x >= 278 && y < 38) {
+    if (bpResetAsk && millis() - bpResetAsk < 3000) {
+      bpResetAsk = 0;
+      bpNewGame();
+      drawGame(false);
+    } else {
+      bpResetAsk = millis();
+      bpDrawPanel();
+      toast("Yeni oyun için bir kez daha dokun");
+    }
+    return;
+  }
+  if (x >= 200 && y >= 80 && y < 200) {
+    int k = (y - 80) / 40;
+    if (k >= 0 && k < 3 && !bpPieces[k].used) {
+      bpDrag = k;
+      bpGhostR = bpGhostC = -100;
+      bpGhostOk = false;
+      bpDrawSlot(k);
+    }
+  }
+}
+
+static void gameMove(int x, int y) {
+  if (bpDrag < 0) return;
+  const BpPiece& p = bpPieces[bpDrag];
+  // Parça parmağın biraz üstünde durur ki nereye düştüğü görünsün.
+  int ax = x - p.w * BP_CELL / 2, ay = y - p.h * BP_CELL - 14;
+  int c0 = (int)lroundf((ax - BP_X) / (float)BP_CELL), r0 = (int)lroundf((ay - BP_Y) / (float)BP_CELL);
+  bool ok = bpFits(p, r0, c0);
+  if (!ok && !bpGhostOk) return;
+  if (r0 == bpGhostR && c0 == bpGhostC && ok == bpGhostOk) return;
+  bpGhostR = r0;
+  bpGhostC = c0;
+  bpGhostOk = ok;
+  bpDrawBoard();
+}
+
+static void gameUp(int x, int y) {
+  if (bpDrag < 0) return;
+  int k = bpDrag;
+  BpPiece& p = bpPieces[k];
+  bool placed = bpGhostOk;
+  if (placed) {
+    for (int i = 0; i < p.n; i++) bpBoard[bpGhostR + p.cells[i][0]][bpGhostC + p.cells[i][1]] = p.color;
+    p.used = true;
+  }
+  bpDrag = -1;
+  bpGhostOk = false;
+  bpGhostR = bpGhostC = -100;
+  if (!placed) {
+    bpDrawBoard();
+    bpDrawSlot(k);
+    return;
+  }
+  bpScore += p.n;
+  bpDrawBoard();
+  int lines = 0;
+  bpClearLines(lines);
+  if (lines) {
+    bpCombo++;
+    bpMiss = 0;
+    bpScore += 10 * lines * lines + (bpCombo > 1 ? 10 * (bpCombo - 1) * lines : 0);
+  } else if (++bpMiss >= 3) {
+    bpCombo = 0;
+  }
+  if (bpPieces[0].used && bpPieces[1].used && bpPieces[2].used) bpNewSet();
+  if (bpScore > bpBest) bpBest = bpScore;
+  bpOver = !bpAnyMove();
+  bpSave();
+  drawGame(false);
+}
+
+// Oyun ekranında dokunuşlar sürükleme olarak işlenir. Alt çubuktan başlayan dokunuş normal işlenir.
+static bool gameTouch(bool t, int x, int y) {
+  static bool active = false;
+  static uint32_t lastSeen = 0;
+  static int lx = 0, ly = 0;
+  uint32_t ms = millis();
+  if (!active) {
+    if (!t || y >= TAB_Y - 2) return false;
+    active = true;
+    lastSeen = ms;
+    lx = x;
+    ly = y;
+    if (!wakeOnly()) gameDown(x, y);
+    return true;
+  }
+  if (t) {
+    lastSeen = ms;
+    int nx = (lx + x) / 2, ny = (ly + y) / 2;  // dokunmatik titremesini yumuşat
+    if (abs(nx - lx) + abs(ny - ly) >= 2) {
+      lx = nx;
+      ly = ny;
+      gameMove(lx, ly);
+    }
+    return true;
+  }
+  if (ms - lastSeen > 40) {
+    active = false;
+    gameUp(lx, ly);
+  }
+  return true;
+}
+
 static void drawScreen(bool full) {
   switch (screen) {
     case SCR_HOME: drawHome(full); break;
     case SCR_PLAN: drawPlan(full); break;
     case SCR_TIMER: drawTimer(full); break;
+    case SCR_MUSIC: drawMusic(full); break;
+    case SCR_GAME: drawGame(full); break;
     case SCR_SETTINGS: drawSettings(full); break;
   }
   if (menuOpen && screen == SCR_PLAN) drawMenu();
+  if (notifListOpen && screen == SCR_HOME) drawNotifList();
 }
 
 static void go(Screen s) {
+  if (screen == SCR_GAME && bpDrag >= 0) bpDrag = -1;
   screen = s;
   toastUntil = 0;
   menuOpen = false;
+  notifListOpen = false;
+  if (s == SCR_SETTINGS) setPage = 0;
   drawScreen(true);
 }
 
@@ -1981,6 +2689,7 @@ static void publishTimer() {
   timerRevSeen = t.rev;
   outTimer = t;
   outTimerPending = true;
+  bleTimerPending = true;
   remoteTimerDirty = false;
 }
 
@@ -2153,6 +2862,411 @@ static void menuTap(int x, int y) {
 }
 
 // ============================================================================
+// Bluetooth (telefonla internetsiz bağlantı, bildirim ve müzik) — docs/bluetooth.md
+// ============================================================================
+// Kart çevre birimidir; telefon bağlanır ve "H" mesajıyla eşleşme anahtarını yollar. Kart ilk
+// eşleşen telefonun anahtarını saklar; başka telefon yalnızca Ayarlar → Bluetooth eşleşme
+// kipindeyken eşleşebilir. Mesajlar 0xA5, tür, uzunluk (2 bayt) ve veriden oluşan çerçevelerdir.
+static NimBLEServer* bleServer = nullptr;
+static NimBLECharacteristic* bleTxChar = nullptr;
+static volatile uint16_t bleMtu = 23;
+static volatile uint16_t bleConn = 0;
+static std::vector<uint8_t> bleRx;
+static uint32_t bleDropAt = 0, bleInflightAt = 0, bleStatusAt = 0;
+
+class BleServerCb : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* s, ble_gap_conn_desc* d) override {
+    bleConn = d->conn_handle;
+    bleMtu = 23;
+    {
+      Lock l;
+      bleRx.clear();
+    }
+    bleConnected = true;
+  }
+  void onDisconnect(NimBLEServer* s) override {
+    bleConnected = false;
+    bleLinked = false;
+  }
+  void onMTUChange(uint16_t mtu, ble_gap_conn_desc* d) override { bleMtu = mtu; }
+};
+
+class BleRxCb : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* c) override {
+    NimBLEAttValue v = c->getValue();
+    Lock l;
+    if (bleRx.size() + v.length() <= 20000) bleRx.insert(bleRx.end(), v.data(), v.data() + v.length());
+  }
+};
+
+static String bleTokenLoad() {
+  Lock l;
+  prefs.begin("cs", true);
+  String t = prefs.getString("btok", "");
+  prefs.end();
+  return t;
+}
+
+static void bleTokenSave(const String& t) {
+  Lock l;
+  prefs.begin("cs", false);
+  if (t.length()) prefs.putString("btok", t);
+  else prefs.remove("btok");
+  prefs.end();
+  bleHasToken = t.length() > 0;
+}
+
+static void bleBegin() {
+  bleHasToken = bleTokenLoad().length() > 0;
+  NimBLEDevice::init(BLE_NAME);
+  NimBLEDevice::setMTU(247);
+  bleServer = NimBLEDevice::createServer();
+  bleServer->setCallbacks(new BleServerCb());
+  NimBLEService* svc = bleServer->createService(BLE_SVC);
+  NimBLECharacteristic* rx = svc->createCharacteristic(BLE_RX, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
+  rx->setCallbacks(new BleRxCb());
+  bleTxChar = svc->createCharacteristic(BLE_TX, NIMBLE_PROPERTY::NOTIFY);
+  svc->start();
+  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+  adv->addServiceUUID(BLE_SVC);
+  adv->setScanResponse(true);
+  adv->start();
+}
+
+static void bleSend(char type, const uint8_t* data, size_t n) {
+  if (!bleConnected || !bleTxChar || n > 16000) return;
+  size_t total = n + 4;
+  std::unique_ptr<uint8_t[]> f(new uint8_t[total]);
+  f[0] = 0xA5;
+  f[1] = (uint8_t)type;
+  f[2] = n & 0xFF;
+  f[3] = (n >> 8) & 0xFF;
+  memcpy(f.get() + 4, data, n);
+  size_t chunk = std::max<int>(20, (int)bleMtu - 3);
+  for (size_t i = 0; i < total; i += chunk) {
+    size_t m = std::min(chunk, total - i);
+    bleTxChar->setValue(f.get() + i, m);
+    bleTxChar->notify();
+    if (total > chunk) delay(4);
+  }
+}
+
+static void bleSendJson(char type, JsonDocument& d) {
+  String s;
+  serializeJson(d, s);
+  bleSend(type, (const uint8_t*)s.c_str(), s.length());
+}
+
+static void bleSendStatus() {
+  JsonDocument d;
+  d["fw"] = "fw-" + String(FW_BUILD);
+  d["variant"] = FW_VARIANT;
+  d["heap"] = ESP.getFreeHeap();
+  d["sd"] = sdOk;
+  d["queue"] = queueCount();
+  d["wifi"] = WiFi.status() == WL_CONNECTED;
+  bleSendJson('S', d);
+  bleStatusAt = millis();
+}
+
+static void bleSendTimer() {
+  SharedTimer t;
+  {
+    Lock l;
+    t = outTimer;
+    bleTimerPending = false;
+  }
+  if (!t.rev) return;
+  JsonDocument d;
+  d["on"] = t.on;
+  if (t.on) {
+    d["itemId"] = t.itemId;
+    d["date"] = t.date;
+    d["ders"] = t.ders;
+    d["konu"] = t.konu;
+    d["dk"] = t.dk;
+    d["startedAt"] = t.startedAt;
+    d["acc"] = t.acc;
+  }
+  d["by"] = "device";
+  d["rev"] = t.rev;
+  bleSendJson('T', d);
+}
+
+// Kuyruktaki olaylar 10'arlı paketlerle telefona gider; telefon "a" ile onaylayınca silinir.
+static void bleFlushEvents() {
+  static uint32_t lastTry = 0;
+  if (bleInflight) {
+    if (millis() - bleInflightAt < 8000) return;
+    bleInflight = 0;  // onay gelmedi; yeniden gönderilir (anahtarlar aynı, çift kayıt olmaz)
+  }
+  if (millis() - lastTry < 500) return;
+  lastTry = millis();
+  {
+    Lock l;
+    if (fbFlushing) return;
+    bleInflight = -1;  // bulutun aynı anda göndermesini engelle
+  }
+  std::vector<String> batch = queuePeek(10);
+  if (batch.empty()) {
+    bleInflight = 0;
+    return;
+  }
+  String body = "{";
+  int valid = 0;
+  for (auto& line : batch) {
+    JsonDocument t;
+    if (deserializeJson(t, line) || !t.is<JsonObject>()) continue;
+    if (valid++) body += ',';
+    body += '"';
+    body += eventKey(line);
+    body += "\":";
+    body += line;
+  }
+  body += '}';
+  if (!valid) {
+    queueDrop(batch.size());
+    bleInflight = 0;
+    return;
+  }
+  bleInflight = batch.size();
+  bleInflightAt = millis();
+  bleSend('E', (const uint8_t*)body.c_str(), body.length());
+}
+
+static void bleOnLinked() {
+  bleLinked = true;
+  bleInflight = 0;
+  bleSendStatus();
+  dataDirty = true;
+}
+
+static void bleOnUnlinked() {
+  bleLinked = false;
+  bleInflight = 0;
+  media.on = false;
+  if (accentOn) {
+    accentOn = false;
+    applyPalette();
+  }
+  dataDirty = true;
+}
+
+static void showNotif(const Notif& n) {
+  banner = n;
+  if (screen == SCR_GAME || menuOpen || notifListOpen || otaProgress >= 0) return;
+  drawBanner();
+  toastUntil = millis() + BANNER_MS;
+}
+
+static void bleImage(char type, const std::vector<uint8_t>& p) {
+  if (p.size() < 8) return;
+  uint32_t id = p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24);
+  int w = p[4] | (p[5] << 8), h = p[6] | (p[7] << 8);
+  if (p.size() != 8 + (size_t)w * h * 2) return;
+  if (type == 'I' && w == ICON_PX && h == ICON_PX) {
+    IconImg* ic = findIcon(id);
+    if (!ic) {
+      if (icons.size() >= 12) {  // en uzun süredir kullanılmayan çıkar
+        auto old = std::min_element(icons.begin(), icons.end(), [](IconImg* a, IconImg* b) { return a->used < b->used; });
+        delete *old;
+        icons.erase(old);
+      }
+      ic = new (std::nothrow) IconImg();
+      if (!ic) return;
+      icons.push_back(ic);
+    }
+    ic->id = id;
+    ic->used = millis();
+    memcpy(ic->px, p.data() + 8, ICON_PX * ICON_PX * 2);
+  } else if (type == 'A' && w == ART_PX && h == ART_PX) {
+    if (!artPx) artPx = (uint16_t*)malloc(ART_PX * ART_PX * 2);
+    if (!artPx) return;
+    memcpy(artPx, p.data() + 8, ART_PX * ART_PX * 2);
+    artId = id;
+    if (screen == SCR_MUSIC && !toastUntil && media.art == artId) drawCover();
+  }
+}
+
+static void bleHandle(char type, const std::vector<uint8_t>& p) {
+  if (!bleLinked && type != 'H') return;
+  if (type == 'I' || type == 'A') {
+    bleImage(type, p);
+    return;
+  }
+  JsonDocument d;
+  if (deserializeJson(d, (const char*)p.data(), p.size())) return;
+  switch (type) {
+    case 'H': {  // merhaba + eşleşme anahtarı
+      String tok = String((const char*)(d["token"] | ""));
+      String saved = bleTokenLoad();
+      bool pairing = blePairUntil && (int32_t)(blePairUntil - millis()) > 0;
+      bool ok = false, paired = false;
+      if (tok.length() >= 16) {
+        if (saved.length() && tok == saved) {
+          ok = true;
+        } else if (!saved.length() || pairing) {
+          bleTokenSave(tok);
+          ok = paired = true;
+          blePairUntil = 0;
+        }
+      }
+      JsonDocument r;
+      r["ok"] = ok;
+      r["paired"] = paired;
+      r["fw"] = "fw-" + String(FW_BUILD);
+      r["variant"] = FW_VARIANT;
+      bleSendJson('h', r);
+      if (!ok) {
+        bleDropAt = millis() + 600;
+        break;
+      }
+      long long t = d["t"].as<long long>();
+      if (t > 1700000000000LL && (!timeOk() || llabs(nowMs() - t) > 2000)) {
+        struct timeval tv = {(time_t)(t / 1000), (suseconds_t)((t % 1000) * 1000)};
+        settimeofday(&tv, nullptr);
+      }
+      bleOnLinked();
+      toast(paired ? "Telefonla eşleşti" : "Telefon bağlandı");
+      break;
+    }
+    case 'C': {  // saat
+      long long t = d["t"].as<long long>();
+      if (t > 1700000000000LL && (!timeOk() || llabs(nowMs() - t) > 2000)) {
+        struct timeval tv = {(time_t)(t / 1000), (suseconds_t)((t % 1000) * 1000)};
+        settimeofday(&tv, nullptr);
+        dataDirty = true;
+      }
+      break;
+    }
+    case 'V':
+      applyView(d.as<JsonVariantConst>());
+      break;
+    case 'T':
+      takeRemoteTimer(d.as<JsonVariantConst>());
+      break;
+    case 'a':  // olaylar telefona ulaştı
+      if (bleInflight > 0) queueDrop(bleInflight);
+      bleInflight = 0;
+      break;
+    case 'N': {
+      Notif n;
+      n.id = String((const char*)(d["id"] | ""));
+      n.app = String((const char*)(d["app"] | ""));
+      n.title = String((const char*)(d["title"] | ""));
+      n.text = String((const char*)(d["text"] | ""));
+      n.icon = d["ic"].as<uint32_t>();
+      notifs.erase(std::remove_if(notifs.begin(), notifs.end(), [&](const Notif& x) { return x.id == n.id; }), notifs.end());
+      notifs.insert(notifs.begin(), n);
+      if (notifs.size() > 8) notifs.pop_back();
+      showNotif(n);
+      if (screen == SCR_HOME && !toastUntil && !notifListOpen) drawDate();
+      break;
+    }
+    case 'X': {
+      String id = String((const char*)(d["id"] | ""));
+      size_t before = notifs.size();
+      notifs.erase(std::remove_if(notifs.begin(), notifs.end(), [&](const Notif& x) { return x.id == id; }), notifs.end());
+      if (notifs.size() != before && screen == SCR_HOME && !toastUntil) {
+        if (notifListOpen) drawNotifList();
+        else drawDate();
+      }
+      break;
+    }
+    case 'M': {
+      media.on = d["on"] | false;
+      media.enabled = d["enabled"] | true;
+      media.app = String((const char*)(d["app"] | ""));
+      media.title = String((const char*)(d["title"] | ""));
+      media.artist = String((const char*)(d["artist"] | ""));
+      media.playing = d["playing"] | false;
+      media.pos = d["pos"].as<uint32_t>();
+      media.dur = d["dur"].as<uint32_t>();
+      media.at = millis();
+      media.vol = d["vol"] | 0;
+      media.volMax = d["volMax"] | 15;
+      media.art = d["art"].as<uint32_t>();
+      bool hasAcc = media.on && d["accent"].is<JsonArrayConst>() && d["dark"].is<JsonArrayConst>();
+      bool accChanged = hasAcc != accentOn;
+      if (hasAcc) {
+        uint8_t a[3], k[3];
+        for (int i = 0; i < 3; i++) {
+          a[i] = d["accent"][i] | 0;
+          k[i] = d["dark"][i] | 0;
+        }
+        if (memcmp(a, accRgb, 3) || memcmp(k, darkRgb, 3)) accChanged = true;
+        memcpy(accRgb, a, 3);
+        memcpy(darkRgb, k, 3);
+      }
+      accentOn = hasAcc;
+      if (accChanged && cfg.coverTheme) {
+        applyPalette();
+        if (!toastUntil) drawScreen(true);
+      } else if (screen == SCR_MUSIC && !toastUntil) {
+        drawMusic(false);
+      }
+      break;
+    }
+    case 'U':  // telefon eşleşmeyi kaldırdı
+      bleTokenSave("");
+      bleOnUnlinked();
+      bleDropAt = millis() + 300;
+      toast("Telefonla eşleşme kaldırıldı");
+      break;
+    default:
+      break;
+  }
+}
+
+// Ana döngüden çağrılır: gelen çerçeveleri işler, bekleyenleri gönderir.
+static void bleProcess() {
+  static bool wasLinked = false;
+  if (wasLinked && !bleLinked) bleOnUnlinked();
+  wasLinked = bleLinked;
+  if (bleDropAt && (int32_t)(millis() - bleDropAt) >= 0) {
+    bleDropAt = 0;
+    if (bleServer && bleConnected) bleServer->disconnect(bleConn);
+  }
+  for (int k = 0; k < 6; k++) {
+    char type = 0;
+    std::vector<uint8_t> payload;
+    {
+      Lock l;
+      size_t i = 0;
+      while (i < bleRx.size() && bleRx[i] != 0xA5) i++;
+      if (i) bleRx.erase(bleRx.begin(), bleRx.begin() + i);
+      if (bleRx.size() < 4) break;
+      size_t len = bleRx[2] | (bleRx[3] << 8);
+      if (len > 16000) {
+        bleRx.erase(bleRx.begin());
+        continue;
+      }
+      if (bleRx.size() < 4 + len) break;
+      type = (char)bleRx[1];
+      payload.assign(bleRx.begin() + 4, bleRx.begin() + 4 + len);
+      bleRx.erase(bleRx.begin(), bleRx.begin() + 4 + len);
+      if (bleRx.capacity() > 4096 && bleRx.size() < 256) bleRx.shrink_to_fit();
+    }
+    bleHandle(type, payload);
+  }
+  if (bleLinked) {
+    bleFlushEvents();
+    if (bleTimerPending) bleSendTimer();
+    if (millis() - bleStatusAt > 60000) bleSendStatus();
+  }
+  if (blePairUntil && (int32_t)(millis() - blePairUntil) > 0) {
+    blePairUntil = 0;
+    if (screen == SCR_SETTINGS && !toastUntil) drawSettings(false);
+  }
+}
+
+static void bleMediaKey(const char* cmd) {
+  JsonDocument d;
+  d["cmd"] = cmd;
+  bleSendJson('K', d);
+}
+
+// ============================================================================
 // Dokunmatik ve buton
 // ============================================================================
 // XPT2046 yazılımsal SPI ile okunur (VSPI SD kartın). Okuma sırası ve ortalama
@@ -2322,15 +3436,47 @@ static void onTap(int x, int y) {
     return;
   }
   if (y >= TAB_Y - 2) {
-    if (x < 86) go(SCR_HOME);
-    else if (x < 172) go(SCR_PLAN);
-    else if (x < 272) go(SCR_TIMER);
-    else go(SCR_SETTINGS);
+    go((Screen)constrain(x * TAB_N / SCREEN_W, 0, TAB_N - 1));
     return;
   }
   switch (screen) {
     case SCR_HOME:
-      if (y >= 100) go(swRunning || swElapsedMs() > 0 ? SCR_TIMER : SCR_PLAN);
+      if (notifListOpen) {
+        if (x >= 210 && y < 44) notifs.clear();  // Temizle
+        notifListOpen = false;
+        drawScreen(true);
+      } else if (y < 32 && x < 234 && !notifs.empty()) {
+        notifListOpen = true;
+        drawNotifList();
+      } else if (y >= 100) {
+        go(swRunning || swElapsedMs() > 0 ? SCR_TIMER : SCR_PLAN);
+      }
+      break;
+    case SCR_MUSIC:
+      if (!bleLinked || !media.on) break;
+      if (y >= MU_CTRL_Y - 4 && y < MU_CTRL_Y + MU_CTRL_H + 4) {
+        if (x >= 48 && x < 116) {
+          bleMediaKey("prev");
+        } else if (x >= 116 && x < 204) {
+          bleMediaKey("toggle");
+          media.pos = mediaPos();
+          media.at = millis();
+          media.playing = !media.playing;
+          drawMusic(false);
+        } else if (x >= 204 && x < 272) {
+          bleMediaKey("next");
+        }
+      } else if (y >= MU_VOL_Y - 4 && y < MU_VOL_Y + MU_VOL_H + 4) {
+        if (x < 60) {
+          bleMediaKey("voldown");
+          if (media.vol > 0) media.vol--;
+          drawMusicVolume();
+        } else if (x >= 260) {
+          bleMediaKey("volup");
+          if (media.vol < media.volMax) media.vol++;
+          drawMusicVolume();
+        }
+      }
       break;
     case SCR_PLAN: {
       int n = shownItems.size();
@@ -2386,22 +3532,52 @@ static void onTap(int x, int y) {
     case SCR_SETTINGS:
       if (y >= SET_Y && y < SET_Y + SET_RH * SET_N) {
         int row = (y - SET_Y) / SET_RH;
-        if (row == 0) portalRequested = true;
-        else if (row == 1) calibRequested = true;
-        else if (row == 2) {
-          cfg.theme = (cfg.theme + 1) % 3;
-          saveConfig();
-          applyPalette();
-          drawSettings(true);
-        } else if (row == 3) {
-          cfg.invert = !cfg.invert;
-          tft.invertDisplay(cfg.invert);
-          saveConfig();
-          drawSettings(false);
-        } else if (row == 4) {
-          setOtaMsg("Güncelleme denetleniyor…");
-          wantOta = true;
-          drawSettings(false);
+        if (setPage == 0) {
+          if (row == 0) {
+            portalRequested = true;
+          } else if (row == 1) {
+            if (bleLinked) {
+              toast("Telefon bağlı");
+            } else {
+              blePairUntil = millis() + BLE_PAIR_MS;
+              drawSettings(false);
+              toast("Uygulamada Masa saatini bul'a dokun");
+            }
+          } else if (row == 2) {
+            cfg.theme = (cfg.theme + 1) % 3;
+            saveConfig();
+            applyPalette();
+            drawSettings(true);
+          } else if (row == 3) {
+            cfg.coverTheme = !cfg.coverTheme;
+            saveConfig();
+            applyPalette();
+            drawSettings(true);
+          } else {
+            setPage = 1;
+            drawSettings(false);
+          }
+        } else {
+          if (row == 0) {
+            calibRequested = true;
+          } else if (row == 1) {
+            cfg.invert = !cfg.invert;
+            tft.invertDisplay(cfg.invert);
+            saveConfig();
+            drawSettings(false);
+          } else if (row == 2) {
+            setOtaMsg("Güncelleme denetleniyor…");
+            wantOta = true;
+            drawSettings(false);
+          } else if (row == 3) {
+            bleTokenSave("");
+            if (bleConnected) bleDropAt = millis() + 200;
+            toast("Bluetooth eşleşmesi silindi");
+            drawSettings(false);
+          } else {
+            setPage = 0;
+            drawSettings(false);
+          }
         }
       }
       break;
@@ -2426,9 +3602,10 @@ static void handleTouch() {
   static bool down = false, swallow = false, longFired = false, longUsed = false;
   static int dx = 0, dy = 0;
   static uint32_t downAt = 0, lastSeen = 0, lastUp = 0;
-  int x, y;
+  int x = 0, y = 0;
   bool t = getTouch(x, y);
   uint32_t ms = millis();
+  if (!down && screen == SCR_GAME && gameTouch(t, x, y)) return;
   if (t) lastSeen = ms;
   if (t && !down) {
     down = true;
@@ -2471,7 +3648,7 @@ static void handleBoot() {
     down = false;
     if (stage == 0 && millis() - downAt > 40) {
       if (wakeOnly()) return;
-      go(screen >= SCR_TIMER ? SCR_HOME : (Screen)((int)screen + 1));
+      go(screen >= SCR_GAME ? SCR_HOME : (Screen)((int)screen + 1));
     }
   }
 }
@@ -2624,6 +3801,10 @@ static void splash(const String& msg) {
   text("fw-" + String(FW_BUILD), 160, 220, F_SMALL, COL_FAINT, COL_BG, MC_DATUM);
 }
 
+// Güncellemeden sonra yeni yazılım hemen "sağlam" sayılmaz: 45 sn sorunsuz çalışınca işaretlenir.
+// Daha önce çökerse ESP32 açılışta bir önceki sürüme döner (kart USB'siz kurtulur).
+extern "C" bool verifyRollbackLater() { return true; }
+
 void setup() {
   Serial.begin(115200);
   mtx = xSemaphoreCreateRecursiveMutex();
@@ -2690,9 +3871,11 @@ void setup() {
 
   splash("Wi-Fi'ye bağlanıyor…");
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  runPortal(!hasCreds());
+  // Bluetooth açıkken Wi-Fi güç tasarrufu kipinde kalmalı (ikisi aynı anteni paylaşıyor).
+  if (!hasCreds()) runPortal(true);
+  else WiFi.begin();  // kayıtlı ağa arka planda bağlanır; yoksa Bluetooth ile çalışır (kurulum: BOOT 6 sn)
   configTzTime("<+03>-3", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
+  bleBegin();
 
   xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, nullptr, 0);
   drawScreen(true);
@@ -2711,8 +3894,15 @@ void loop() {
     return;
   }
 
+  static bool markedValid = false;
+  if (!markedValid && millis() > 45000) {
+    markedValid = true;
+    esp_ota_mark_app_valid_cancel_rollback();
+  }
+
   handleBoot();
   handleTouch();
+  bleProcess();
 
   if (portalRequested) {
     portalRequested = false;
@@ -2738,14 +3928,20 @@ void loop() {
   }
   if (dataDirty && !toastUntil) {
     dataDirty = false;
-    drawScreen(false);
+    if (screen != SCR_GAME) drawScreen(false);  // oyun ekranında plan verisi yok, titremesin
   }
 
   static uint32_t lastPhase = 0;
   if (millis() - lastPhase >= 6000) {
     lastPhase = millis();
     datePhase = !datePhase;
-    if (screen == SCR_HOME && !toastUntil) drawDate();
+    if (screen == SCR_HOME && !toastUntil && !notifListOpen) drawDate();
+  }
+
+  static uint32_t lastMusicTick = 0;
+  if (screen == SCR_MUSIC && media.on && media.playing && bleLinked && !toastUntil && millis() - lastMusicTick >= 1000) {
+    lastMusicTick = millis();
+    drawMusicProgress();
   }
 
   if (millis() - lastTick >= 200) {
@@ -2775,7 +3971,7 @@ void loop() {
           if (it.durum != "tamam" && s - minute >= 0 && s - minute <= 2) upcomingSoon = true;
         }
       }
-      if (screen == SCR_HOME && !toastUntil) {
+      if (screen == SCR_HOME && !toastUntil && !notifListOpen) {
         drawClock();
         drawNowCard();
       }
@@ -2784,7 +3980,7 @@ void loop() {
     if (sec != lastSec) {
       lastSec = sec;
       if (screen == SCR_TIMER && !toastUntil) drawTimerDigits();
-      if (screen == SCR_HOME && swRunning && !toastUntil) drawNowTimerTick();
+      if (screen == SCR_HOME && swRunning && !toastUntil && !notifListOpen) drawNowTimerTick();
       if (swRunning && cfg.pomodoro) {
         if (sec >= (uint32_t)(pomoCount + 1) * POMODORO_WORK_SEC) {
           pomoCount++;

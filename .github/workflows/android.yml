@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, "dev/**"]
     paths:
       - "app/**"
       - ".github/workflows/android.yml"
@@ -77,6 +77,7 @@ jobs:
         run: cp android/app/build/outputs/apk/debug/app-debug.apk "../calisma-asistani-v${GITHUB_RUN_NUMBER}.apk"
 
       - name: Release oluştur
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
