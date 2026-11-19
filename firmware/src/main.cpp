@@ -1041,51 +1041,43 @@ static void setOtaMsg(const String& m) {
   dataDirty = true;
 }
 
-static void checkOta(bool manual) {
-  WiFiClientSecure client;
-  client.setInsecure();
-  HTTPClient http;
-  http.useHTTP10(true);
-  http.setTimeout(15000);
-  if (!http.begin(client, "https://api.github.com/repos/" GITHUB_REPO "/releases?per_page=30")) return;
-  http.setUserAgent("calisma-saati");
-  http.addHeader("Accept", "application/vnd.github+json");
-  int code = http.GET();
-  if (code != 200) {
-    http.end();
-    if (manual) setOtaMsg("Güncelleme bilgisi alınamadı (" + String(code) + ")");
-    return;
-  }
-  JsonDocument filter;
-  filter[0]["tag_name"] = true;
-  filter[0]["assets"][0]["name"] = true;
-  filter[0]["assets"][0]["browser_download_url"] = true;
-  JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, http.getStream(), DeserializationOption::Filter(filter));
-  http.end();
-  if (err) {
-    if (manual) setOtaMsg("Güncelleme bilgisi okunamadı");
-    return;
-  }
-  String want = String("firmware-") + FW_VARIANT + ".bin";
+// Sürüm listesinin tamamı (her sürümle büyüyor, 70 KB'ı geçti) yerine yalnızca fw-v etiketleri
+// sorulur (birkaç KB); dosya sürümün sabit adresinden indirilir. false: denetlenemedi.
+static bool checkOta(bool manual) {
   int best = 0;
-  String url;
-  for (JsonObject rel : doc.as<JsonArray>()) {
-    String tag = String((const char*)(rel["tag_name"] | ""));
-    if (!tag.startsWith("fw-v")) continue;
-    int n = tag.substring(4).toInt();
-    if (n <= best) continue;
-    for (JsonObject a : rel["assets"].as<JsonArray>()) {
-      if (want == String((const char*)(a["name"] | ""))) {
-        best = n;
-        url = String((const char*)(a["browser_download_url"] | ""));
-      }
+  {
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+    http.useHTTP10(true);
+    http.setTimeout(15000);
+    if (!http.begin(client, "https://api.github.com/repos/" GITHUB_REPO "/git/matching-refs/tags/fw-v")) return false;
+    http.setUserAgent("calisma-saati");
+    http.addHeader("Accept", "application/vnd.github+json");
+    int code = http.GET();
+    if (code != 200) {
+      http.end();
+      if (manual) setOtaMsg("Güncelleme bilgisi alınamadı (" + String(code) + ")");
+      return false;
+    }
+    String body = http.getString();
+    http.end();
+    if (body.indexOf("refs/tags/") < 0 && body.indexOf("[]") < 0) {
+      if (manual) setOtaMsg("Güncelleme bilgisi okunamadı");
+      return false;
+    }
+    const char* p = body.c_str();
+    while ((p = strstr(p, "refs/tags/fw-v")) != nullptr) {
+      p += 14;
+      int n = atoi(p);
+      if (n > best) best = n;
     }
   }
-  if (best <= FW_BUILD || !url.length()) {
+  if (best <= FW_BUILD) {
     if (manual) setOtaMsg("En güncel sürüm yüklü (fw-" + String(FW_BUILD) + ")");
-    return;
+    return true;
   }
+  String url = "https://github.com/" GITHUB_REPO "/releases/download/fw-v" + String(best) + "/firmware-" FW_VARIANT ".bin";
   esp_ota_mark_app_valid_cancel_rollback();  // doğrulanmamış yazılım yeni güncelleme kuramaz
   otaProgress = 0;
   dataDirty = true;
@@ -1104,6 +1096,7 @@ static void checkOta(bool manual) {
   }
   otaProgress = -1;
   setOtaMsg("Güncelleme başarısız: " + httpUpdate.getLastErrorString());
+  return false;
 }
 
 static void netTask(void*) {
@@ -1186,7 +1179,8 @@ static void netTask(void*) {
       otaOnce = true;
       lastOta = now;
       liveClose();  // indirme için bellek boşalsın; akış sonra yeniden açılır
-      checkOta(manual);
+      // Denetlenemezse 12 saat beklenmez, 15 dakika sonra yeniden denenir.
+      if (!checkOta(manual)) lastOta = now - OTA_EVERY_MS + 15UL * 60UL * 1000UL;
     }
   }
 }
