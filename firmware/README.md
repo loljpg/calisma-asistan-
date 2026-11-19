@@ -18,6 +18,14 @@ powerbank yeterli.
 
 Alt çubuktaki simgeler soldan sağa: Ana, Program, Kronometre, Müzik, Oyun, Ayarlar.
 
+**Kedi:** ana ekranda saatin altında topuyla oynayan küçük bir kedi var. Kendi kendine dolaşır,
+oturur, topu kovalar; gece 22:00–07:00 uyur. Üstüne dokununca sevinir. Kareleri
+`tools/make_cat.py` ile üretilir. **Seri:** tarihin yanında alevle gösterilir.
+
+**Kart kendiliğinden yeniden başlarsa:** Ayarlar → *Diğer ayarlar* sayfasının altında son açılışın
+sebebi (çökme, voltaj düştü, güç verildi…), önceki çalışma süresi ve en düşük boş bellek yazar.
+Kronometre kaldığı yerden sürer, gönderilmiş tikler ekranda kalır.
+
 **Bildirimler:** telefona gelen bildirim birkaç saniye ekranın üstünde görünür, sonra ana ekranda
 tarihin yanında küçük uygulama simgesi olarak kalır. Simgelere dokununca liste açılır (*Temizle*).
 

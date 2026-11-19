@@ -2256,7 +2256,6 @@ static void drawDate() {
   String extra;
   if (exam == 0) extra = "SINAV BUGÜN";
   else if (exam > 0) extra = "YKS'YE " + String(exam) + " GÜN";
-  if (streak > 0) extra += (extra.length() ? " · " : "") + String(streak) + " GÜN SERİ";
   struct tm t;
   String s;
   if (datePhase && extra.length()) s = extra;
@@ -2264,10 +2263,10 @@ static void drawDate() {
   bool alt = datePhase && extra.length();
   int iw = notifIconsW();
   int room = 216 - iw - (iw ? 6 : 0);
-  if (streak > 0) {
-    // Seri varsa yanında alev: tarih kısmında "🔥 6", seri kısmında yazının sonunda.
-    String num = alt ? String("") : String(streak);
-    int extraW = 16 + (num.length() ? textW(num, F_SMALL) + 2 : 0);
+  if (streak > 0 && !alt) {
+    // Seri tarihin yanında alevle gösterilir; dönüşümlü satır yalnızca sınava kalan gün.
+    String num = String(streak);
+    int extraW = 16 + textW(num, F_SMALL) + 2;
     String shown = fit(s, F_SMALL, room - extraW);
     text(shown, 14, 10, F_SMALL, alt ? COL_RED : COL_MUTED, COL_BG);
     int fx = 14 + textW(shown, F_SMALL) + 6;
@@ -2306,9 +2305,9 @@ static void drawWeatherCard() {
 static void drawNowTimerTick() {
   const int X = 8, Y = 122, W = 304;
   int wMax = textW("0:00:00", F_TITLE);
-  tft.fillRect(X + W - 14 - wMax - 2, Y + 20, wMax + 2, 34, COL_INK);
-  text(fmtClock(swElapsedMs() / 1000), X + W - 14, Y + 22, F_TITLE, COL_ON_INK, COL_INK, TR_DATUM);
-  if (swDk > 0) progressBar(X + 14, Y + 63, W - 28, 4, (int)(swElapsedMs() / 600 / swDk), COL_ON_INK, COL_INK_LINE, COL_INK);
+  tft.fillRect(X + W - 14 - wMax - 2, Y + 18, wMax + 2, 34, COL_INK);
+  text(fmtClock(swElapsedMs() / 1000), X + W - 14, Y + 20, F_TITLE, COL_ON_INK, COL_INK, TR_DATUM);
+  if (swDk > 0) progressBar(X + 14, Y + 65, W - 28, 4, (int)(swElapsedMs() / 600 / swDk), COL_ON_INK, COL_INK_LINE, COL_INK);
 }
 
 static void drawNowCard() {
@@ -2319,10 +2318,10 @@ static void drawNowCard() {
 
   if (swRunning || swElapsedMs() > 0) {
     card(X, Y, W, H, 14, COL_INK, COL_INK);
-    dotLabel(swRunning ? "KRONOMETRE" : "DURAKLATILDI", X + 14, Y + 8, swRunning ? COL_RED : COL_INK_MUTED, COL_INK_MUTED, COL_INK);
+    dotLabel(swRunning ? "KRONOMETRE" : "DURAKLATILDI", X + 14, Y + 7, swRunning ? COL_RED : COL_INK_MUTED, COL_INK_MUTED, COL_INK);
     int maxW = W - 28 - textW("0:00:00", F_TITLE) - 14;
-    text(fit(swDers.length() ? swDers : String("Serbest çalışma"), F_TEXT, maxW), X + 14, Y + 25, F_TEXT, COL_ON_INK, COL_INK);
-    text(fit(swKonu, F_SMALL, maxW), X + 14, Y + 46, F_SMALL, COL_INK_MUTED, COL_INK);
+    text(fit(swDers.length() ? swDers : String("Serbest çalışma"), F_TEXT, maxW), X + 14, Y + 23, F_TEXT, COL_ON_INK, COL_INK);
+    text(fit(swKonu, F_SMALL, maxW), X + 14, Y + 44, F_SMALL, COL_INK_MUTED, COL_INK);
     drawNowTimerTick();
     return;
   }
@@ -2378,12 +2377,12 @@ static void drawNowCard() {
       streakLine = v.streak > 0;
     }
   }
-  dotLabel(label, X + 14, Y + 8, dot, COL_MUTED, COL_SURFACE);
-  text(fmtMin(studied) + " / " + fmtMin(v.goalMin), X + W - 14, Y + 8, F_SMALL, COL_MUTED, COL_SURFACE, TR_DATUM);
-  text(fit(line1, F_TEXT, W - 28), X + 14, Y + 25, F_TEXT, COL_TEXT, COL_SURFACE);
-  text(fit(line2, F_SMALL, W - 28), X + 14, Y + 46, F_SMALL, COL_MUTED, COL_SURFACE);
-  if (streakLine) drawFlame(X + 14 + textW(line2, F_SMALL) + 5, Y + 45, COL_SURFACE);
-  progressBar(X + 14, Y + 63, W - 28, 4, v.goalMin > 0 ? studied * 100 / v.goalMin : 0, COL_TEXT, COL_TRACK, COL_SURFACE);
+  dotLabel(label, X + 14, Y + 7, dot, COL_MUTED, COL_SURFACE);
+  text(fmtMin(studied) + " / " + fmtMin(v.goalMin), X + W - 14, Y + 7, F_SMALL, COL_MUTED, COL_SURFACE, TR_DATUM);
+  text(fit(line1, F_TEXT, W - 28), X + 14, Y + 23, F_TEXT, COL_TEXT, COL_SURFACE);
+  text(fit(line2, F_SMALL, W - 28), X + 14, Y + 44, F_SMALL, COL_MUTED, COL_SURFACE);
+  if (streakLine) drawFlame(X + 14 + textW(line2, F_SMALL) + 5, Y + 43, COL_SURFACE);
+  progressBar(X + 14, Y + 65, W - 28, 4, v.goalMin > 0 ? studied * 100 / v.goalMin : 0, COL_TEXT, COL_TRACK, COL_SURFACE);
 }
 
 static void drawHome(bool full) {
