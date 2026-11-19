@@ -8,7 +8,7 @@
 
 #ifdef FW_VARIANT_ST7789
 #define FW_VARIANT "cyd_st7789"
-#define DEFAULT_INVERT true
+#define DEFAULT_INVERT false  // iki USB'li kartta doğru renkler ters çevirmeden geliyor
 #else
 #define FW_VARIANT "cyd"
 #define DEFAULT_INVERT false
@@ -34,7 +34,12 @@
 #define TOUCH_MOSI 32
 #define TOUCH_MISO 39
 #define TOUCH_CLK 25
-#define TOUCH_CS 33
+#define TOUCH_CS 33        // dokunmatik yazılımsal SPI ile okunur; VSPI SD kartın
+
+#define SD_SCK 18          // SD kart yuvası (VSPI)
+#define SD_MISO 19
+#define SD_MOSI 23
+#define SD_CS 5
 
 // ---------- Ekran ----------
 #define SCREEN_W 320
@@ -81,3 +86,6 @@ extern const Palette* th;
 #define WEATHER_EVERY_MS (15UL * 60UL * 1000UL)
 #define OTA_EVERY_MS (12UL * 60UL * 60UL * 1000UL)
 #define POMODORO_WORK_SEC (25 * 60)
+#define TIMER_POLL_MS 10000UL      // canlı bağlantı yokken ortak kronometre bu aralıkla okunur
+#define VIEW_POLL_LIVE_MS (5UL * 60UL * 1000UL)  // canlı bağlantı varken plan yine de ara sıra okunur
+#define LONG_PRESS_MS 650

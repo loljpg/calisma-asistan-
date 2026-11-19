@@ -9,12 +9,14 @@ powerbank yeterli.
 
 | Ekran | Ne gösterir |
 | --- | --- |
-| **Ana** | Saat, tarih, Sakarya hava durumu, şimdiki/sıradaki oturum, günlük hedef çubuğu |
-| **Program** | Günün planı. Sağdaki daireye dokun: tamamlandı / geri al. Satıra dokun: o dersle kronometre |
-| **Kronometre** | Başlat / Duraklat, Bitir (telefona oturum olarak gider), Sıfırla, Pomodoro (25 dk'da mola uyarısı) |
+| **Ana** | Saat, tarih (6 sn'de bir YKS'ye kalan gün ve seriyle değişir), Sakarya hava durumu, şimdiki/sıradaki oturum, günlük hedef çubuğu |
+| **Program** | Günün planı. Sağdaki kareye dokun: tamamlandı / geri al. Satıra dokun: o dersle kronometre. Satıra **basılı tut**: menü (kronometreyle başlat, ertele, işareti kaldır) |
+| **Kronometre** | Başlat / Duraklat, Bitir (telefona oturum olarak gider), Sıfırla, Pomodoro (25 dk'da mola uyarısı). Telefondaki kronometreyle ortak: birinde başlatınca diğerinde de çalışır |
 | **Ayarlar** (dişli) | Wi-Fi ve hesap, dokunmatik ayarı, tema, renkleri ters çevirme, güncelleme, bağlantı bilgisi |
 
-**BOOT tuşu:** kısa bas → sonraki ekran, 2 saniye bas → Ayarlar.
+**BOOT tuşu:** kısa bas → sonraki ekran, 2 saniye bas → Ayarlar, 6 saniye bas → kurulum portalı
+(Wi-Fi ve hesap). Açılışta "Dokunmatik ayarı için BOOT'a bas" yazarken basarsan dokunmatik
+yeniden ayarlanır.
 
 **Işık:** yeşil = kronometre çalışıyor, mavi yanıp sönme = 2 dk içinde oturum başlıyor ya da
 Pomodoro molası, kırmızı = buluta bağlanamıyor. Ekran 22:00–07:00 arası kısılır; ilk dokunuş
@@ -70,19 +72,43 @@ Kart Wi-Fi'deyken 12 saatte bir (ve açılıştan kısa süre sonra) GitHub'daki
 sürümünü denetler, varsa kendisi indirip kurar. Ayarlar → *Güncellemeyi denetle* ile hemen de
 deneyebilirsin. Tekrar OTG ile yüklemen gerekmez.
 
+**SD karttan (fw-5 ve sonrası):** Releases'taki `firmware-cyd_st7789.bin` (ya da `firmware-cyd.bin`)
+dosyasını kartın köküne kopyala, kartı tak, cihazı yeniden başlat. Dosya `update.bin` ya da
+`firmware.bin` adında da olabilir. Kart yalnızca aynı modelin **daha yeni** sürümünü yükler;
+işlediği dosyanın sonuna `.yuklendi`, `.eski` (aynı/eski sürüm) ya da `.bad` (yanlış dosya, örneğin
+`ilk-kurulum-…bin`) ekler. İlk kurulum dosyası SD'den yüklenmez; o yalnızca USB ile yazılır.
+
+## SD kart
+
+Takılı değilse her şey yine çalışır. Takılıysa (FAT32) kart `/calisma/` klasörünü kullanır:
+
+| Dosya | İçerik |
+| --- | --- |
+| `kuyruk.txt` | İnternet yokken biriken tik, erteleme ve kronometre kayıtları; Wi-Fi gelince buluta gider ve silinir |
+| `kayit-AAAA-AA.txt` | Cihazda yapılan her şeyin aylık kalıcı kaydı (silinmez) |
+| `plan.json` | Son alınan plan; açılışta internet beklemeden gösterilir |
+
+Kart yokken kuyruk cihazın kendi hafızasında en fazla 40 kayıt tutar. Ayarlar ekranının alt
+satırı SD'nin takılı olup olmadığını ve bekleyen kayıt sayısını gösterir.
+
 ## Telefonla eşleşme nasıl çalışır?
 
 Ayrıntılar: [docs/firebase.md](../docs/firebase.md).
 
-- Telefon günün planını `device/view` altına yazar; kart 30 saniyede bir okur.
-- Kart tik ve kronometre oturumlarını `device/events` altına gönderir; telefon uygulaması
-  açıldığında bunları işler ve siler. Kart kendi değişikliklerini beklemeden hemen gösterir.
-- İnternet yoksa olaylar kartta saklanır, bağlantı gelince gönderilir.
+- Kart ve telefon `device/` altını canlı dinler: değişiklik saniyesinde gelir. Bağlantı koparsa
+  kart planı 30 saniyede, kronometreyi 10 saniyede bir sorar. Ayarlar'da "(canlı)" yazısı
+  akışın açık olduğunu gösterir.
+- Telefon günün planını `device/view` altına yazar.
+- Kart tik, erteleme ve kronometre oturumlarını `device/events` altına gönderir; telefon
+  uygulaması bunları işler ve siler. Kart kendi değişikliklerini beklemeden hemen gösterir.
+- Ortak kronometre `device/timer` altındadır. Bitiren taraf oturumu kaydeder, süre iki kez sayılmaz.
+- İnternet yoksa olaylar SD'de (yoksa cihaz hafızasında) saklanır, bağlantı gelince gönderilir.
 - Kart dakikada bir `device/status` yazar; telefondaki "Masa saati bağlı" yazısı buradan gelir.
 
 ## Geliştirme notları
 
 - PlatformIO, `espressif32@6.9.0` (Arduino core 2.0.x). Ortamlar: `cyd` (ILI9341), `cyd_st7789`.
+- Dokunmatik (XPT2046) yazılımsal SPI ile okunur; donanım VSPI SD kartındır.
 - Türkçe harfler için yazı tipleri `tools/make_fonts.py` ile üretilir (`src/fonts.h`):
   arayüz Inter, başlıklar ve büyük rakamlar Lora. İkisi de SIL Open Font License 1.1.
 - Derleme ve sürüm yayınlama `.github/workflows/firmware.yml` ile GitHub'da yapılır.

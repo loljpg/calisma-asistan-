@@ -69,7 +69,7 @@ function timerCard(t) {
   const running = !!t.startedAt;
   return `
   <section class="card ink" aria-label="Kronometre">
-    <span class="eyebrow">${running ? 'Kronometre çalışıyor' : 'Kronometre duraklatıldı'}</span>
+    <span class="eyebrow">${running ? 'Kronometre çalışıyor' : 'Kronometre duraklatıldı'}${isSignedIn() && L.deviceOnline(syncState.status) ? ' · masa saatinde de' : ''}</span>
     <div class="timer-row">
       <div><b>${esc(t.ders)}</b><span class="muted small">${esc(t.konu || 'Serbest çalışma')}</span></div>
       <span class="timer-big" data-timer>${L.fmtClock(L.timerElapsedMs(t) / 1000)}</span>

@@ -3,7 +3,7 @@ import { store } from './store.js';
 import * as L from './logic.js';
 import { icon, toast, openSheet, closeSheet, sheetOpen } from './ui.js';
 import * as native from './native.js';
-import { syncNow, isSignedIn, syncState } from './sync.js';
+import { syncNow, isSignedIn, syncState, pushTimer, startLive, stopLive } from './sync.js';
 import * as today from './views/today.js';
 import * as program from './views/program.js';
 import * as exams from './views/exams.js';
@@ -194,8 +194,16 @@ function afterSync() {
   if (app.route === 'today' && online !== lastOnline && !sheetOpen()) render();
   lastOnline = online;
   if (app.route === 'settings') settings.refreshSyncInfo();
+  updateLive();
 }
 app.syncNow = (opts) => syncNow(opts).finally(afterSync);
+
+// Uygulama açıkken masa saatiyle canlı bağlantı; arka planda kapanır.
+let appActive = true;
+function updateLive() {
+  if (appActive && isSignedIn()) startLive({ onChange: afterSync, onEvents: () => scheduleSync(300) });
+  else stopLive();
+}
 
 setInterval(() => {
   if (document.visibilityState === 'visible') scheduleSync(0);
@@ -222,12 +230,16 @@ if (views[startView]) app.route = startView;
 store.subscribe(() => {
   render();
   refreshNotifications();
+  pushTimer();
   scheduleSync();
 });
 render();
 refreshNotifications();
 scheduleSync(500);
+updateLive();
 native.onAppState((active) => {
+  appActive = active;
+  updateLive();
   if (active) scheduleSync(0);
   else if (isSignedIn()) runSync({ flush: true });
 });

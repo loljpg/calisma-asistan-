@@ -1,9 +1,10 @@
 // Çalışma Saati — ESP32 Cheap Yellow Display (ESP32-2432S028R) yazılımı
 //
 // Ekranlar: Ana (saat, tarih, hava durumu, şimdiki/sıradaki oturum), Program (günün
-// listesi, tik), Kronometre (derse bağlı, Pomodoro), Ayarlar.
-// Veri: Firebase Realtime Database (docs/firebase.md). Ağ işleri ayrı bir görevde
-// (çekirdek 0) çalışır; ekran ve dokunmatik ana döngüde (çekirdek 1).
+// listesi, tik, basılı tutunca menü), Kronometre (derse bağlı, Pomodoro, telefonla ortak), Ayarlar.
+// Veri: Firebase Realtime Database (docs/firebase.md). Değişiklikler canlı akışla (SSE)
+// saniyesinde gelir. Ağ işleri ayrı bir görevde (çekirdek 0) çalışır; ekran ve dokunmatik
+// ana döngüde (çekirdek 1). SD kart takılıysa gönderilemeyen kayıtlar orada bekler.
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -15,9 +16,12 @@
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
 #include <TFT_eSPI.h>
-#include <XPT2046_Touchscreen.h>
+#include <SD.h>
+#include <Update.h>
+#include <sys/time.h>
 #include <time.h>
 #include <vector>
+#include <memory>
 #include <algorithm>
 
 #include "config.h"
@@ -52,6 +56,14 @@ struct Weather {
   int code = 0;
 };
 
+// Telefonla ortak kronometre: users/{uid}/device/timer (telefondaki logic.js sharedTimer ile aynı)
+struct SharedTimer {
+  bool on = false;
+  String itemId, date, ders, konu, by;
+  int dk = 0;
+  long long startedAt = 0, acc = 0, rev = 0;  // startedAt: duvar saati (ms), duraklatıldıysa 0
+};
+
 struct Config {
   String dbUrl, apiKey, email, password;
   bool invert = DEFAULT_INVERT;
@@ -83,8 +95,20 @@ static volatile bool wantOta = false;
 static volatile bool wantView = false;
 static volatile bool credsChanged = false;
 static volatile int otaProgress = -1;
+static volatile bool wantTimer = false;
+static volatile bool liveOn = false;  // canlı akış açık ve veri geliyor
 
+static SharedTimer outTimer, remoteTimer;
+static bool outTimerPending = false, remoteTimerDirty = false;
+static long long timerRevSeen = 0;
+
+static bool sdOk = false;
 static Preferences prefs;
+
+#define STR_(x) #x
+#define STR(x) STR_(x)
+// SD karttan güncellemede dosyanın hangi sürüm olduğunu anlamak için yazılıma gömülen işaret.
+static const char FW_MARKER[] = "CSFW:" FW_VARIANT ":" STR(FW_BUILD) ";";
 
 // ============================================================================
 // Yardımcılar
@@ -106,7 +130,12 @@ static String todayStr() {
   return String(b);
 }
 
-static long long nowMs() { return timeOk() ? (long long)time(nullptr) * 1000LL : 0; }
+static long long nowMs() {
+  if (!timeOk()) return 0;
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  return (long long)tv.tv_sec * 1000LL + tv.tv_usec / 1000;
+}
 
 static int minutesOfDay() {
   struct tm t;
@@ -181,7 +210,15 @@ static void loadConfig() {
   cfg.y2 = prefs.getInt("cy2", cfg.y2);
   cfg.pomodoro = prefs.getBool("pomo", false);
   cfg.theme = constrain(prefs.getInt("theme", 0), 0, 2);
+  // Kuyruk: fw-4 metin olarak ("outbox"), fw-5 bayt dizisi olarak ("ob2") saklar.
   String ob = prefs.getString("outbox", "");
+  size_t n = prefs.getBytesLength("ob2");
+  if (n) {
+    std::unique_ptr<char[]> buf(new char[n + 1]);
+    prefs.getBytes("ob2", buf.get(), n);
+    buf[n] = 0;
+    ob += buf.get();
+  }
   prefs.end();
   outbox.clear();
   int start = 0;
@@ -189,6 +226,7 @@ static void loadConfig() {
     int nl = ob.indexOf('\n', start);
     if (nl < 0) nl = ob.length();
     String line = ob.substring(start, nl);
+    line.trim();
     if (line.length()) outbox.push_back(line);
     start = nl + 1;
   }
@@ -213,7 +251,8 @@ static void saveConfig() {
   prefs.end();
 }
 
-static void saveOutbox() {
+// SD kart yokken kuyruk NVS'de durur (en fazla 40 kayıt).
+static void saveOutboxNvs() {
   Lock l;
   String s;
   for (auto& e : outbox) {
@@ -221,7 +260,9 @@ static void saveOutbox() {
     s += '\n';
   }
   prefs.begin("cs", false);
-  prefs.putString("outbox", s);
+  if (s.length()) prefs.putBytes("ob2", s.c_str(), s.length());
+  else prefs.remove("ob2");
+  prefs.remove("outbox");
   prefs.end();
 }
 
@@ -237,6 +278,196 @@ static void setNet(const String& msg, bool ok) {
     cloudOk = ok;
     dataDirty = true;
   }
+}
+
+// ============================================================================
+// SD kart: gönderilecek kayıtlar, çalışma defteri, plan önbelleği
+// ============================================================================
+// /calisma/kuyruk.txt      buluta henüz gitmemiş olaylar (satır başına bir JSON)
+// /calisma/kayit-AAAA-AA.txt  cihazda yapılan her şeyin kalıcı kaydı
+// /calisma/plan.json       son alınan plan; açılışta internet beklemeden gösterilir
+#define SD_DIR "/calisma"
+#define SD_QUEUE SD_DIR "/kuyruk.txt"
+#define SD_QUEUE_TMP SD_DIR "/kuyruk.tmp"
+#define SD_PLAN SD_DIR "/plan.json"
+static const int QUEUE_MAX_SD = 3000, QUEUE_MAX_NVS = 40;
+static int sdQueueCount = 0;
+static SPIClass sdSPI(VSPI);
+
+static bool sdBegin() {
+  sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  bool ok = SD.begin(SD_CS, sdSPI, 10000000, "/sd", 4);
+  if (!ok) {
+    SD.end();
+    ok = SD.begin(SD_CS, sdSPI, 4000000, "/sd", 4);
+  }
+  if (!ok || SD.cardType() == CARD_NONE) {
+    SD.end();
+    return false;
+  }
+  if (!SD.exists(SD_DIR)) SD.mkdir(SD_DIR);
+  return true;
+}
+
+static int sdCountLines(const char* path) {
+  File f = SD.open(path, FILE_READ);
+  if (!f) return 0;
+  int n = 0;
+  uint8_t buf[256];
+  size_t r;
+  while ((r = f.read(buf, sizeof buf)) > 0)
+    for (size_t i = 0; i < r; i++)
+      if (buf[i] == '\n') n++;
+  f.close();
+  return n;
+}
+
+// Baştaki n satırı siler.
+static void sdDropLines(int n) {
+  File in = SD.open(SD_QUEUE, FILE_READ);
+  if (!in) {
+    sdQueueCount = 0;
+    return;
+  }
+  File out = SD.open(SD_QUEUE_TMP, FILE_WRITE);
+  int line = 0, kept = 0;
+  while (in.available()) {
+    String s = in.readStringUntil('\n');
+    s.trim();
+    if (!s.length()) continue;
+    if (line++ < n) continue;
+    if (out) {
+      out.print(s);
+      out.print('\n');
+    }
+    kept++;
+  }
+  in.close();
+  if (out) out.close();
+  SD.remove(SD_QUEUE);
+  if (kept) SD.rename(SD_QUEUE_TMP, SD_QUEUE);
+  else SD.remove(SD_QUEUE_TMP);
+  sdQueueCount = kept;
+}
+
+static void queueAppend(const String& line) {
+  Lock l;
+  if (sdOk) {
+    File f = SD.open(SD_QUEUE, FILE_APPEND);
+    if (f && f.print(line + "\n") > 0) {
+      f.close();
+      if (++sdQueueCount > QUEUE_MAX_SD) sdDropLines(sdQueueCount - QUEUE_MAX_SD);
+      return;
+    }
+    if (f) f.close();
+    sdOk = false;  // kart çıkarıldı ya da bozuk: bundan sonra NVS
+  }
+  outbox.push_back(line);
+  while ((int)outbox.size() > QUEUE_MAX_NVS) outbox.erase(outbox.begin());
+  saveOutboxNvs();
+}
+
+static std::vector<String> queuePeek(int max) {
+  Lock l;
+  std::vector<String> out;
+  if (!sdOk) {
+    for (auto& e : outbox) {
+      if ((int)out.size() >= max) break;
+      out.push_back(e);
+    }
+    return out;
+  }
+  if (sdQueueCount <= 0) return out;
+  File f = SD.open(SD_QUEUE, FILE_READ);
+  while (f && f.available() && (int)out.size() < max) {
+    String s = f.readStringUntil('\n');
+    s.trim();
+    if (s.length()) out.push_back(s);
+  }
+  if (f) f.close();
+  if (out.empty()) sdQueueCount = 0;
+  return out;
+}
+
+static void queueDrop(int n) {
+  Lock l;
+  if (sdOk) {
+    sdDropLines(n);
+    return;
+  }
+  outbox.erase(outbox.begin(), outbox.begin() + std::min((int)outbox.size(), n));
+  saveOutboxNvs();
+}
+
+static int queueCount() {
+  Lock l;
+  return sdOk ? sdQueueCount : (int)outbox.size();
+}
+
+// Kart takılıysa NVS'de kalan kayıtlar SD'ye taşınır.
+static void queueMigrate() {
+  Lock l;
+  sdQueueCount = sdCountLines(SD_QUEUE);
+  if (outbox.empty()) return;
+  File f = SD.open(SD_QUEUE, FILE_APPEND);
+  if (!f) return;
+  for (auto& e : outbox) {
+    f.print(e);
+    f.print('\n');
+    sdQueueCount++;
+  }
+  f.close();
+  outbox.clear();
+  saveOutboxNvs();
+}
+
+static void sdLog(const String& line, const String& date) {
+  Lock l;
+  if (!sdOk || date.length() < 7) return;
+  File f = SD.open(String(SD_DIR "/kayit-") + date.substring(0, 7) + ".txt", FILE_APPEND);
+  if (!f) return;
+  f.print(line);
+  f.print('\n');
+  f.close();
+}
+
+static void cacheView(const String& raw) {
+  Lock l;
+  if (sdOk) {
+    File f = SD.open(SD_PLAN, FILE_WRITE);
+    if (f) {
+      f.print(raw);
+      f.close();
+    }
+    return;
+  }
+  if (raw.length() > 3800) return;
+  prefs.begin("cs", false);
+  prefs.putBytes("view", raw.c_str(), raw.length());
+  prefs.end();
+}
+
+static String loadCachedView() {
+  Lock l;
+  String raw;
+  if (sdOk) {
+    File f = SD.open(SD_PLAN, FILE_READ);
+    if (f) {
+      raw = f.readString();
+      f.close();
+    }
+    if (raw.length()) return raw;
+  }
+  prefs.begin("cs", true);
+  size_t n = prefs.getBytesLength("view");
+  if (n) {
+    std::unique_ptr<char[]> buf(new char[n + 1]);
+    prefs.getBytes("view", buf.get(), n);
+    buf[n] = 0;
+    raw = buf.get();
+  }
+  prefs.end();
+  return raw;
 }
 
 // ============================================================================
@@ -338,6 +569,46 @@ static void pruneLocalEvents() {
                     localEvents.end());
 }
 
+// Plan JSON'u (REST, canlı akış ya da SD önbelleği) View'a çevirir.
+static void parseView(JsonVariantConst d, View& v) {
+  v = View();
+  if (!d.is<JsonObjectConst>()) return;
+  v.valid = true;
+  v.date = String((const char*)(d["date"] | ""));
+  v.studiedMin = d["studiedMin"] | 0;
+  v.goalMin = d["goalMin"] | 300;
+  v.streak = d["streak"] | 0;
+  v.examDays = d["examDays"].isNull() ? -1 : d["examDays"].as<int>();
+  v.updatedAt = d["updatedAt"].as<long long>();
+  for (JsonObjectConst it : d["items"].as<JsonArrayConst>()) {
+    Item x;
+    x.id = String((const char*)(it["id"] | ""));
+    x.saat = String((const char*)(it["saat"] | ""));
+    x.ders = String((const char*)(it["ders"] | ""));
+    x.konu = String((const char*)(it["konu"] | ""));
+    x.durum = String((const char*)(it["durum"] | "bekliyor"));
+    x.dk = it["dk"] | 0;
+    v.items.push_back(x);
+  }
+}
+
+static String lastViewRaw;
+static void applyView(JsonVariantConst d) {
+  String raw;
+  serializeJson(d, raw);
+  if (raw == lastViewRaw) return;
+  View v;
+  parseView(d, v);
+  {
+    Lock l;
+    view = v;
+  }
+  lastViewRaw = raw;
+  pruneLocalEvents();
+  dataDirty = true;
+  if (v.valid) cacheView(raw);
+}
+
 static bool fbFetchView() {
   int code = 0;
   String resp = httpsRequest("GET", fbUrl("device/view"), "", code);
@@ -355,33 +626,8 @@ static bool fbFetchView() {
     setNet("Plan okunamadı", false);
     return false;
   }
-  View v;
-  if (!d.isNull()) {
-    v.valid = true;
-    v.date = String((const char*)(d["date"] | ""));
-    v.studiedMin = d["studiedMin"] | 0;
-    v.goalMin = d["goalMin"] | 300;
-    v.streak = d["streak"] | 0;
-    v.examDays = d["examDays"].isNull() ? -1 : d["examDays"].as<int>();
-    v.updatedAt = d["updatedAt"].as<long long>();
-    for (JsonObject it : d["items"].as<JsonArray>()) {
-      Item x;
-      x.id = String((const char*)(it["id"] | ""));
-      x.saat = String((const char*)(it["saat"] | ""));
-      x.ders = String((const char*)(it["ders"] | ""));
-      x.konu = String((const char*)(it["konu"] | ""));
-      x.durum = String((const char*)(it["durum"] | "bekliyor"));
-      x.dk = it["dk"] | 0;
-      v.items.push_back(x);
-    }
-  }
-  {
-    Lock l;
-    view = v;
-  }
+  applyView(d.as<JsonVariantConst>());
   lastViewBody = resp;
-  pruneLocalEvents();
-  dataDirty = true;
   return true;
 }
 
@@ -392,6 +638,10 @@ static void fbPushStatus() {
   d["variant"] = FW_VARIANT;
   d["ip"] = WiFi.localIP().toString();
   d["rssi"] = WiFi.RSSI();
+  d["heap"] = ESP.getFreeHeap();
+  d["sd"] = sdOk;
+  d["live"] = (bool)liveOn;
+  d["queue"] = queueCount();
   String body;
   serializeJson(d, body);
   int code = 0;
@@ -399,28 +649,350 @@ static void fbPushStatus() {
   if (code == 401) idToken = "";
 }
 
+// Olayın anahtarı içeriğinden üretilir: aynı olay iki kez gönderilse de tek kayıt olur.
+static String eventKey(const String& line) {
+  uint64_t h = 1469598103934665603ULL;
+  for (size_t i = 0; i < line.length(); i++) {
+    h ^= (uint8_t)line[i];
+    h *= 1099511628211ULL;
+  }
+  char b[20];
+  snprintf(b, sizeof b, "c%016llx", (unsigned long long)h);
+  return String(b);
+}
+
+// Bekleyen olaylar 20'şerli paketlerle tek istekte gönderilir (internet uzun süre yoksa
+// SD'de yüzlerce kayıt birikebilir).
 static void fbFlushOutbox() {
-  for (;;) {
-    String ev;
-    {
-      Lock l;
-      if (outbox.empty()) return;
-      ev = outbox.front();
+  for (int round = 0; round < 10; round++) {
+    std::vector<String> batch = queuePeek(20);
+    if (batch.empty()) return;
+    String body = "{";
+    int valid = 0;
+    for (auto& line : batch) {
+      JsonDocument t;
+      if (deserializeJson(t, line) || !t.is<JsonObject>()) continue;  // yarım yazılmış satır
+      if (valid++) body += ',';
+      body += '"';
+      body += eventKey(line);
+      body += "\":";
+      body += line;
     }
-    int code = 0;
-    httpsRequest("POST", fbUrl("device/events"), ev, code);
-    if (code == 401) {
-      idToken = "";
-      return;
+    body += '}';
+    if (valid) {
+      int code = 0;
+      httpsRequest("PATCH", fbUrl("device/events"), body, code);
+      if (code == 401) {
+        idToken = "";
+        return;
+      }
+      if (code != 200 && code != 400) return;  // 400: bozuk paket, takılı kalmasın diye atlanır
     }
-    if (code != 200) return;
-    {
-      Lock l;
-      if (!outbox.empty() && outbox.front() == ev) outbox.erase(outbox.begin());
-    }
-    saveOutbox();
+    queueDrop(batch.size());
     wantView = true;
   }
+}
+
+// --- Ortak kronometre ---
+static void parseTimer(JsonVariantConst v, SharedTimer& t) {
+  t = SharedTimer();
+  if (!v.is<JsonObjectConst>()) return;
+  t.on = v["on"] | false;
+  t.itemId = String((const char*)(v["itemId"] | ""));
+  t.date = String((const char*)(v["date"] | ""));
+  t.ders = String((const char*)(v["ders"] | ""));
+  t.konu = String((const char*)(v["konu"] | ""));
+  t.by = String((const char*)(v["by"] | ""));
+  t.dk = v["dk"] | 0;
+  t.startedAt = v["startedAt"].as<long long>();
+  t.acc = v["acc"].as<long long>();
+  t.rev = v["rev"].as<long long>();
+}
+
+// Buluttaki kronometre bizim gördüğümüzden yeniyse ana döngüye bırakılır.
+static void takeRemoteTimer(JsonVariantConst v) {
+  SharedTimer r;
+  parseTimer(v, r);
+  Lock l;
+  if (r.rev <= timerRevSeen) return;  // kendi yazdığımız ya da eski
+  timerRevSeen = r.rev;
+  remoteTimer = r;
+  remoteTimerDirty = true;
+  outTimerPending = false;
+}
+
+static void fbFetchTimer() {
+  int code = 0;
+  String resp = httpsRequest("GET", fbUrl("device/timer"), "", code);
+  if (code == 401) idToken = "";
+  if (code != 200) return;
+  JsonDocument d;
+  if (deserializeJson(d, resp)) return;
+  takeRemoteTimer(d.as<JsonVariantConst>());
+}
+
+static void fbPushTimer() {
+  SharedTimer t;
+  {
+    Lock l;
+    if (!outTimerPending) return;
+    t = outTimer;
+    outTimerPending = false;
+  }
+  JsonDocument d;
+  d["on"] = t.on;
+  if (t.on) {
+    d["itemId"] = t.itemId;
+    d["date"] = t.date;
+    d["ders"] = t.ders;
+    d["konu"] = t.konu;
+    d["dk"] = t.dk;
+    d["startedAt"] = t.startedAt;
+    d["acc"] = t.acc;
+  }
+  d["by"] = "device";
+  d["rev"] = t.rev;
+  String body;
+  serializeJson(d, body);
+  int code = 0;
+  httpsRequest("PUT", fbUrl("device/timer"), body, code);
+  if (code == 401) idToken = "";
+  if (code != 200) {
+    Lock l;
+    if (!outTimerPending && timerRevSeen == t.rev) outTimerPending = true;  // sonra yeniden dene
+  }
+}
+
+// --- Canlı akış (Realtime Database REST streaming, Server-Sent Events) ---
+// users/{uid}/device dinlenir: plan (view) ve kronometre (timer) değişince saniyesinde gelir.
+// Akış kopuksa plan 30 sn, kronometre 10 sn arayla sorulur.
+struct LiveConn {
+  WiFiClientSecure* c = nullptr;
+  bool chunked = false, ready = false, overflow = false;
+  long chunkLeft = 0;
+  int skipCrlf = 0;
+  String sizeLine, line, evType, evData;
+  uint32_t lastData = 0, retryAt = 0, backoff = 5000;
+};
+static LiveConn live;
+
+static void liveClose() {
+  if (live.c) {
+    live.c->stop();
+    delete live.c;
+    live.c = nullptr;
+  }
+  live.ready = false;
+  live.line = live.evType = live.evData = live.sizeLine = "";
+  liveOn = false;
+}
+
+static void liveFail() {
+  liveClose();
+  live.retryAt = millis() + live.backoff;
+  live.backoff = std::min<uint32_t>(live.backoff * 2, 120000);
+}
+
+static bool readLineT(WiFiClientSecure* c, String& out, uint32_t ms) {
+  out = "";
+  uint32_t t0 = millis();
+  while (millis() - t0 < ms) {
+    while (c->available()) {
+      int ch = c->read();
+      if (ch < 0) break;
+      if (ch == '\n') {
+        out.trim();
+        return true;
+      }
+      if (out.length() < 1500) out += (char)ch;
+    }
+    if (!c->connected()) return false;
+    delay(5);
+  }
+  return false;
+}
+
+static bool liveConnect() {
+  if (ESP.getMaxAllocHeap() < 45000) {  // bellek azsa akış açılmaz, sorarak devam edilir
+    live.retryAt = millis() + 60000;
+    return false;
+  }
+  String url = fbUrl("device");
+  for (int hop = 0; hop < 3; hop++) {
+    if (!url.startsWith("https://")) break;
+    int slash = url.indexOf('/', 8);
+    String host = url.substring(8, slash < 0 ? url.length() : slash);
+    String path = slash < 0 ? String("/") : url.substring(slash);
+    uint16_t port = 443;
+    int colon = host.indexOf(':');
+    if (colon >= 0) {
+      port = host.substring(colon + 1).toInt();
+      host = host.substring(0, colon);
+    }
+    WiFiClientSecure* c = new WiFiClientSecure();
+    c->setInsecure();
+    if (!c->connect(host.c_str(), port)) {
+      delete c;
+      break;
+    }
+    c->print(String("GET ") + path + " HTTP/1.1\r\nHost: " + host +
+             "\r\nAccept: text/event-stream\r\nUser-Agent: calisma-saati/" + String(FW_BUILD) + "\r\n\r\n");
+    String st, h, location;
+    bool chunked = false;
+    int code = 0;
+    if (readLineT(c, st, 10000) && st.length() > 12) code = st.substring(9, 12).toInt();
+    while (code && readLineT(c, h, 10000) && h.length()) {
+      String lower = h;
+      lower.toLowerCase();
+      if (lower.startsWith("location:")) {
+        location = h.substring(9);
+        location.trim();
+      } else if (lower.startsWith("transfer-encoding:") && lower.indexOf("chunked") > 0) {
+        chunked = true;
+      }
+    }
+    if ((code == 307 || code == 302 || code == 301) && location.length()) {
+      c->stop();
+      delete c;
+      url = location;
+      continue;
+    }
+    if (code != 200) {
+      c->stop();
+      delete c;
+      if (code == 401) idToken = "";
+      break;
+    }
+    live.c = c;
+    live.chunked = chunked;
+    live.chunkLeft = 0;
+    live.skipCrlf = 0;
+    live.ready = false;
+    live.overflow = false;
+    live.line.reserve(256);
+    live.lastData = millis();
+    return true;
+  }
+  liveFail();
+  return false;
+}
+
+static void liveApply(bool patch, const String& path, JsonVariantConst v) {
+  if (path == "/") {
+    if (patch) {
+      for (JsonPairConst kv : v.as<JsonObjectConst>()) liveApply(false, String("/") + kv.key().c_str(), kv.value());
+      return;
+    }
+    applyView(v["view"]);
+    takeRemoteTimer(v["timer"]);
+    return;
+  }
+  if (path == "/view") {
+    if (patch) wantView = true;
+    else applyView(v);
+  } else if (path.startsWith("/view/")) {
+    wantView = true;
+  } else if (path == "/timer") {
+    if (patch) wantTimer = true;
+    else takeRemoteTimer(v);
+  } else if (path.startsWith("/timer/")) {
+    wantTimer = true;
+  }
+  // events ve status bizim yazdıklarımız; yok sayılır.
+}
+
+static void liveDispatch() {
+  String type = live.evType, data = live.evData;
+  bool overflow = live.overflow;
+  live.evType = live.evData = "";
+  live.overflow = false;
+  if (type == "keep-alive" || !type.length()) return;
+  if (type == "cancel") {  // izin yok ya da kurallar değişti
+    liveClose();
+    live.retryAt = millis() + 60000;
+    return;
+  }
+  if (type == "auth_revoked") {  // oturum anahtarının süresi doldu
+    idToken = "";
+    liveClose();
+    live.retryAt = millis() + 1000;
+    return;
+  }
+  if (type != "put" && type != "patch") return;
+  if (!live.ready) {
+    live.ready = true;
+    live.backoff = 5000;
+    liveOn = true;
+    setNet("Bağlı", true);
+  }
+  if (overflow) {  // çok büyük mesaj: ayrı ayrı sorulur
+    wantView = wantTimer = true;
+    return;
+  }
+  JsonDocument d;
+  if (deserializeJson(d, data)) {
+    wantView = wantTimer = true;
+    return;
+  }
+  liveApply(type == "patch", String((const char*)(d["path"] | "/")), d["data"].as<JsonVariantConst>());
+}
+
+static void liveByte(char ch) {
+  if (ch == '\r') return;
+  if (ch != '\n') {
+    if (live.line.length() < 12000) live.line += ch;
+    else live.overflow = true;
+    return;
+  }
+  if (!live.line.length()) {
+    liveDispatch();
+    return;
+  }
+  if (live.line.startsWith("event:")) {
+    live.evType = live.line.substring(6);
+    live.evType.trim();
+  } else if (live.line.startsWith("data:")) {
+    String part = live.line.substring(5);
+    if (part.startsWith(" ")) part.remove(0, 1);
+    if (live.evData.length()) live.evData += '\n';
+    if (live.evData.length() + part.length() < 12000) live.evData += part;
+    else live.overflow = true;
+  }
+  live.line = "";
+}
+
+static void livePump() {
+  if (!live.c) return;
+  if (!live.c->connected()) {
+    liveFail();
+    return;
+  }
+  int budget = 6000;
+  while (budget-- > 0 && live.c && live.c->available()) {
+    int b = live.c->read();
+    if (b < 0) break;
+    live.lastData = millis();
+    if (!live.chunked) {
+      liveByte((char)b);
+    } else if (live.chunkLeft > 0) {
+      liveByte((char)b);
+      if (--live.chunkLeft == 0) live.skipCrlf = 2;
+    } else if (live.skipCrlf > 0) {
+      live.skipCrlf--;
+    } else if (b == '\n') {
+      long n = strtol(live.sizeLine.c_str(), nullptr, 16);
+      live.sizeLine = "";
+      if (n <= 0) {
+        liveFail();
+        return;
+      }
+      live.chunkLeft = n;
+    } else if (b != '\r' && live.sizeLine.length() < 16) {
+      live.sizeLine += (char)b;
+    }
+  }
+  // Firebase 30 sn'de bir keep-alive yollar; uzun sessizlik kopukluk demektir.
+  if (live.c && millis() - live.lastData > 75000) liveFail();
 }
 
 // --- Hava durumu (Open-Meteo, anahtar gerekmez) ---
@@ -512,15 +1084,19 @@ static void checkOta(bool manual) {
 }
 
 static void netTask(void*) {
-  uint32_t lastView = 0, lastStatus = 0, nextWeather = 0, lastOta = 0, lastReconnect = 0;
+  uint32_t lastView = 0, lastStatus = 0, nextWeather = 0, lastOta = 0, lastReconnect = 0, lastTimerPoll = 0;
   const uint32_t bootAt = millis();
   bool viewOnce = false, statusOnce = false, otaOnce = false;
   for (;;) {
     netBusy = false;
-    vTaskDelay(pdMS_TO_TICKS(250));
-    if (portalActive) continue;
+    vTaskDelay(pdMS_TO_TICKS(live.c ? 80 : 250));
+    if (portalActive) {
+      liveClose();
+      continue;
+    }
     netBusy = true;
     if (WiFi.status() != WL_CONNECTED) {
+      liveClose();
       setNet("Wi-Fi bağlantısı yok", false);
       if (millis() - lastReconnect > 15000) {
         lastReconnect = millis();
@@ -534,7 +1110,10 @@ static void netTask(void*) {
       authRetryAt = millis();
       viewOnce = statusOnce = false;
       lastViewBody = "";
+      liveClose();
+      live.retryAt = 0;
     }
+    livePump();
     const uint32_t now = millis();
     if ((int32_t)(now - nextWeather) >= 0) {
       fetchWeather();
@@ -547,18 +1126,26 @@ static void netTask(void*) {
     }
     if (hasCreds()) {
       if (ensureAuth()) {
+        fbPushTimer();
         fbFlushOutbox();
-        if (wantView || !viewOnce || now - lastView > VIEW_EVERY_MS) {
+        bool liveOk = live.c && live.ready;
+        if (wantView || !viewOnce || now - lastView > (liveOk ? VIEW_POLL_LIVE_MS : VIEW_EVERY_MS)) {
           wantView = false;
           viewOnce = true;
           lastView = now;
           if (fbFetchView()) setNet("Bağlı", true);
+        }
+        if (wantTimer || (!liveOk && now - lastTimerPoll > TIMER_POLL_MS)) {
+          wantTimer = false;
+          lastTimerPoll = now;
+          fbFetchTimer();
         }
         if (!statusOnce || now - lastStatus > STATUS_EVERY_MS) {
           statusOnce = true;
           lastStatus = now;
           fbPushStatus();
         }
+        if (!live.c && idToken.length() && (int32_t)(millis() - live.retryAt) >= 0) liveConnect();
       }
     } else {
       setNet("Hesap bilgisi girilmedi", false);
@@ -569,6 +1156,7 @@ static void netTask(void*) {
       wantOta = false;
       otaOnce = true;
       lastOta = now;
+      liveClose();  // indirme için bellek boşalsın; akış sonra yeniden açılır
       checkOta(manual);
     }
   }
@@ -595,8 +1183,6 @@ static bool darkNow = false;
 static TFT_eSPI tft;
 static TFT_eSprite spr(&tft);
 static bool sprOk = false;
-static SPIClass touchSPI(VSPI);
-static XPT2046_Touchscreen ts(TOUCH_CS, TOUCH_IRQ);
 
 enum Screen { SCR_HOME = 0, SCR_PLAN = 1, SCR_TIMER = 2, SCR_SETTINGS = 3 };
 static Screen screen = SCR_HOME;
@@ -790,14 +1376,20 @@ static void weatherIcon(int cx, int cy, int code, uint16_t bg) {
   }
 }
 
-enum BtnStyle { BTN_SURFACE, BTN_INK, BTN_INK_PRIMARY };
-static void button(int x, int y, int w, int h, const String& label, BtnStyle st) {
-  uint16_t under = st == BTN_SURFACE ? COL_BG : COL_INK;
-  uint16_t fill = st == BTN_INK_PRIMARY ? COL_ON_INK : (st == BTN_INK ? COL_INK2 : COL_SURFACE);
-  uint16_t border = st == BTN_INK_PRIMARY ? COL_ON_INK : (st == BTN_INK ? COL_INK_LINE : COL_LINE_STRONG);
-  uint16_t fg = st == BTN_INK_PRIMARY ? INK_TEXT : (st == BTN_INK ? COL_ON_INK : COL_TEXT);
-  card(x, y, w, h, 10, fill, border, under);
-  text(label, x + w / 2, y + h / 2, F_TEXT, fg, fill, MC_DATUM);
+// BTN_SURFACE: kâğıt üstünde beyaz, BTN_PRIMARY: kâğıt üstünde koyu,
+// BTN_INK / BTN_INK_PRIMARY: koyu kart üstünde. under: düğmenin altındaki renk.
+enum BtnStyle { BTN_SURFACE, BTN_PRIMARY, BTN_INK, BTN_INK_PRIMARY };
+static void button(int x, int y, int w, int h, const String& label, BtnStyle st, int32_t under = -1) {
+  uint16_t u = under >= 0 ? (uint16_t)under : (st == BTN_SURFACE || st == BTN_PRIMARY ? COL_BG : COL_INK);
+  uint16_t fill, border, fg;
+  switch (st) {
+    case BTN_PRIMARY: fill = border = COL_INK; fg = COL_ON_INK; break;
+    case BTN_INK: fill = COL_INK2; border = COL_INK_LINE; fg = COL_ON_INK; break;
+    case BTN_INK_PRIMARY: fill = border = COL_ON_INK; fg = INK_TEXT; break;
+    default: fill = COL_SURFACE; border = COL_LINE_STRONG; fg = COL_TEXT; break;
+  }
+  card(x, y, w, h, 10, fill, border, u);
+  text(fit(label, F_TEXT, w - 16), x + w / 2, y + h / 2, F_TEXT, fg, fill, MC_DATUM);
 }
 
 // --- Veriyi ekrana hazırlama ---
@@ -816,6 +1408,8 @@ static std::vector<Item> displayItems(int& studied, View& snapshot) {
       } else if (e.type == "uncomplete" && it.durum == "tamam") {
         it.durum = "bekliyor";
         studied -= it.dk;
+      } else if (e.type == "postpone" && it.durum != "tamam") {
+        it.durum = "ertelendi";
       } else if (e.type == "session") {
         it.durum = "tamam";
       }
@@ -860,11 +1454,26 @@ static void fullClear() {
 static const char* GUN_UP[] = {"PAZAR", "PAZARTESİ", "SALI", "ÇARŞAMBA", "PERŞEMBE", "CUMA", "CUMARTESİ"};
 static const char* AY_UP[] = {"OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"};
 
+// Tarih satırı 6 saniyede bir sınava kalan gün ve seriyle yer değiştirir.
+static bool datePhase = false;
 static void drawDate() {
   clearBg(10, 6, 222, 24);
+  int exam, streak;
+  {
+    Lock l;
+    exam = view.valid ? view.examDays : -1;
+    streak = view.valid ? view.streak : 0;
+  }
+  String extra;
+  if (exam == 0) extra = "SINAV BUGÜN";
+  else if (exam > 0) extra = "YKS'YE " + String(exam) + " GÜN";
+  if (streak > 0) extra += (extra.length() ? " · " : "") + String(streak) + " GÜN SERİ";
   struct tm t;
-  String s = localNow(t) ? String(GUN_UP[t.tm_wday]) + ", " + String(t.tm_mday) + " " + AY_UP[t.tm_mon] : String("SAAT AYARLANIYOR…");
-  text(s, 14, 10, F_SMALL, COL_MUTED, COL_BG);
+  String s;
+  if (datePhase && extra.length()) s = extra;
+  else s = localNow(t) ? String(GUN_UP[t.tm_wday]) + ", " + String(t.tm_mday) + " " + AY_UP[t.tm_mon] : String("SAAT AYARLANIYOR…");
+  bool alt = datePhase && extra.length();
+  text(fit(s, F_SMALL, 216), 14, 10, F_SMALL, alt ? COL_RED : COL_MUTED, COL_BG);
 }
 
 static void drawClock() {
@@ -923,9 +1532,23 @@ static void drawNowCard() {
     line1 = "Telefonla eşleştirilmedi";
     line2 = "Ayarlar → Wi-Fi ve hesap";
   } else if (!planIsToday(v)) {
-    label = "PLAN";
-    line1 = v.valid ? "Bugünkü plan henüz gelmedi" : "Bugün için plan yok";
-    line2 = v.valid ? "Telefondaki uygulamayı bir kez aç" : "Telefondaki uygulamadan plan oluştur";
+    bool ok;
+    String msg;
+    {
+      Lock l;
+      ok = cloudOk;
+      msg = netMsg;
+    }
+    if (!ok && millis() > 45000) {  // plan yoksa sebebi çoğu zaman bağlantıdır; açıkça söylenir
+      label = "BULUT";
+      dot = COL_RED;
+      line1 = msg;
+      line2 = WiFi.status() == WL_CONNECTED ? "Ayarlar ekranında ayrıntı var" : "BOOT'u 6 sn basılı tut: kurulum";
+    } else {
+      label = "PLAN";
+      line1 = v.valid ? "Bugünkü plan henüz gelmedi" : "Bugün için plan yok";
+      line2 = v.valid ? "Telefondaki uygulamayı bir kez aç" : "Telefondaki uygulamadan plan oluştur";
+    }
   } else {
     int now = minutesOfDay();
     const Item* pick = nullptr;
@@ -1104,8 +1727,42 @@ static void drawSettings(bool full) {
   if (WiFi.status() == WL_CONNECTED) l1 += " · " + WiFi.localIP().toString() + " · " + String(WiFi.RSSI()) + " dBm";
   text(fit(l1, F_SMALL, 296), 12, 162, F_SMALL, COL_MUTED, COL_BG);
   String l2 = ota;
-  if (!l2.length()) l2 = "Bulut: " + net + " · Işık " + String(analogRead(PIN_LDR));
+  if (!l2.length()) {
+    l2 = "Bulut: " + net + (liveOn ? " (canlı)" : "") + " · SD " + (sdOk ? "var" : "yok");
+    int q = queueCount();
+    if (q) l2 += " · " + String(q) + " bekliyor";
+  }
   text(fit(l2, F_SMALL, 296), 12, 180, F_SMALL, ok || ota.length() ? COL_MUTED : COL_RED, COL_BG);
+}
+
+// --- Oturum menüsü (Program ekranında satıra basılı tutunca) ---
+enum MenuAct { ACT_START, ACT_POSTPONE, ACT_UNDO, ACT_CLOSE };
+static bool menuOpen = false;
+static uint32_t menuAt = 0;
+static Item menuItem;
+static MenuAct menuActs[3];
+static int menuN = 0;
+static const int MENU_X = 24, MENU_Y = 16, MENU_W = 272, MENU_BTN_Y = 80, MENU_BTN_H = 30, MENU_GAP = 6;
+
+static int menuBtnY(int i) { return MENU_BTN_Y + i * (MENU_BTN_H + MENU_GAP); }
+
+static void drawMenu() {
+  int h = (MENU_BTN_Y - MENU_Y) + menuN * (MENU_BTN_H + MENU_GAP) - MENU_GAP + 12;
+  card(MENU_X, MENU_Y, MENU_W, h, 14, COL_TEXT, COL_TEXT);  // koyu çerçeve: listenin üstünde ayrı dursun
+  card(MENU_X + 2, MENU_Y + 2, MENU_W - 4, h - 4, 12, COL_SURFACE, COL_SURFACE, COL_TEXT);
+  tft.fillSmoothCircle(MENU_X + 20, MENU_Y + 25, 4, dersColor(menuItem.ders), COL_SURFACE);
+  text(fit(menuItem.saat + " · " + menuItem.ders, F_TEXT, MENU_W - 46), MENU_X + 30, MENU_Y + 14, F_TEXT, COL_TEXT, COL_SURFACE);
+  String sub = menuItem.konu.length() ? menuItem.konu : String(menuItem.dk) + " dk";
+  if (menuItem.durum == "ertelendi") sub = "Ertelendi · " + sub;
+  else if (menuItem.durum == "tamam") sub = "Tamamlandı · " + sub;
+  text(fit(sub, F_SMALL, MENU_W - 46), MENU_X + 30, MENU_Y + 40, F_SMALL, COL_MUTED, COL_SURFACE);
+  for (int i = 0; i < menuN; i++) {
+    const char* l = menuActs[i] == ACT_START ? "Kronometreyle başlat"
+                    : menuActs[i] == ACT_POSTPONE ? "Ertele"
+                    : menuActs[i] == ACT_UNDO ? "İşareti kaldır"
+                                               : "Vazgeç";
+    button(MENU_X + 12, menuBtnY(i), MENU_W - 24, MENU_BTN_H, l, i == 0 ? BTN_PRIMARY : BTN_SURFACE, COL_SURFACE);
+  }
 }
 
 static void drawScreen(bool full) {
@@ -1115,11 +1772,13 @@ static void drawScreen(bool full) {
     case SCR_TIMER: drawTimer(full); break;
     case SCR_SETTINGS: drawSettings(full); break;
   }
+  if (menuOpen && screen == SCR_PLAN) drawMenu();
 }
 
 static void go(Screen s) {
   screen = s;
   toastUntil = 0;
+  menuOpen = false;
   drawScreen(true);
 }
 
@@ -1134,6 +1793,116 @@ static void drawOta() {
   clearBg(40, 128, 240, 26);
   text("%" + String(p), 160, 140, F_TEXT, COL_MUTED, COL_BG, MC_DATUM);
   text("Kapatma, bitince yeniden başlayacak", 160, 172, F_SMALL, COL_MUTED, COL_BG, MC_DATUM);
+}
+
+// ============================================================================
+// SD karttan güncelleme (açılışta)
+// ============================================================================
+// Kartın kökündeki update.bin, firmware.bin ya da firmware-<model>.bin dosyası yazılımın
+// içindeki "CSFW:<model>:<sürüm>;" işaretiyle tanınır. Yalnızca aynı modelin daha yeni sürümü
+// yüklenir; işlenen dosyanın adı değiştirilir ki her açılışta tekrar denenmesin:
+//   .yuklendi  yüklendi        .eski  aynı ya da eski sürüm (işaretsiz eski dosyalar da)
+//   .bad       başka model ya da uygulama dosyası değil (ör. ilk-kurulum dosyası)
+static bool sdFindMarker(File& f, String& variant, int& build) {
+  static const char pat[] = "CSFW:";
+  uint8_t buf[512];
+  int m = 0;
+  bool collecting = false;
+  String body;
+  size_t r;
+  while ((r = f.read(buf, sizeof buf)) > 0) {
+    for (size_t i = 0; i < r; i++) {
+      char ch = (char)buf[i];
+      if (collecting) {
+        if (ch == ';') {
+          int c = body.lastIndexOf(':');
+          if (c > 0 && c < (int)body.length() - 1) {
+            variant = body.substring(0, c);
+            build = body.substring(c + 1).toInt();
+            bool digits = true;
+            for (size_t k = c + 1; k < body.length(); k++)
+              if (!isdigit((unsigned char)body[k])) digits = false;
+            if (digits) return true;
+          }
+          collecting = false;
+        } else if ((isalnum((unsigned char)ch) || ch == '_' || ch == ':') && body.length() < 40) {
+          body += ch;
+          continue;
+        } else {
+          collecting = false;
+        }
+        m = 0;
+      }
+      if (ch == pat[m]) {
+        if (++m == 5) {
+          collecting = true;
+          body = "";
+          m = 0;
+        }
+      } else {
+        m = ch == pat[0] ? 1 : 0;
+      }
+    }
+  }
+  return false;
+}
+
+static void sdRenameDone(const char* name, const char* suffix) {
+  String to = String(name) + suffix;
+  if (SD.exists(to)) SD.remove(to);
+  if (!SD.rename(String(name), to)) SD.remove(name);
+}
+
+static void sdTryUpdate() {
+  if (!sdOk) return;
+  static const char* names[] = {"/update.bin", "/firmware.bin", "/firmware-" FW_VARIANT ".bin", SD_DIR "/update.bin"};
+  for (const char* name : names) {
+    if (!SD.exists(name)) continue;
+    File f = SD.open(name, FILE_READ);
+    if (!f) continue;
+    size_t size = f.size();
+    int magic = f.read();
+    String variant;
+    int build = -1;
+    bool marked = magic == 0xE9 && size > 100000 && sdFindMarker(f, variant, build);
+    f.close();
+    if (magic != 0xE9 || (marked && variant != FW_VARIANT)) {
+      sdRenameDone(name, ".bad");
+      continue;
+    }
+    if (!marked || build <= FW_BUILD) {
+      sdRenameDone(name, ".eski");
+      continue;
+    }
+    f = SD.open(name, FILE_READ);
+    if (!f) continue;
+    otaProgress = 0;
+    drawOta();
+    bool ok = Update.begin(size, U_FLASH);
+    if (ok) {
+      Update.onProgress([](size_t cur, size_t total) {
+        if (total) otaProgress = (int)((uint64_t)cur * 100 / total);
+        drawOta();
+      });
+      ok = Update.writeStream(f) == size && Update.end(true);
+    }
+    f.close();
+    if (ok) {
+      sdRenameDone(name, ".yuklendi");
+      otaProgress = 100;
+      drawOta();
+      delay(800);
+      ESP.restart();
+    }
+    Update.abort();
+    otaProgress = -1;
+    sdRenameDone(name, ".bad");
+    clearBg(0, 0, SCREEN_W, SCREEN_H);
+    text("SD'den güncelleme olmadı", 160, 100, F_TITLE, COL_TEXT, COL_BG, MC_DATUM);
+    text("Dosya bozuk olabilir; eski sürümle devam", 160, 134, F_SMALL, COL_MUTED, COL_BG, MC_DATUM);
+    delay(3000);
+    return;
+  }
 }
 
 // ============================================================================
@@ -1152,10 +1921,10 @@ static void enqueueEvent(const char* type, const String& itemId, int sec, const 
   if (konu.length()) d["konu"] = konu;
   String s;
   serializeJson(d, s);
+  queueAppend(s);
+  sdLog(s, date);
   {
     Lock l;
-    outbox.push_back(s);
-    while (outbox.size() > 40) outbox.erase(outbox.begin());
     LocalEvent e;
     e.type = type;
     e.itemId = itemId;
@@ -1166,7 +1935,53 @@ static void enqueueEvent(const char* type, const String& itemId, int sec, const 
     localEvents.push_back(e);
     while (localEvents.size() > 60) localEvents.erase(localEvents.begin());
   }
-  saveOutbox();
+}
+
+// Açılışta kuyrukta bekleyen olaylar ekrana yeniden işlenir (telefon henüz görmedi).
+static void rebuildLocalEvents() {
+  std::vector<String> q = queuePeek(60);
+  Lock l;
+  localEvents.clear();
+  for (auto& line : q) {
+    JsonDocument d;
+    if (deserializeJson(d, line)) continue;
+    LocalEvent e;
+    e.type = String((const char*)(d["type"] | ""));
+    e.itemId = String((const char*)(d["itemId"] | ""));
+    e.date = String((const char*)(d["date"] | ""));
+    e.sec = d["sec"] | 0;
+    e.at = d["at"].as<long long>();
+    if (e.type.length()) localEvents.push_back(e);
+  }
+}
+
+// Kronometrenin şimdiki hâli telefona gönderilmek üzere sıraya konur.
+static void publishTimer() {
+  long long now = nowMs();
+  if (!now) return;  // saat ayarlanmadan duvar saati hesaplanamaz
+  SharedTimer t;
+  t.on = swRunning || swElapsedMs() > 0;
+  if (t.on) {
+    t.itemId = swItemId;
+    t.date = todayStr();
+    t.ders = swDers.length() ? swDers : String("Diğer");
+    t.konu = swKonu;
+    t.dk = swDk;
+    if (swRunning) {
+      t.startedAt = now - (long long)(millis() - swStart);
+      t.acc = swAccMs;
+    } else {
+      t.startedAt = 0;
+      t.acc = swElapsedMs();
+    }
+  }
+  t.by = "device";
+  Lock l;
+  t.rev = std::max(now, timerRevSeen + 1);
+  timerRevSeen = t.rev;
+  outTimer = t;
+  outTimerPending = true;
+  remoteTimerDirty = false;
 }
 
 static void resetTimer() {
@@ -1192,8 +2007,53 @@ static void finishTimer() {
   }
   enqueueEvent("session", swItemId, sec, swDers.length() ? swDers : String("Diğer"), swKonu, swDk);
   resetTimer();
+  publishTimer();
   drawScreen(true);
   toast(fmtMin(sec / 60) + " kaydedildi");
+}
+
+// Telefondan gelen kronometre (başlatma, duraklatma, bitirme) uygulanır.
+static void applyRemoteTimer() {
+  SharedTimer r;
+  {
+    Lock l;
+    if (!remoteTimerDirty) return;
+    r = remoteTimer;
+    remoteTimerDirty = false;
+  }
+  bool wasActive = swRunning || swElapsedMs() > 0;
+  if (!r.on) {
+    if (!wasActive) return;
+    resetTimer();  // oturum telefonda kaydedildi ya da iptal edildi
+    drawScreen(true);
+    if (r.by == "phone") toast("Kronometre telefonda kapatıldı");
+    return;
+  }
+  long long now = nowMs();
+  bool sameItem = wasActive && swItemId == r.itemId;
+  swItemId = r.itemId;
+  swDers = r.ders == "Diğer" ? String("") : r.ders;
+  swKonu = r.konu;
+  swDk = r.dk;
+  if (!swDk && swItemId.length()) {
+    Lock l;
+    for (auto& it : view.items)
+      if (it.id == swItemId) swDk = it.dk;
+  }
+  if (r.startedAt > 0 && now > 0) {
+    long long ran = std::max(0LL, now - r.startedAt);
+    swAccMs = (uint32_t)std::max(0LL, r.acc);
+    swStart = millis() - (uint32_t)ran;  // taşma olsa da fark doğru kalır
+    swRunning = true;
+  } else {
+    swRunning = false;
+    swAccMs = (uint32_t)std::max(0LL, r.acc);
+  }
+  pomoCount = swElapsedMs() / 1000 / POMODORO_WORK_SEC;
+  pomoBreak = false;
+  menuOpen = false;
+  drawScreen(true);
+  if (!sameItem && r.by == "phone") toast(swRunning ? "Kronometre telefonda başlatıldı" : "Kronometre telefondan geldi");
 }
 
 static void toggleItem(const Item& it) {
@@ -1211,6 +2071,20 @@ static void toggleItem(const Item& it) {
   toast(done ? "Geri alındı" : "Tamamlandı");
 }
 
+static void postponeItem(const Item& it) {
+  if (!timeOk()) {
+    toast("Saat henüz ayarlanmadı, biraz bekle");
+    return;
+  }
+  if (swItemId == it.id) {
+    resetTimer();
+    publishTimer();
+  }
+  enqueueEvent("postpone", it.id, 0, "", "", it.dk);
+  drawScreen(false);
+  toast("Ertelendi");
+}
+
 static void selectForTimer(const Item& it) {
   if (swElapsedMs() > 0 && swItemId != it.id) {
     toast("Önce çalışan kronometreyi bitir");
@@ -1223,13 +2097,152 @@ static void selectForTimer(const Item& it) {
   go(SCR_TIMER);
 }
 
+static void startItemTimer(const Item& it) {
+  if (swElapsedMs() > 0 && swItemId != it.id) {
+    toast("Önce çalışan kronometreyi bitir");
+    return;
+  }
+  if (swItemId != it.id) {
+    swAccMs = 0;
+    pomoCount = 0;
+    pomoBreak = false;
+  }
+  swItemId = it.id;
+  swDers = it.ders;
+  swKonu = it.konu;
+  swDk = it.dk;
+  if (!swRunning) {
+    swStart = millis();
+    swRunning = true;
+  }
+  publishTimer();
+  go(SCR_TIMER);
+}
+
+static void openMenu(const Item& it) {
+  menuItem = it;
+  menuN = 0;
+  if (it.durum == "tamam") {
+    menuActs[menuN++] = ACT_UNDO;
+  } else {
+    menuActs[menuN++] = ACT_START;
+    if (it.durum != "ertelendi") menuActs[menuN++] = ACT_POSTPONE;
+  }
+  menuActs[menuN++] = ACT_CLOSE;
+  menuOpen = true;
+  menuAt = millis();
+  drawMenu();
+}
+
+static void menuTap(int x, int y) {
+  menuOpen = false;
+  for (int i = 0; i < menuN; i++) {
+    int by = menuBtnY(i);
+    if (x >= MENU_X + 6 && x < MENU_X + MENU_W - 6 && y >= by - 3 && y < by + MENU_BTN_H + 3) {
+      Item it = menuItem;
+      switch (menuActs[i]) {
+        case ACT_START: startItemTimer(it); return;
+        case ACT_POSTPONE: postponeItem(it); return;
+        case ACT_UNDO: toggleItem(it); return;
+        default: break;
+      }
+      break;
+    }
+  }
+  drawScreen(false);
+}
+
 // ============================================================================
 // Dokunmatik ve buton
 // ============================================================================
+// XPT2046 yazılımsal SPI ile okunur (VSPI SD kartın). Okuma sırası ve ortalama
+// XPT2046_Touchscreen kütüphanesiyle aynıdır; eski kalibrasyon geçerli kalır.
+struct TouchRaw {
+  int x = 0, y = 0, z = 0;
+};
+
+static void tsBegin() {
+  pinMode(TOUCH_CS, OUTPUT);
+  digitalWrite(TOUCH_CS, HIGH);
+  pinMode(TOUCH_CLK, OUTPUT);
+  digitalWrite(TOUCH_CLK, LOW);
+  pinMode(TOUCH_MOSI, OUTPUT);
+  pinMode(TOUCH_MISO, INPUT);
+  pinMode(TOUCH_IRQ, INPUT);
+}
+
+static uint8_t tsXfer(uint8_t out) {
+  uint8_t in = 0;
+  for (int i = 7; i >= 0; i--) {
+    digitalWrite(TOUCH_MOSI, (out >> i) & 1);
+    delayMicroseconds(1);
+    digitalWrite(TOUCH_CLK, HIGH);
+    delayMicroseconds(1);
+    in = (in << 1) | (digitalRead(TOUCH_MISO) ? 1 : 0);
+    digitalWrite(TOUCH_CLK, LOW);
+  }
+  return in;
+}
+
+static uint16_t tsXfer16(uint16_t out) {
+  uint16_t hi = tsXfer(out >> 8);
+  return (hi << 8) | tsXfer(out & 0xFF);
+}
+
+static int16_t besttwoavg(int16_t x, int16_t y, int16_t z) {
+  int16_t da = abs(x - y), db = abs(x - z), dc = abs(z - y);
+  if (da <= db && da <= dc) return (x + y) >> 1;
+  if (db <= da && db <= dc) return (x + z) >> 1;
+  return (y + z) >> 1;
+}
+
+static TouchRaw tsRead() {
+  static bool awake = false;
+  static uint32_t lastAt = 0;
+  static TouchRaw last;
+  if (millis() - lastAt < 3) return last;
+  TouchRaw r;
+  // Dokunulmuyorken IRQ yüksektir; bir dokunuş başladıktan sonra parmak kalkana kadar okunur.
+  if (!awake && digitalRead(TOUCH_IRQ) == HIGH) {
+    last = r;
+    return r;
+  }
+  awake = true;
+  int16_t d[6] = {0, 0, 0, 0, 0, 0};
+  digitalWrite(TOUCH_CS, LOW);
+  tsXfer(0xB1);
+  int16_t z1 = tsXfer16(0xC1) >> 3;
+  int z = z1 + 4095;
+  int16_t z2 = tsXfer16(0x91) >> 3;
+  z -= z2;
+  if (z >= 400) {
+    tsXfer16(0x91);  // ilk ölçüm gürültülü
+    d[0] = tsXfer16(0xD1) >> 3;
+    d[1] = tsXfer16(0x91) >> 3;
+    d[2] = tsXfer16(0xD1) >> 3;
+    d[3] = tsXfer16(0x91) >> 3;
+  }
+  d[4] = tsXfer16(0xD0) >> 3;  // son ölçüm, ardından bekleme kipi (IRQ açık)
+  d[5] = tsXfer16(0) >> 3;
+  digitalWrite(TOUCH_CS, HIGH);
+  lastAt = millis();
+  if (z < 400) {
+    if (z < 75) awake = false;
+    last = r;
+    return r;
+  }
+  r.x = besttwoavg(d[0], d[2], d[4]);
+  r.y = besttwoavg(d[1], d[3], d[5]);
+  r.z = z;
+  last = r;
+  return r;
+}
+
+static bool tsTouched() { return tsRead().z > 0; }
+
 static bool getTouch(int& x, int& y) {
-  if (!ts.touched()) return false;
-  TS_Point p = ts.getPoint();
-  if (p.z < 200) return false;
+  TouchRaw p = tsRead();
+  if (!p.z) return false;
   int rx = cfg.swapXY ? p.y : p.x, ry = cfg.swapXY ? p.x : p.y;
   int dx = cfg.x2 - cfg.x1, dy = cfg.y2 - cfg.y1;
   if (dx == 0 || dy == 0) return false;
@@ -1242,10 +2255,10 @@ static bool getTouch(int& x, int& y) {
 
 // Dokunuşu bekler; BOOT'a basılırsa ya da 60 sn dokunulmazsa false döner.
 static bool waitTap(int& rx, int& ry) {
-  while (ts.touched()) delay(10);
+  while (tsTouched()) delay(10);
   delay(150);
   uint32_t t0 = millis();
-  while (!ts.touched()) {
+  while (!tsTouched()) {
     if (digitalRead(PIN_BOOT) == LOW || millis() - t0 > 60000) {
       while (digitalRead(PIN_BOOT) == LOW) delay(10);
       return false;
@@ -1255,16 +2268,15 @@ static bool waitTap(int& rx, int& ry) {
   long sx = 0, sy = 0;
   int n = 0;
   t0 = millis();
-  while (ts.touched() && millis() - t0 < 1500) {
-    TS_Point p = ts.getPoint();
-    if (p.z > 300) {
-      sx += p.x;
-      sy += p.y;
-      n++;
-    }
+  while (millis() - t0 < 1500) {
+    TouchRaw p = tsRead();
+    if (!p.z) break;
+    sx += p.x;
+    sy += p.y;
+    n++;
     delay(15);
   }
-  while (ts.touched()) delay(10);
+  while (tsTouched()) delay(10);
   if (!n) return false;
   rx = sx / n;
   ry = sy / n;
@@ -1305,6 +2317,10 @@ static void runCalibration() {
 }
 
 static void onTap(int x, int y) {
+  if (menuOpen && y < TAB_Y - 2) {
+    menuTap(x, y);
+    return;
+  }
   if (y >= TAB_Y - 2) {
     if (x < 86) go(SCR_HOME);
     else if (x < 172) go(SCR_PLAN);
@@ -1355,11 +2371,14 @@ static void onTap(int x, int y) {
             swStart = millis();
             swRunning = true;
           }
+          publishTimer();
           drawTimer(false);
         } else if (x < 235) {
           if (swElapsedMs() > 0) finishTimer();
         } else {
+          bool was = swRunning || swElapsedMs() > 0;
           resetTimer();
+          if (was) publishTimer();
           drawTimer(true);
         }
       }
@@ -1389,40 +2408,68 @@ static void onTap(int x, int y) {
   }
 }
 
+// Uzun basış yalnızca Program satırlarında anlamlı: oturum menüsünü açar.
+static bool onLongPress(int x, int y) {
+  if (screen != SCR_PLAN || menuOpen || y < ROW_Y || y >= TAB_Y - 2) return false;
+  int n = shownItems.size();
+  for (int i = 0; i < ROWS && planScroll + i < n; i++) {
+    int ry = ROW_Y + i * ROW_H;
+    if (y >= ry && y < ry + ROW_H) {
+      openMenu(shownItems[planScroll + i]);
+      return true;
+    }
+  }
+  return false;
+}
+
 static void handleTouch() {
-  static bool down = false;
+  static bool down = false, swallow = false, longFired = false, longUsed = false;
   static int dx = 0, dy = 0;
-  static uint32_t lastUp = 0;
-  static bool swallow = false;
+  static uint32_t downAt = 0, lastSeen = 0, lastUp = 0;
   int x, y;
   bool t = getTouch(x, y);
+  uint32_t ms = millis();
+  if (t) lastSeen = ms;
   if (t && !down) {
     down = true;
     dx = x;
     dy = y;
+    downAt = ms;
+    longFired = longUsed = false;
     swallow = wakeOnly();
-  } else if (!t && down) {
+  } else if (down && t && !swallow && !longFired && ms - downAt > LONG_PRESS_MS) {
+    longFired = true;
+    longUsed = onLongPress(dx, dy);
+  } else if (down && !t && ms - lastSeen > 40) {  // kısa kesintiler bırakma sayılmaz
     down = false;
-    if (!swallow && millis() - lastUp > 120) onTap(dx, dy);
-    lastUp = millis();
+    if (!swallow && !longUsed && ms - lastUp > 120) onTap(dx, dy);
+    lastUp = ms;
   }
 }
 
+// BOOT: kısa basış sonraki ekran, 2 sn Ayarlar, 6 sn kurulum (Wi-Fi ve hesap) portalı.
 static void handleBoot() {
   static bool down = false;
   static uint32_t downAt = 0;
-  static bool longDone = false;
+  static int stage = 0;
   bool pressed = digitalRead(PIN_BOOT) == LOW;
   if (pressed && !down) {
     down = true;
     downAt = millis();
-    longDone = false;
-  } else if (pressed && down && !longDone && millis() - downAt > 2000) {
-    longDone = true;
-    go(SCR_SETTINGS);
+    stage = 0;
+  } else if (pressed && down) {
+    uint32_t held = millis() - downAt;
+    if (stage == 0 && held > 2000) {
+      stage = 1;
+      go(SCR_SETTINGS);
+      toast("Bırakma: 6 sn'de kurulum açılır");
+    } else if (stage == 1 && held > 6000) {
+      stage = 2;
+      portalRequested = true;
+    }
   } else if (!pressed && down) {
     down = false;
-    if (!longDone && millis() - downAt > 40) {
+    if (stage == 0 && millis() - downAt > 40) {
       if (wakeOnly()) return;
       go(screen >= SCR_TIMER ? SCR_HOME : (Screen)((int)screen + 1));
     }
@@ -1490,18 +2537,22 @@ static void waitNetIdle() {
 static void runPortal(bool force) {
   waitNetIdle();
   String db, key, mail;
+  bool hasPass;
   {
     Lock l;
     db = cfg.dbUrl;
     key = cfg.apiKey;
     mail = cfg.email;
+    hasPass = cfg.password.length() > 0;
   }
   WiFiManager wm;
   WiFiManagerParameter title("<hr><h3>Firebase</h3><p>Telefondaki uygulamaya girdi&#287;in bilgilerin ayn&#305;s&#305;.</p>");
   WiFiManagerParameter pDb("db", "Veritaban&#305; adresi", db.c_str(), 140);
   WiFiManagerParameter pKey("key", "Web API anahtar&#305;", key.c_str(), 80);
   WiFiManagerParameter pMail("mail", "E-posta", mail.c_str(), 100);
-  WiFiManagerParameter pPass("pass", "&#350;ifre (de&#287;i&#351;meyecekse bo&#351; b&#305;rak)", "", 80, "type='password'");
+  // Kayıtlı şifre yoksa "boş bırak" yazmaz; ilk kurulumda boş bırakılıp eşleşme olmuyordu.
+  WiFiManagerParameter pPass("pass", hasPass ? "&#350;ifre (de&#287;i&#351;meyecekse bo&#351; b&#305;rak)" : "&#350;ifre",
+                             "", 80, "type='password'");
   wm.addParameter(&title);
   wm.addParameter(&pDb);
   wm.addParameter(&pKey);
@@ -1597,15 +2648,45 @@ void setup() {
   ledcAttachPin(PIN_BL, 0);
   ledcWrite(0, 255);
 
-  touchSPI.begin(TOUCH_CLK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
-  ts.begin(touchSPI);
-  ts.setRotation(1);
+  tsBegin();
 
   spr.setColorDepth(16);
   sprOk = spr.createSprite(300, 60) != nullptr;
   if (sprOk) spr.loadFont(F_BIG);
 
-  if (!cfg.calibrated) runCalibration();
+  Serial.println(FW_MARKER);
+  splash("SD kart kontrol ediliyor…");
+  sdOk = sdBegin();
+  if (sdOk) {
+    sdTryUpdate();
+    queueMigrate();
+  }
+  // Son alınan plan internet beklemeden gösterilir.
+  String cached = loadCachedView();
+  if (cached.length()) {
+    JsonDocument d;
+    if (!deserializeJson(d, cached)) {
+      Lock l;
+      parseView(d.as<JsonVariantConst>(), view);
+    }
+  }
+  rebuildLocalEvents();
+
+  // Açılışta 2 sn içinde BOOT'a basılırsa dokunmatik yeniden ayarlanır.
+  bool calib = !cfg.calibrated;
+  if (!calib) {
+    splash("Dokunmatik ayarı için BOOT'a bas");
+    uint32_t t0 = millis();
+    while (millis() - t0 < 2000) {
+      if (digitalRead(PIN_BOOT) == LOW) {
+        while (digitalRead(PIN_BOOT) == LOW) delay(10);
+        calib = true;
+        break;
+      }
+      delay(10);
+    }
+  }
+  if (calib) runCalibration();
 
   splash("Wi-Fi'ye bağlanıyor…");
   WiFi.mode(WIFI_STA);
@@ -1635,8 +2716,15 @@ void loop() {
 
   if (portalRequested) {
     portalRequested = false;
+    while (digitalRead(PIN_BOOT) == LOW) delay(10);  // basılı BOOT portalı hemen kapatmasın
+    menuOpen = false;
     runPortal(true);
     drawScreen(true);
+  }
+  applyRemoteTimer();
+  if (menuOpen && millis() - menuAt > 20000) {
+    menuOpen = false;
+    drawScreen(false);
   }
   if (calibRequested) {
     calibRequested = false;
@@ -1651,6 +2739,13 @@ void loop() {
   if (dataDirty && !toastUntil) {
     dataDirty = false;
     drawScreen(false);
+  }
+
+  static uint32_t lastPhase = 0;
+  if (millis() - lastPhase >= 6000) {
+    lastPhase = millis();
+    datePhase = !datePhase;
+    if (screen == SCR_HOME && !toastUntil) drawDate();
   }
 
   if (millis() - lastTick >= 200) {

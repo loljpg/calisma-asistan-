@@ -382,6 +382,10 @@ export function applyDeviceEvents(state, events, now = new Date()) {
     } else if (e.type === 'uncomplete' && it && it.durum === 'tamam') {
       uncompleteItem(state, date, it.id);
       applied++;
+    } else if (e.type === 'postpone' && it && it.durum !== 'tamam' && it.durum !== 'ertelendi') {
+      it.durum = 'ertelendi';
+      if (state.timer?.itemId === it.id) state.timer = null;
+      applied++;
     } else if (e.type === 'session') {
       const sec = Math.round(Number(e.sec));
       if (sec >= 60 && sec <= 6 * 3600) {
@@ -400,6 +404,58 @@ export function applyDeviceEvents(state, events, now = new Date()) {
   }
   state.processedEvents = state.processedEvents.slice(-300);
   return applied;
+}
+
+// ---------- Ortak kronometre (telefon ve masa saati) ----------
+// users/{uid}/device/timer = { on, itemId, date, ders, konu, dk, startedAt, acc, by, rev }
+// startedAt: çalışıyorsa son başlatılma anı (ms), duraklatılmışsa 0. acc: o ana kadar biriken süre (ms).
+// rev: değişiklik zamanı; iki taraf da sadece kendisininkinden yeni olanı uygular.
+export function sharedTimer(state, by = 'phone', rev = Date.now()) {
+  const t = state.timer;
+  if (!t) return { on: false, by, rev };
+  const it = t.itemId ? findItem(state, t.date, t.itemId) : null;
+  return {
+    on: true,
+    itemId: t.itemId || '',
+    date: t.date || dateStr(),
+    ders: t.ders || '',
+    konu: t.konu || '',
+    dk: Number(it?.dk) || 0,
+    startedAt: t.startedAt || 0,
+    acc: Math.max(0, Math.round(t.acc || 0)),
+    by,
+    rev
+  };
+}
+
+// Kronometrenin değişip değişmediğini anlamak için (kim/ne zaman bilgisi hariç).
+export function timerSig(t) {
+  if (!t) return 'off';
+  return JSON.stringify([t.itemId || null, t.date || '', t.ders || '', t.konu || '', t.startedAt || 0, Math.round(t.acc || 0)]);
+}
+
+// Masa saatinden gelen kronometreyi uygular. Değişiklik olduysa true döner.
+export function applySharedTimer(state, r) {
+  if (!r || !r.on) {
+    if (!state.timer) return false;
+    state.timer = null;
+    return true;
+  }
+  const itemId = r.itemId ? String(r.itemId) : null;
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(r.date)) ? r.date : dateStr();
+  const it = itemId ? findItem(state, date, itemId) : null;
+  const next = {
+    itemId: it ? it.id : null,
+    date,
+    ders: String(r.ders || it?.ders || 'Diğer').slice(0, 40),
+    konu: String(r.konu || it?.konu || '').slice(0, 120),
+    taskId: it?.taskId || null,
+    startedAt: Number(r.startedAt) > 0 ? Number(r.startedAt) : null,
+    acc: Math.max(0, Number(r.acc) || 0)
+  };
+  if (timerSig(next) === timerSig(state.timer)) return false;
+  state.timer = next;
+  return true;
 }
 
 // Cihaz son 3 dakika içinde haber verdiyse bağlı sayılır.

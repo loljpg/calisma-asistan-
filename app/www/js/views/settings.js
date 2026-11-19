@@ -4,7 +4,7 @@ import { icon, esc, radio, openSheet, closeSheet, sheetHead, toast, copyText } f
 import { askClaude, MODELS } from '../ai.js';
 import { BUILD, ensureNotifPermission } from '../native.js';
 import * as L from '../logic.js';
-import { syncState, isSignedIn, connect, disconnect, restoreFromCloud } from '../sync.js';
+import { syncState, isSignedIn, connect, disconnect, restoreFromCloud, liveOpen } from '../sync.js';
 
 const THEMES = [
   ['auto', 'Otomatik'],
@@ -14,7 +14,8 @@ const THEMES = [
 
 function syncText() {
   if (syncState.error) return `Hata: ${syncState.error}`;
-  return syncState.lastSync ? L.agoText(syncState.lastSync) : 'Henüz eşitlenmedi';
+  const t = syncState.lastSync ? L.agoText(syncState.lastSync) : 'Henüz eşitlenmedi';
+  return liveOpen() ? `${t} · canlı` : t;
 }
 
 function deviceText() {
