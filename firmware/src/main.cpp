@@ -117,6 +117,10 @@ static bool bleTimerPending = false;
 static uint32_t blePairUntil = 0;           // eşleşme kipi bitişi (millis)
 static bool bleHasToken = false;            // bir telefonla eşleşmiş mi
 
+// Yeniden başlama tanısı: RTC belleği yazılım sıfırlamalarında ve çökmelerde silinmez.
+RTC_NOINIT_ATTR uint32_t rtcMagic, rtcUpSec, rtcMinHeap;
+static String bootReason;
+
 #define STR_(x) #x
 #define STR(x) STR_(x)
 // SD karttan güncellemede dosyanın hangi sürüm olduğunu anlamak için yazılıma gömülen işaret.
@@ -435,6 +439,95 @@ static void queueMigrate() {
   saveOutboxNvs();
 }
 
+// Gönderilmiş ama telefonun planına henüz yansımamış olaylar. Kart yeniden başlarsa ekranda
+// kaybolmasınlar diye saklanır; telefonun planı bunları gösterince silinir.
+static std::vector<String> sentLines;
+#define SD_SENT SD_DIR "/gonderilen.txt"
+
+static long long lineAt(const String& line) {
+  int i = line.indexOf("\"at\":");
+  return i < 0 ? 0 : atoll(line.c_str() + i + 5);
+}
+
+static void sentSave() {
+  Lock l;
+  String s;
+  for (auto& e : sentLines) {
+    s += e;
+    s += '\n';
+  }
+  if (sdOk) {
+    File f = SD.open(SD_SENT, FILE_WRITE);
+    if (f) {
+      f.print(s);
+      f.close();
+    }
+    return;
+  }
+  prefs.begin("cs", false);
+  if (s.length()) prefs.putBytes("sent", s.c_str(), s.length());
+  else prefs.remove("sent");
+  prefs.end();
+}
+
+static void sentLoad() {
+  Lock l;
+  String s;
+  if (sdOk) {
+    File f = SD.open(SD_SENT, FILE_READ);
+    if (f) {
+      s = f.readString();
+      f.close();
+    }
+  } else {
+    prefs.begin("cs", true);
+    size_t n = prefs.getBytesLength("sent");
+    if (n) {
+      std::unique_ptr<char[]> b(new char[n + 1]);
+      prefs.getBytes("sent", b.get(), n);
+      b[n] = 0;
+      s = b.get();
+    }
+    prefs.end();
+  }
+  sentLines.clear();
+  int start = 0;
+  while (start < (int)s.length()) {
+    int nl = s.indexOf('\n', start);
+    if (nl < 0) nl = s.length();
+    String line = s.substring(start, nl);
+    line.trim();
+    if (line.length()) sentLines.push_back(line);
+    start = nl + 1;
+  }
+}
+
+// Kuyruğun başındaki n olay gönderildi: kuyruktan çıkar, "gönderildi" listesine al.
+static void queueDropSent(int n) {
+  std::vector<String> head = queuePeek(n);
+  {
+    Lock l;
+    for (auto& h : head) sentLines.push_back(h);
+    while (sentLines.size() > 40) sentLines.erase(sentLines.begin());
+  }
+  queueDrop(n);
+  sentSave();
+}
+
+static void sentPrune(long long updatedAt, const String& date) {
+  bool changed = false;
+  {
+    Lock l;
+    String tag = "\"date\":\"" + date + "\"";
+    size_t before = sentLines.size();
+    sentLines.erase(std::remove_if(sentLines.begin(), sentLines.end(),
+                                   [&](const String& x) { return lineAt(x) <= updatedAt || x.indexOf(tag) < 0; }),
+                    sentLines.end());
+    changed = sentLines.size() != before;
+  }
+  if (changed) sentSave();
+}
+
 static void sdLog(const String& line, const String& date) {
   Lock l;
   if (!sdOk || date.length() < 7) return;
@@ -489,6 +582,11 @@ static String loadCachedView() {
 // ============================================================================
 static String httpsRequest(const char* method, const String& url, const String& body, int& code,
                            const char* contentType = "application/json") {
+  // Bellek azsa şifreli bağlantı açılmaz: yetersiz bellekte kütüphane çöküp kartı yeniden başlatıyordu.
+  if (ESP.getMaxAllocHeap() < 38000) {
+    code = -2;
+    return String();
+  }
   WiFiClientSecure client;
   client.setInsecure();  // sertifika doğrulaması yok; ev ağı için yeterli
   HTTPClient http;
@@ -619,6 +717,7 @@ static void applyView(JsonVariantConst d) {
   }
   lastViewRaw = raw;
   pruneLocalEvents();
+  if (v.valid) sentPrune(v.updatedAt, v.date);
   dataDirty = true;
   if (v.valid) cacheView(raw);
 }
@@ -653,6 +752,8 @@ static void fbPushStatus() {
   d["ip"] = WiFi.localIP().toString();
   d["rssi"] = WiFi.RSSI();
   d["heap"] = ESP.getFreeHeap();
+  d["minHeap"] = ESP.getMinFreeHeap();
+  d["reset"] = bootReason;
   d["sd"] = sdOk;
   d["live"] = (bool)liveOn;
   d["queue"] = queueCount();
@@ -709,6 +810,11 @@ static void fbFlushOutbox() {
         return;
       }
       if (code != 200 && code != 400) return;  // 400: bozuk paket, takılı kalmasın diye atlanır
+      if (code == 200) {
+        queueDropSent(batch.size());
+        wantView = true;
+        continue;
+      }
     }
     queueDrop(batch.size());
     wantView = true;
@@ -785,6 +891,49 @@ static void fbPushTimer() {
   }
 }
 
+// Kronometre her değiştiğinde saklanır; kart yeniden başlarsa kaldığı yerden sürer.
+static void timerSave(const SharedTimer& t) {
+  JsonDocument d;
+  d["on"] = t.on;
+  if (t.on) {
+    d["itemId"] = t.itemId;
+    d["date"] = t.date;
+    d["ders"] = t.ders;
+    d["konu"] = t.konu;
+    d["dk"] = t.dk;
+    d["startedAt"] = t.startedAt;
+    d["acc"] = t.acc;
+  }
+  d["rev"] = t.rev;
+  String s;
+  serializeJson(d, s);
+  Lock l;
+  prefs.begin("cs", false);
+  prefs.putString("tmr", s);
+  prefs.end();
+}
+
+static void timerRestore() {
+  String s;
+  {
+    Lock l;
+    prefs.begin("cs", true);
+    s = prefs.getString("tmr", "");
+    prefs.end();
+  }
+  if (!s.length()) return;
+  JsonDocument d;
+  if (deserializeJson(d, s)) return;
+  SharedTimer r;
+  parseTimer(d.as<JsonVariantConst>(), r);
+  if (!r.on || !r.rev) return;
+  r.by = "restore";
+  Lock l;
+  timerRevSeen = r.rev;
+  remoteTimer = r;
+  remoteTimerDirty = true;
+}
+
 // --- Canlı akış (Realtime Database REST streaming, Server-Sent Events) ---
 // users/{uid}/device dinlenir: plan (view) ve kronometre (timer) değişince saniyesinde gelir.
 // Akış kopuksa plan 30 sn, kronometre 10 sn arayla sorulur.
@@ -805,7 +954,10 @@ static void liveClose() {
     live.c = nullptr;
   }
   live.ready = false;
-  live.line = live.evType = live.evData = live.sizeLine = "";
+  live.line = String();  // büyük mesajlardan kalan tamponlar bırakılsın
+  live.evType = String();
+  live.evData = String();
+  live.sizeLine = String();
   liveOn = false;
 }
 
@@ -926,7 +1078,8 @@ static void liveApply(bool patch, const String& path, JsonVariantConst v) {
 static void liveDispatch() {
   String type = live.evType, data = live.evData;
   bool overflow = live.overflow;
-  live.evType = live.evData = "";
+  live.evType = String();
+  live.evData = String();
   live.overflow = false;
   if (type == "keep-alive" || !type.length()) return;
   if (type == "cancel") {  // izin yok ya da kurallar değişti
@@ -980,7 +1133,8 @@ static void liveByte(char ch) {
     if (live.evData.length() + part.length() < 12000) live.evData += part;
     else live.overflow = true;
   }
-  live.line = "";
+  if (live.line.length() > 1024) live.line = String();
+  else live.line = "";
 }
 
 static void livePump() {
@@ -1018,19 +1172,38 @@ static void livePump() {
 }
 
 // --- Hava durumu (Open-Meteo, anahtar gerekmez) ---
+// Hava durumu şifresiz HTTP ile alınır (Open-Meteo destekliyor): şifreli bağlantının ~40 KB
+// belleği Bluetooth açıkken yetmiyordu.
+static int weatherHttp = 0;
+static uint32_t weatherAt = 0;
 static void fetchWeather() {
-  int code = 0;
-  String resp = httpsRequest("GET",
-                             "https://api.open-meteo.com/v1/forecast?latitude=" WEATHER_LAT "&longitude=" WEATHER_LON
-                             "&current=temperature_2m,weather_code&timezone=auto",
-                             "", code);
+  static const char* URL = "http://api.open-meteo.com/v1/forecast?latitude=" WEATHER_LAT "&longitude=" WEATHER_LON
+                           "&current=temperature_2m,weather_code&timezone=auto";
+  WiFiClient client;
+  HTTPClient http;
+  http.setConnectTimeout(8000);
+  http.setTimeout(10000);
+  String resp;
+  int code = -1;
+  if (http.begin(client, URL)) {
+    http.setUserAgent("calisma-saati/" + String(FW_BUILD));
+    code = http.GET();
+    if (code == 200) resp = http.getString();
+    http.end();
+  }
+  if (code != 200) resp = httpsRequest("GET", String(URL).substring(0, 4) + "s" + String(URL).substring(4), "", code);
+  weatherHttp = code;
   if (code != 200) return;
   JsonDocument d;
-  if (deserializeJson(d, resp)) return;
+  if (deserializeJson(d, resp)) {
+    weatherHttp = -3;
+    return;
+  }
   Lock l;
   weather.valid = !d["current"]["temperature_2m"].isNull();
   weather.temp = d["current"]["temperature_2m"] | 0.0f;
   weather.code = d["current"]["weather_code"] | 0;
+  weatherAt = millis();
   dataDirty = true;
 }
 
@@ -1754,6 +1927,318 @@ static void drawMusic(bool full) {
   drawMusicVolume();
 }
 
+// Kedi kareleri (tools ile üretildi). O: çizgi, W: beyaz, G: gölge, K: koyu gölge, E: göz, P: pembe, .: boş
+static const int CAT_W = 19, CAT_H = 13;
+enum CatFrame { CF_WALK1, CF_WALK2, CF_RUN, CF_BAT, CF_SIT, CF_SLEEP };
+static const char* const CAT_FRAMES[][CAT_H] = {
+    {"..OO........O...O..",
+     ".OWWO......OWO.OWO.",
+     "OWWWWO....OWKOOPWO.",
+     "OWWWO.....OWWWWWWO.",
+     ".OWWO.....OWWWWEWWO",
+     "..OWWO....OWWWWWWPO",
+     "..OWWWOOOOWWWWWWWO.",
+     "...OWWWWWWWWWWWWO..",
+     "...OGWWWWWWWWWWGO..",
+     "...OGGWWWWWWWWGGO..",
+     "...OWKOKWOOOWKOWO..",
+     "...OWKOKWO.OWKOWO..",
+     "....OO.OO...OO.O..."},  // walk1
+    {"..OO........O...O..",
+     ".OWWO......OWO.OWO.",
+     "OWWWWO....OWKOOPWO.",
+     "OWWWO.....OWWWWWWO.",
+     ".OWWO.....OWWWWEWWO",
+     "..OWWO....OWWWWWWPO",
+     "..OWWWOOOOWWWWWWWO.",
+     "...OWWWWWWWWWWWWO..",
+     "...OGWWWWWWWWWWGO..",
+     "...OGGWWWWWWWWGGO..",
+     "....OWKWOOOOOWKWO..",
+     "....OWKWO...OWKWO..",
+     ".....OOO.....OOO..."},  // walk2
+    {"..OO........O...O..",
+     ".OWWO......OWO.OWO.",
+     "OWWWWO....OWKOOPWO.",
+     "OWWWO.....OWWWWWWO.",
+     ".OWWO....OWWWWWEWWO",
+     "..OWWO...OWWWWWWWPO",
+     "..OWWWOOOWWWWWWWWO.",
+     "...OWWWWWWWWWWWWO..",
+     "...OGWWWWWWWWWWGO..",
+     "..OGGGWWWWWWWGGWWO.",
+     ".OWWOGGGOOOOGGOOWWO",
+     "OWWO.OOO....OO..OWO",
+     ".OO..............O."},  // run
+    {"..OO........O...O..",
+     ".OWWO......OWO.OWO.",
+     "OWWWWO....OWKOOPWO.",
+     "OWWWO.....OWWWWWWO.",
+     ".OWWO.....OWWWWEWWO",
+     "..OWWO....OWWWWWWPO",
+     "..OWWWOOOOWWWWWWWO.",
+     "...OWWWWWWWWWWWWWWO",
+     "...OGWWWWWWWWWWGOWO",
+     "...OGGWWWWWWWWGGOO.",
+     "...OWKOKWOOOWKOO...",
+     "...OWKOKWO.OWKO....",
+     "....OO.OO...OO....."},  // bat
+    {".........O...O.....",
+     "........OWO.OWO....",
+     "........OWKOOPWO...",
+     "........OWWWWWWO...",
+     "..OO....OWWWWEWWO..",
+     ".OWWO...OWWWWWWPO..",
+     "OWWWWO.OWWWWWWWO...",
+     "OWWWO.OWWWWWWWWO...",
+     "OWWO.OWWWWWWWWWO...",
+     ".OWWOOGWWWWWWWWO...",
+     "..OWWGGWWWWWWGWO...",
+     "...OGGGGWWWWGGWO...",
+     "....OOOOOOOOOOO...."},  // sit
+    {"...................",
+     "...................",
+     "...................",
+     "...................",
+     "............O...O..",
+     ".......OOOOOWO.OWO.",
+     "....OOOWWWWWWKOPWO.",
+     "...OWWWWWWWWWWWWWO.",
+     "..OWWWWWWWWWWKKWWWO",
+     ".OWWGWWWWWWWWWWWWPO",
+     ".OWWGGWWWWWWWWWWWO.",
+     "..OWWWGGGGGGGGGWO..",
+     "...OOOOOOOOOOOOO..."},  // sleep
+};
+
+// --- Ana ekrandaki kedi ve topu ---
+// Saatin altındaki şeritte kendi kendine dolaşır, oturur, topunu kovalar ve patiyle iter.
+// Gece (22:00–07:00) uyur. Üstüne dokununca sevinir.
+static const int CAT_S = 2;                         // her sanat pikseli 2×2 ekran pikseli
+static const int ZONE_TOP = 92, ZONE_FLOOR = 119;   // şerit: 92..121, ayakların bastığı çizgi 119
+static const int ZONE_H = 30;
+enum CatState { CAT_SIT, CAT_WALK, CAT_CHASE, CAT_BAT, CAT_SLEEP, CAT_HAPPY };
+struct CatS {
+  float x = 120, target = 120, bx = 220, bvx = 0;
+  int dir = 1, hop = 0;
+  CatState st = CAT_SIT;
+  uint32_t until = 0, tick = 0, happyAt = 0;
+  int lastL = -1, lastR = -1, lastBL = -1, lastBR = -1, lastFrame = -1, lastHop = 0;
+  bool lastZ = false;
+};
+static CatS cat;
+
+static uint16_t catColor(char c) {
+  switch (c) {
+    case 'O': return darkNow ? RGB(150, 151, 160) : RGB(112, 113, 121);
+    case 'W': return RGB(250, 250, 248);
+    case 'G': return RGB(205, 205, 212);
+    case 'K': return RGB(172, 172, 182);
+    case 'E': return RGB(236, 150, 30);
+    case 'P': return RGB(238, 140, 170);
+    default: return 0;
+  }
+}
+
+static int catFrameNow() {
+  switch (cat.st) {
+    case CAT_WALK: return (cat.tick / 4) % 2 ? CF_WALK2 : CF_WALK1;
+    case CAT_CHASE: return (cat.tick / 3) % 2 ? CF_RUN : CF_WALK2;
+    case CAT_BAT: return CF_BAT;
+    case CAT_SLEEP: return CF_SLEEP;
+    default: return CF_SIT;
+  }
+}
+
+static int catLeft() { return (int)cat.x - CAT_W * CAT_S / 2; }
+
+// Küçük piksel desenleri (uyku "z"si ve kalp)
+static void catPattern(int x, int y, const char* const* rows, int n, uint16_t col) {
+  for (int r = 0; r < n; r++)
+    for (int c = 0; rows[r][c]; c++)
+      if (rows[r][c] == 'X') spr.fillRect(x + c * 2, y + r * 2, 2, 2, col);
+}
+static const char* const PAT_Z[] = {"XXX", "..X", ".X.", "XXX"};
+static const char* const PAT_HEART[] = {".X.X.", "XXXXX", ".XXX.", "..X.."};
+
+// Şeridin [x0, x0+w) kısmını ara bellekte çizip ekrana basar.
+static void catRender(int x0, int w) {
+  int x1 = std::min(SCREEN_W, x0 + w);
+  x0 = std::max(0, x0);
+  if (!sprOk || x1 <= x0) return;
+  while (x0 < x1) {
+    int ww = std::min(x1 - x0, 300);
+    spr.fillRect(0, 0, ww, ZONE_H, COL_BG);
+    gridLines(spr, x0, ZONE_TOP, x0, ZONE_TOP, ww, ZONE_H);
+    int cx = (int)cat.x;
+    uint16_t shadow = darkNow ? RGB(6, 6, 8) : COL_LINE_STRONG;
+    if (cat.st != CAT_SLEEP) spr.fillRoundRect(cx - 13 - x0, ZONE_FLOOR - ZONE_TOP, 26, 3, 1, shadow);
+    else spr.fillRoundRect(cx - 16 - x0, ZONE_FLOOR - ZONE_TOP, 32, 3, 1, shadow);
+    // top
+    int bx = (int)cat.bx, by = ZONE_FLOOR - 4 - ZONE_TOP;
+    spr.fillRoundRect(bx - 4 - x0, ZONE_FLOOR - ZONE_TOP + 1, 9, 2, 1, shadow);
+    spr.fillCircle(bx - x0, by, 4, COL_RED);
+    float a = cat.bx / 4.0f;
+    spr.fillRect(bx - x0 + (int)roundf(cosf(a) * 2) - 1, by + (int)roundf(sinf(a) * 2) - 1, 2, 2, COL_SURFACE);
+    // kedi
+    int f = catFrameNow();
+    int left = catLeft(), top = ZONE_FLOOR + 1 - CAT_H * CAT_S - cat.hop;
+    for (int r = 0; r < CAT_H; r++) {
+      const char* row = CAT_FRAMES[f][r];
+      for (int c = 0; c < CAT_W; c++) {
+        char ch = row[cat.dir > 0 ? c : CAT_W - 1 - c];
+        if (ch == '.') continue;
+        spr.fillRect(left + c * CAT_S - x0, top + r * CAT_S - ZONE_TOP, CAT_S, CAT_S, catColor(ch));
+      }
+    }
+    if (cat.st == CAT_SLEEP) {
+      int zx = cat.dir > 0 ? left + 22 : left + 8;
+      catPattern(zx - x0, top + 2 - ZONE_TOP, PAT_Z, 4, COL_MUTED);
+      if ((cat.tick / 3) % 2) catPattern(zx + 9 * cat.dir - x0, top - ZONE_TOP - 1, PAT_Z, 4, COL_FAINT);
+    } else if (cat.st == CAT_HAPPY) {
+      int hx = cat.dir > 0 ? left + CAT_W * CAT_S + 1 : left - 11;
+      catPattern(hx - x0, top + 2 - ZONE_TOP, PAT_HEART, 4, COL_RED);
+    }
+    spr.pushSprite(x0, ZONE_TOP, 0, 0, ww, ZONE_H);
+    x0 += ww;
+  }
+}
+
+static void catDrawAll() {
+  cat.lastL = cat.lastR = cat.lastBL = cat.lastBR = -1;
+  catRender(0, SCREEN_W);
+}
+
+// Yalnızca değişen yer yeniden çizilir (eski ve yeni konumları kapsayan dar şerit).
+static void catFlush() {
+  int f = catFrameNow();
+  int l = catLeft() - 14, r = catLeft() + CAT_W * CAT_S + 14;
+  int bl = (int)cat.bx - 7, br = (int)cat.bx + 7;
+  bool z = (cat.tick / 3) % 2;
+  bool same = l == cat.lastL && bl == cat.lastBL && f == cat.lastFrame && cat.hop == cat.lastHop &&
+              (cat.st != CAT_SLEEP || z == cat.lastZ);
+  if (same) return;
+  int a0 = cat.lastL < 0 ? l : std::min(l, cat.lastL), a1 = std::max(r, cat.lastR);
+  int b0 = cat.lastBL < 0 ? bl : std::min(bl, cat.lastBL), b1 = std::max(br, cat.lastBR);
+  if (b0 <= a1 && b1 >= a0) {
+    catRender(std::min(a0, b0), std::max(a1, b1) - std::min(a0, b0));
+  } else {
+    catRender(a0, a1 - a0);
+    catRender(b0, b1 - b0);
+  }
+  cat.lastL = l;
+  cat.lastR = r;
+  cat.lastBL = bl;
+  cat.lastBR = br;
+  cat.lastFrame = f;
+  cat.lastHop = cat.hop;
+  cat.lastZ = z;
+}
+
+static uint32_t rnd(uint32_t n) { return esp_random() % n; }
+
+static void catUpdate(bool night) {
+  uint32_t ms = millis();
+  cat.tick++;
+  // Top yuvarlanır, yavaşlar, kenarlardan seker.
+  if (fabsf(cat.bvx) > 0.03f) {
+    cat.bx += cat.bvx;
+    cat.bvx *= 0.965f;
+    if (cat.bx < 8) {
+      cat.bx = 8;
+      cat.bvx = -cat.bvx * 0.6f;
+    } else if (cat.bx > SCREEN_W - 8) {
+      cat.bx = SCREEN_W - 8;
+      cat.bvx = -cat.bvx * 0.6f;
+    }
+  } else {
+    cat.bvx = 0;
+  }
+  switch (cat.st) {
+    case CAT_SLEEP:
+      if (!night) {
+        cat.st = CAT_SIT;
+        cat.until = ms + 3000;
+      }
+      break;
+    case CAT_SIT:
+      if (fabsf(cat.bvx) > 0.3f) cat.dir = cat.bx > cat.x ? 1 : -1;  // yuvarlanan topu izler
+      if ((int32_t)(ms - cat.until) > 0) {
+        if (night) {
+          cat.st = CAT_SLEEP;
+          break;
+        }
+        uint32_t r = rnd(100);
+        if (r < 45) {
+          cat.st = CAT_CHASE;
+        } else if (r < 85) {
+          cat.st = CAT_WALK;
+          cat.target = 24 + rnd(272);
+          cat.dir = cat.target > cat.x ? 1 : -1;
+        } else {
+          cat.until = ms + 2000 + rnd(4000);
+        }
+      }
+      break;
+    case CAT_WALK:
+      cat.x += 0.7f * cat.dir;
+      if ((cat.dir > 0 && cat.x >= cat.target) || (cat.dir < 0 && cat.x <= cat.target) || cat.x <= 22 || cat.x >= 298) {
+        cat.st = CAT_SIT;
+        cat.until = ms + 2000 + rnd(5000);
+      }
+      break;
+    case CAT_CHASE: {
+      float d = cat.bx - cat.x;
+      cat.dir = d > 0 ? 1 : -1;
+      if (fabsf(d) > 16) {
+        cat.x += 1.8f * cat.dir;
+      } else if (fabsf(cat.bvx) < 0.6f) {
+        cat.st = CAT_BAT;
+        cat.until = ms + 350;
+      }
+      break;
+    }
+    case CAT_BAT:
+      if ((int32_t)(ms - cat.until) > 0) {
+        cat.bvx = cat.dir * (2.2f + rnd(100) / 40.0f);  // patiyle iter
+        if (rnd(100) < 65) {
+          cat.st = CAT_CHASE;
+        } else {
+          cat.st = CAT_SIT;
+          cat.until = ms + 1500 + rnd(3000);
+        }
+      }
+      break;
+    case CAT_HAPPY:
+      cat.hop = ms - cat.happyAt < 160 ? 2 : (ms - cat.happyAt < 320 ? 4 : (ms - cat.happyAt < 480 ? 2 : 0));
+      if ((int32_t)(ms - cat.until) > 0) {
+        cat.st = CAT_SIT;
+        cat.hop = 0;
+        cat.until = ms + 2500;
+      }
+      break;
+  }
+  cat.x = constrain(cat.x, 22.f, 298.f);
+}
+
+static void catPet(int x) {
+  cat.dir = x >= cat.x ? 1 : -1;
+  cat.st = CAT_HAPPY;
+  cat.happyAt = millis();
+  cat.until = millis() + 1600;
+}
+
+// Seri alevi (~11×14)
+static void drawFlame(int x, int y, uint16_t bg) {
+  const uint16_t o = RGB(255, 112, 32), m = RGB(255, 172, 40), c = RGB(255, 230, 130);
+  tft.fillSmoothCircle(x + 5, y + 9, 5, o, bg);
+  tft.fillTriangle(x + 0, y + 8, x + 10, y + 8, x + 6, y + 0, o);
+  tft.fillTriangle(x + 0, y + 8, x + 3, y + 8, x + 1, y + 3, o);
+  tft.fillSmoothCircle(x + 5, y + 10, 3, m, o);
+  tft.fillTriangle(x + 3, y + 10, x + 7, y + 10, x + 5, y + 4, m);
+  tft.fillRect(x + 4, y + 10, 2, 2, c);
+}
+
 // --- Ana ekran ---
 static const char* GUN_UP[] = {"PAZAR", "PAZARTESİ", "SALI", "ÇARŞAMBA", "PERŞEMBE", "CUMA", "CUMARTESİ"};
 static const char* AY_UP[] = {"OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"};
@@ -1778,7 +2263,19 @@ static void drawDate() {
   else s = localNow(t) ? String(GUN_UP[t.tm_wday]) + ", " + String(t.tm_mday) + " " + AY_UP[t.tm_mon] : String("SAAT AYARLANIYOR…");
   bool alt = datePhase && extra.length();
   int iw = notifIconsW();
-  text(fit(s, F_SMALL, 216 - iw - (iw ? 6 : 0)), 14, 10, F_SMALL, alt ? COL_RED : COL_MUTED, COL_BG);
+  int room = 216 - iw - (iw ? 6 : 0);
+  if (streak > 0) {
+    // Seri varsa yanında alev: tarih kısmında "🔥 6", seri kısmında yazının sonunda.
+    String num = alt ? String("") : String(streak);
+    int extraW = 16 + (num.length() ? textW(num, F_SMALL) + 2 : 0);
+    String shown = fit(s, F_SMALL, room - extraW);
+    text(shown, 14, 10, F_SMALL, alt ? COL_RED : COL_MUTED, COL_BG);
+    int fx = 14 + textW(shown, F_SMALL) + 6;
+    drawFlame(fx, 8, COL_BG);
+    if (num.length()) text(num, fx + 13, 10, F_SMALL, COL_TEXT, COL_BG);
+  } else {
+    text(fit(s, F_SMALL, room), 14, 10, F_SMALL, alt ? COL_RED : COL_MUTED, COL_BG);
+  }
   drawNotifIcons();
 }
 
@@ -1807,31 +2304,32 @@ static void drawWeatherCard() {
 
 // Ana ekrandaki koyu kronometre kartında yalnızca değişen kısım (saniyede bir).
 static void drawNowTimerTick() {
-  const int X = 8, Y = 100, W = 304;
+  const int X = 8, Y = 122, W = 304;
   int wMax = textW("0:00:00", F_TITLE);
-  tft.fillRect(X + W - 14 - wMax - 2, Y + 24, wMax + 2, 34, COL_INK);
-  text(fmtClock(swElapsedMs() / 1000), X + W - 14, Y + 26, F_TITLE, COL_ON_INK, COL_INK, TR_DATUM);
-  if (swDk > 0) progressBar(X + 14, Y + 78, W - 28, 4, (int)(swElapsedMs() / 600 / swDk), COL_ON_INK, COL_INK_LINE, COL_INK);
+  tft.fillRect(X + W - 14 - wMax - 2, Y + 20, wMax + 2, 34, COL_INK);
+  text(fmtClock(swElapsedMs() / 1000), X + W - 14, Y + 22, F_TITLE, COL_ON_INK, COL_INK, TR_DATUM);
+  if (swDk > 0) progressBar(X + 14, Y + 63, W - 28, 4, (int)(swElapsedMs() / 600 / swDk), COL_ON_INK, COL_INK_LINE, COL_INK);
 }
 
 static void drawNowCard() {
-  const int X = 8, Y = 100, W = 304, H = 94;
+  const int X = 8, Y = 122, W = 304, H = 72;
   int studied = 0;
   View v;
   std::vector<Item> items = displayItems(studied, v);
 
   if (swRunning || swElapsedMs() > 0) {
     card(X, Y, W, H, 14, COL_INK, COL_INK);
-    dotLabel(swRunning ? "KRONOMETRE" : "DURAKLATILDI", X + 14, Y + 10, swRunning ? COL_RED : COL_INK_MUTED, COL_INK_MUTED, COL_INK);
+    dotLabel(swRunning ? "KRONOMETRE" : "DURAKLATILDI", X + 14, Y + 8, swRunning ? COL_RED : COL_INK_MUTED, COL_INK_MUTED, COL_INK);
     int maxW = W - 28 - textW("0:00:00", F_TITLE) - 14;
-    text(fit(swDers.length() ? swDers : String("Serbest çalışma"), F_TEXT, maxW), X + 14, Y + 32, F_TEXT, COL_ON_INK, COL_INK);
-    text(fit(swKonu, F_SMALL, maxW), X + 14, Y + 54, F_SMALL, COL_INK_MUTED, COL_INK);
+    text(fit(swDers.length() ? swDers : String("Serbest çalışma"), F_TEXT, maxW), X + 14, Y + 25, F_TEXT, COL_ON_INK, COL_INK);
+    text(fit(swKonu, F_SMALL, maxW), X + 14, Y + 46, F_SMALL, COL_INK_MUTED, COL_INK);
     drawNowTimerTick();
     return;
   }
 
   card(X, Y, W, H, 14, COL_SURFACE, COL_LINE);
   String label, line1, line2;
+  bool streakLine = false;
   uint16_t dot = COL_FAINT;
   if (!hasCreds()) {
     label = "KURULUM";
@@ -1877,13 +2375,15 @@ static void drawNowCard() {
       dot = COL_OK;
       line1 = items.empty() ? "Plan boş" : "Bugünkü oturumlar bitti";
       if (v.streak > 0) line2 = String(v.streak) + " gün seri";
+      streakLine = v.streak > 0;
     }
   }
-  dotLabel(label, X + 14, Y + 10, dot, COL_MUTED, COL_SURFACE);
-  text(fmtMin(studied) + " / " + fmtMin(v.goalMin), X + W - 14, Y + 10, F_SMALL, COL_MUTED, COL_SURFACE, TR_DATUM);
-  text(fit(line1, F_TEXT, W - 28), X + 14, Y + 32, F_TEXT, COL_TEXT, COL_SURFACE);
-  text(fit(line2, F_SMALL, W - 28), X + 14, Y + 54, F_SMALL, COL_MUTED, COL_SURFACE);
-  progressBar(X + 14, Y + 78, W - 28, 4, v.goalMin > 0 ? studied * 100 / v.goalMin : 0, COL_TEXT, COL_TRACK, COL_SURFACE);
+  dotLabel(label, X + 14, Y + 8, dot, COL_MUTED, COL_SURFACE);
+  text(fmtMin(studied) + " / " + fmtMin(v.goalMin), X + W - 14, Y + 8, F_SMALL, COL_MUTED, COL_SURFACE, TR_DATUM);
+  text(fit(line1, F_TEXT, W - 28), X + 14, Y + 25, F_TEXT, COL_TEXT, COL_SURFACE);
+  text(fit(line2, F_SMALL, W - 28), X + 14, Y + 46, F_SMALL, COL_MUTED, COL_SURFACE);
+  if (streakLine) drawFlame(X + 14 + textW(line2, F_SMALL) + 5, Y + 45, COL_SURFACE);
+  progressBar(X + 14, Y + 63, W - 28, 4, v.goalMin > 0 ? studied * 100 / v.goalMin : 0, COL_TEXT, COL_TRACK, COL_SURFACE);
 }
 
 static void drawHome(bool full) {
@@ -1892,6 +2392,7 @@ static void drawHome(bool full) {
   drawClock();
   drawWeatherCard();
   drawNowCard();
+  if (full) catDrawAll();
 }
 
 // --- Program ekranı ---
@@ -2046,6 +2547,14 @@ static void drawSettings(bool full) {
     net = netMsg;
     ok = cloudOk;
     ota = otaMsg;
+  }
+  if (setPage == 1) {  // tanı bilgisi: kart neden yeniden başladı, bellek, hava durumu
+    text(fit(bootReason, F_SMALL, 296), 12, 162, F_SMALL, COL_MUTED, COL_BG);
+    String w = weatherAt ? "Hava: " + String((millis() - weatherAt) / 60000) + " dk önce alındı"
+                         : "Hava alınamadı (" + String(weatherHttp) + ")";
+    String m = "Bellek " + String(ESP.getFreeHeap() / 1024) + " KB, en az " + String(ESP.getMinFreeHeap() / 1024) + " KB · " + w;
+    text(fit(m, F_SMALL, 296), 12, 180, F_SMALL, COL_MUTED, COL_BG);
+    return;
   }
   String l1 = "fw-" + String(FW_BUILD) + " · " FW_VARIANT;
   if (WiFi.status() == WL_CONNECTED) l1 += " · " + WiFi.localIP().toString() + " · " + String(WiFi.RSSI()) + " dBm";
@@ -2646,6 +3155,7 @@ static void enqueueEvent(const char* type, const String& itemId, int sec, const 
 static void rebuildLocalEvents() {
   std::vector<String> q = queuePeek(60);
   Lock l;
+  for (auto& s : sentLines) q.push_back(s);
   localEvents.clear();
   for (auto& line : q) {
     JsonDocument d;
@@ -2688,6 +3198,7 @@ static void publishTimer() {
   outTimerPending = true;
   bleTimerPending = true;
   remoteTimerDirty = false;
+  timerSave(t);
 }
 
 static void resetTimer() {
@@ -2724,9 +3235,11 @@ static void applyRemoteTimer() {
   {
     Lock l;
     if (!remoteTimerDirty) return;
+    if (remoteTimer.on && remoteTimer.startedAt > 0 && !timeOk()) return;  // saat gelince uygulanır
     r = remoteTimer;
     remoteTimerDirty = false;
   }
+  if (r.by != "restore") timerSave(r);
   bool wasActive = swRunning || swElapsedMs() > 0;
   if (!r.on) {
     if (!wasActive) return;
@@ -2888,11 +3401,15 @@ class BleServerCb : public NimBLEServerCallbacks {
   void onMTUChange(uint16_t mtu, ble_gap_conn_desc* d) override { bleMtu = mtu; }
 };
 
+// Gelen veri tamponu açılışta bir kez ayrılır ve hiç büyümez: sonradan büyük bellek istemek,
+// bellek parçalandığında kartı çökertiyordu.
+static const size_t BLE_RX_CAP = 16400;
 class BleRxCb : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c) override {
     NimBLEAttValue v = c->getValue();
     Lock l;
-    if (bleRx.size() + v.length() <= 20000) bleRx.insert(bleRx.end(), v.data(), v.data() + v.length());
+    if (bleRx.size() + v.length() <= BLE_RX_CAP) bleRx.insert(bleRx.end(), v.data(), v.data() + v.length());
+    else bleRx.clear();  // taşma: akış bozuldu, baştan
   }
 };
 
@@ -2914,6 +3431,8 @@ static void bleTokenSave(const String& t) {
 }
 
 static void bleBegin() {
+  bleRx.reserve(BLE_RX_CAP);
+  if (!artPx) artPx = (uint16_t*)malloc(ART_PX * ART_PX * 2);
   bleHasToken = bleTokenLoad().length() > 0;
   NimBLEDevice::init(BLE_NAME);
   NimBLEDevice::setMTU(247);
@@ -2930,20 +3449,22 @@ static void bleBegin() {
   adv->start();
 }
 
+// Çerçeve yığında (stack) parça parça kurulur; gönderirken bellek ayrılmaz.
 static void bleSend(char type, const uint8_t* data, size_t n) {
   if (!bleConnected || !bleTxChar || n > 16000) return;
-  size_t total = n + 4;
-  std::unique_ptr<uint8_t[]> f(new uint8_t[total]);
-  f[0] = 0xA5;
-  f[1] = (uint8_t)type;
-  f[2] = n & 0xFF;
-  f[3] = (n >> 8) & 0xFF;
-  memcpy(f.get() + 4, data, n);
-  size_t chunk = std::max<int>(20, (int)bleMtu - 3);
-  for (size_t i = 0; i < total; i += chunk) {
-    size_t m = std::min(chunk, total - i);
-    bleTxChar->setValue(f.get() + i, m);
+  uint8_t head[4] = {0xA5, (uint8_t)type, (uint8_t)(n & 0xFF), (uint8_t)((n >> 8) & 0xFF)};
+  uint8_t buf[244];
+  size_t chunk = std::min<size_t>(sizeof buf, std::max<int>(20, (int)bleMtu - 3));
+  size_t total = n + 4, sent = 0;
+  while (sent < total) {
+    size_t m = std::min(chunk, total - sent);
+    for (size_t i = 0; i < m; i++) {
+      size_t k = sent + i;
+      buf[i] = k < 4 ? head[k] : data[k - 4];
+    }
+    bleTxChar->setValue(buf, m);
     bleTxChar->notify();
+    sent += m;
     if (total > chunk) delay(4);
   }
 }
@@ -2959,6 +3480,8 @@ static void bleSendStatus() {
   d["fw"] = "fw-" + String(FW_BUILD);
   d["variant"] = FW_VARIANT;
   d["heap"] = ESP.getFreeHeap();
+  d["minHeap"] = ESP.getMinFreeHeap();
+  d["reset"] = bootReason;
   d["sd"] = sdOk;
   d["queue"] = queueCount();
   d["wifi"] = WiFi.status() == WL_CONNECTED;
@@ -3056,11 +3579,12 @@ static void showNotif(const Notif& n) {
   toastUntil = millis() + BANNER_MS;
 }
 
-static void bleImage(char type, const std::vector<uint8_t>& p) {
-  if (p.size() < 8) return;
+static bool artPending = false;
+static void bleImage(char type, const uint8_t* p, size_t len) {
+  if (len < 8) return;
   uint32_t id = p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24);
   int w = p[4] | (p[5] << 8), h = p[6] | (p[7] << 8);
-  if (p.size() != 8 + (size_t)w * h * 2) return;
+  if (len != 8 + (size_t)w * h * 2) return;
   if (type == 'I' && w == ICON_PX && h == ICON_PX) {
     IconImg* ic = findIcon(id);
     if (!ic) {
@@ -3075,22 +3599,16 @@ static void bleImage(char type, const std::vector<uint8_t>& p) {
     }
     ic->id = id;
     ic->used = millis();
-    memcpy(ic->px, p.data() + 8, ICON_PX * ICON_PX * 2);
-  } else if (type == 'A' && w == ART_PX && h == ART_PX) {
-    if (!artPx) artPx = (uint16_t*)malloc(ART_PX * ART_PX * 2);
-    if (!artPx) return;
-    memcpy(artPx, p.data() + 8, ART_PX * ART_PX * 2);
+    memcpy(ic->px, p + 8, ICON_PX * ICON_PX * 2);
+  } else if (type == 'A' && w == ART_PX && h == ART_PX && artPx) {
+    memcpy(artPx, p + 8, ART_PX * ART_PX * 2);
     artId = id;
-    if (screen == SCR_MUSIC && !toastUntil && media.art == artId) drawCover();
+    artPending = true;  // çizim kilit dışında yapılır
   }
 }
 
 static void bleHandle(char type, const std::vector<uint8_t>& p) {
   if (!bleLinked && type != 'H') return;
-  if (type == 'I' || type == 'A') {
-    bleImage(type, p);
-    return;
-  }
   JsonDocument d;
   if (deserializeJson(d, (const char*)p.data(), p.size())) return;
   switch (type) {
@@ -3143,7 +3661,7 @@ static void bleHandle(char type, const std::vector<uint8_t>& p) {
       takeRemoteTimer(d.as<JsonVariantConst>());
       break;
     case 'a':  // olaylar telefona ulaştı
-      if (bleInflight > 0) queueDrop(bleInflight);
+      if (bleInflight > 0) queueDropSent(bleInflight);
       bleInflight = 0;
       break;
     case 'N': {
@@ -3243,10 +3761,19 @@ static void bleProcess() {
       }
       if (bleRx.size() < 4 + len) break;
       type = (char)bleRx[1];
-      payload.assign(bleRx.begin() + 4, bleRx.begin() + 4 + len);
+      if (type == 'I' || type == 'A') {
+        if (bleLinked) bleImage(type, bleRx.data() + 4, len);  // görüntü kopyalanmadan işlenir
+        type = 0;
+      } else {
+        payload.assign(bleRx.begin() + 4, bleRx.begin() + 4 + len);
+      }
       bleRx.erase(bleRx.begin(), bleRx.begin() + 4 + len);
-      if (bleRx.capacity() > 4096 && bleRx.size() < 256) bleRx.shrink_to_fit();
     }
+    if (artPending) {
+      artPending = false;
+      if (screen == SCR_MUSIC && !toastUntil && media.art == artId) drawCover();
+    }
+    if (!type) continue;
     bleHandle(type, payload);
   }
   if (bleLinked) {
@@ -3448,8 +3975,10 @@ static void onTap(int x, int y) {
       } else if (y < 32 && x < 234 && !notifs.empty()) {
         notifListOpen = true;
         drawNotifList();
-      } else if (y >= 100) {
+      } else if (y >= 122) {
         go(swRunning || swElapsedMs() > 0 ? SCR_TIMER : SCR_PLAN);
+      } else if (y >= ZONE_TOP) {
+        catPet(x);  // kediyi sev
       }
       break;
     case SCR_MUSIC:
@@ -3805,7 +4334,34 @@ static void splash(const String& msg) {
 // Daha önce çökerse ESP32 açılışta bir önceki sürüme döner (kart USB'siz kurtulur).
 extern "C" bool verifyRollbackLater() { return true; }
 
+static void diagBoot() {
+  esp_reset_reason_t r = esp_reset_reason();
+  const char* t;
+  switch (r) {
+    case ESP_RST_POWERON: t = "güç verildi"; break;
+    case ESP_RST_EXT: t = "RST tuşu"; break;
+    case ESP_RST_SW: t = "yazılım (güncelleme)"; break;
+    case ESP_RST_PANIC: t = "çökme"; break;
+    case ESP_RST_INT_WDT: t = "kesme bekçisi"; break;
+    case ESP_RST_TASK_WDT: t = "görev bekçisi"; break;
+    case ESP_RST_WDT: t = "bekçi"; break;
+    case ESP_RST_BROWNOUT: t = "voltaj düştü"; break;
+    case ESP_RST_DEEPSLEEP: t = "uyku"; break;
+    default: t = "bilinmiyor"; break;
+  }
+  bootReason = String("Son açılış: ") + t;
+  if (rtcMagic == 0xCA7D1A60 && r != ESP_RST_POWERON) {
+    uint32_t m = rtcUpSec / 60;
+    bootReason += " · önceki " + (m >= 60 ? String(String(m / 60) + " sa ") : String("")) + String(m % 60) + " dk, en az " +
+                  String(rtcMinHeap / 1024) + " KB";
+  }
+  rtcMagic = 0xCA7D1A60;
+  rtcUpSec = 0;
+  rtcMinHeap = ESP.getFreeHeap();
+}
+
 void setup() {
+  diagBoot();
   Serial.begin(115200);
   mtx = xSemaphoreCreateRecursiveMutex();
   pinMode(PIN_BOOT, INPUT_PULLUP);
@@ -3851,7 +4407,10 @@ void setup() {
       parseView(d.as<JsonVariantConst>(), view);
     }
   }
+  sentLoad();
   rebuildLocalEvents();
+  pruneLocalEvents();
+  timerRestore();
 
   // Açılışta 2 sn içinde BOOT'a basılırsa dokunmatik yeniden ayarlanır.
   bool calib = !cfg.calibrated;
@@ -3894,6 +4453,12 @@ void loop() {
     return;
   }
 
+  static uint32_t lastDiag = 0;
+  if (millis() - lastDiag > 5000) {
+    lastDiag = millis();
+    rtcUpSec = millis() / 1000;
+    rtcMinHeap = ESP.getMinFreeHeap();
+  }
   static bool markedValid = false;
   if (!markedValid && millis() > 45000) {
     markedValid = true;
@@ -3936,6 +4501,17 @@ void loop() {
     lastPhase = millis();
     datePhase = !datePhase;
     if (screen == SCR_HOME && !toastUntil && !notifListOpen) drawDate();
+  }
+
+  static uint32_t lastCat = 0;
+  if (screen == SCR_HOME && !notifListOpen) {
+    bool night = isNightHour();
+    uint32_t every = cat.st == CAT_SLEEP ? 700 : 70;
+    if (millis() - lastCat >= every) {
+      lastCat = millis();
+      catUpdate(night);
+      catFlush();
+    }
   }
 
   static uint32_t lastMusicTick = 0;
