@@ -1214,6 +1214,9 @@ static void setOtaMsg(const String& m) {
   dataDirty = true;
 }
 
+static void drawOta();
+static bool otaInSetup = false;  // açılıştaki denetimde ilerleme doğrudan çizilir
+
 // Sürüm listesinin tamamı (her sürümle büyüyor, 70 KB'ı geçti) yerine yalnızca fw-v etiketleri
 // sorulur (birkaç KB); dosya sürümün sabit adresinden indirilir. false: denetlenemedi.
 static bool checkOta(bool manual) {
@@ -1260,6 +1263,7 @@ static bool checkOta(bool manual) {
   httpUpdate.rebootOnUpdate(false);
   httpUpdate.onProgress([](int cur, int total) {
     if (total > 0) otaProgress = (int)((long long)cur * 100 / total);
+    if (otaInSetup) drawOta();
   });
   t_httpUpdate_return r = httpUpdate.update(dl, url);
   if (r == HTTP_UPDATE_OK) {
@@ -1273,9 +1277,8 @@ static bool checkOta(bool manual) {
 }
 
 static void netTask(void*) {
-  uint32_t lastView = 0, lastStatus = 0, nextWeather = 0, lastOta = 0, lastReconnect = 0, lastTimerPoll = 0;
-  const uint32_t bootAt = millis();
-  bool viewOnce = false, statusOnce = false, otaOnce = false;
+  uint32_t lastView = 0, lastStatus = 0, nextWeather = 0, lastReconnect = 0, lastTimerPoll = 0;
+  bool viewOnce = false, statusOnce = false;
   for (;;) {
     netBusy = false;
     vTaskDelay(pdMS_TO_TICKS(live.c ? 80 : 250));
@@ -1344,17 +1347,8 @@ static void netTask(void*) {
     } else {
       setNet("Hesap bilgisi girilmedi", false);
     }
-    // İlk denetim açılıştan 60 sn sonra: yeni yazılım önce kendini "sağlam" işaretlesin (45 sn).
-    bool autoOta = FW_BUILD > 0 && now - bootAt > 60000 && (!otaOnce || now - lastOta > OTA_EVERY_MS);
-    if (wantOta || autoOta) {
-      bool manual = wantOta;
-      wantOta = false;
-      otaOnce = true;
-      lastOta = now;
-      liveClose();  // indirme için bellek boşalsın; akış sonra yeniden açılır
-      // Denetlenemezse 12 saat beklenmez, 15 dakika sonra yeniden denenir.
-      if (!checkOta(manual)) lastOta = now - OTA_EVERY_MS + 15UL * 60UL * 1000UL;
-    }
+    // Güncelleme denetimi açılışta, Bluetooth başlamadan yapılır (bootOtaCheck): Bluetooth açıkken
+    // şifreli bağlantıya bellek yetmiyor. Kart her gece 04:00'te kendini yeniden başlatıp denetler.
   }
 }
 
@@ -1415,6 +1409,7 @@ static bool wakeOnly() {
   return wasDim;
 }
 static volatile bool portalRequested = false, calibRequested = false;
+static uint32_t lastInteract = 0;  // son dokunuş ya da BOOT
 static bool upcomingSoon = false;
 
 // --- Tema ---
@@ -2530,10 +2525,10 @@ static void drawSettings(bool full) {
       if (i == 1) val = bleStatusText();
       if (i == 2) val = THEME_NAMES[constrain(cfg.theme, 0, 2)];
       if (i == 3) val = cfg.coverTheme ? "Açık" : "Kapalı";
-      if (i == 4) val = "›";
+      if (i == 4) val = "→";
     } else {
       if (i == 1) val = cfg.invert ? "Açık" : "Kapalı";
-      if (i == 4) val = "‹";
+      if (i == 4) val = "";
     }
     uint16_t col = (setPage == 1 && i == 3) ? COL_RED : COL_TEXT;
     text(SET_ROWS[setPage][i], 20, y + SET_RH / 2, F_SMALL, col, COL_SURFACE, ML_DATUM);
@@ -4094,9 +4089,16 @@ static void onTap(int x, int y) {
             saveConfig();
             drawSettings(false);
           } else if (row == 2) {
-            setOtaMsg("Güncelleme denetleniyor…");
-            wantOta = true;
-            drawSettings(false);
+            {
+              Lock l;
+              prefs.begin("cs", false);
+              prefs.putBool("otaman", true);
+              prefs.end();
+            }
+            toast("Yeniden başlatılıp denetlenecek…");
+            delay(900);
+            esp_ota_mark_app_valid_cancel_rollback();
+            ESP.restart();
           } else if (row == 3) {
             bleTokenSave("");
             if (bleConnected) bleDropAt = millis() + 200;
@@ -4135,6 +4137,7 @@ static void handleTouch() {
   uint32_t ms = millis();
   if (!down && screen == SCR_GAME && gameTouch(t, x, y)) return;
   if (t) lastSeen = ms;
+  if (t) lastInteract = ms;
   if (t && !down) {
     down = true;
     dx = x;
@@ -4333,6 +4336,30 @@ static void splash(const String& msg) {
 // Daha önce çökerse ESP32 açılışta bir önceki sürüme döner (kart USB'siz kurtulur).
 extern "C" bool verifyRollbackLater() { return true; }
 
+// Açılışta, Bluetooth başlamadan güncelleme denetimi: bellek bol, şifreli bağlantı rahat açılır.
+static void bootOtaCheck() {
+  bool manual;
+  {
+    Lock l;
+    prefs.begin("cs", false);
+    manual = prefs.getBool("otaman", false);
+    if (manual) prefs.remove("otaman");
+    prefs.end();
+  }
+  if (FW_BUILD == 0) return;
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < (manual ? 15000UL : 8000UL)) delay(100);
+  if (WiFi.status() != WL_CONNECTED) {
+    if (manual) setOtaMsg("Wi-Fi yok, güncelleme denetlenemedi");
+    return;
+  }
+  splash("Güncelleme denetleniyor…");
+  otaInSetup = true;
+  checkOta(manual);
+  otaInSetup = false;
+  otaProgress = -1;
+}
+
 static void diagBoot() {
   esp_reset_reason_t r = esp_reset_reason();
   const char* t;
@@ -4433,6 +4460,7 @@ void setup() {
   if (!hasCreds()) runPortal(true);
   else WiFi.begin();  // kayıtlı ağa arka planda bağlanır; yoksa Bluetooth ile çalışır (kurulum: BOOT 6 sn)
   configTzTime("<+03>-3", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
+  bootOtaCheck();
   bleBegin();
 
   xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, nullptr, 0);
@@ -4530,6 +4558,13 @@ void loop() {
     }
     if (minute != lastMinute) {
       lastMinute = minute;
+      // Gece bakımı: 04:00–04:30 arası, 20 saatten uzun açıksa ve kimse kullanmıyorsa yeniden başlar.
+      // Açılışta güncelleme denetlenir, bellek de tazelenir. Kronometre ve kayıtlar korunur.
+      if (minute >= 240 && minute < 270 && millis() > 20UL * 3600UL * 1000UL && !swRunning && swElapsedMs() == 0 &&
+          millis() - lastInteract > 10UL * 60UL * 1000UL && !bleInflight) {
+        esp_ota_mark_app_valid_cancel_rollback();
+        ESP.restart();
+      }
       if (wantDark() != darkNow) {  // otomatik temada 22:00 ve 07:00 geçişleri
         applyPalette();
         toastUntil = 0;

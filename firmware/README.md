@@ -88,9 +88,10 @@ korunur).
 
 ## Güncellemeler
 
-Kart Wi-Fi'deyken 12 saatte bir (ve açılıştan kısa süre sonra) GitHub'daki en yeni **fw-v…**
-sürümünü denetler, varsa kendisi indirip kurar. Ayarlar → *Güncellemeyi denetle* ile hemen de
-deneyebilirsin. Tekrar OTG ile yüklemen gerekmez.
+Kart her açılışta, Bluetooth başlamadan önce GitHub'daki en yeni **fw-v…** sürümünü denetler,
+varsa kendisi indirip kurar (Bluetooth açıkken şifreli bağlantıya bellek yetmiyor). Her gece
+04:00–04:30 arasında, kimse kullanmıyorsa kendini yeniden başlatır; böylece günde bir denetlenir.
+Ayarlar → *Diğer ayarlar* → *Güncellemeyi denetle* kartı yeniden başlatıp hemen denetler.
 
 **SD karttan (fw-5 ve sonrası):** Releases'taki `firmware-cyd_st7789.bin` (ya da `firmware-cyd.bin`)
 dosyasını kartın köküne kopyala, kartı tak, cihazı yeniden başlat. Dosya `update.bin` ya da
