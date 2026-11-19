@@ -2291,12 +2291,12 @@ static void bpDrawSlot(int k) {
   gridLines(tft, 0, 0, 202, y0, 112, 40);
   const BpPiece& p = bpPieces[k];
   if (p.used) return;
-  const int m = 8;
+  const int m = std::min(12, 36 / std::max<int>(p.w, p.h));  // parça yuvaya sığacak kadar büyük
   int x0 = 258 - p.w * m / 2, yy = y0 + 20 - p.h * m / 2;
   uint16_t col = bpColor(p.color);
   if (bpDrag == k) col = tft.alphaBlend(90, col, COL_BG);
   else if (!bpPlaceable(p)) col = tft.alphaBlend(70, col, COL_BG);
-  for (int i = 0; i < p.n; i++) tft.fillRoundRect(x0 + p.cells[i][1] * m, yy + p.cells[i][0] * m, m - 1, m - 1, 2, col);
+  for (int i = 0; i < p.n; i++) tft.fillRoundRect(x0 + p.cells[i][1] * m, yy + p.cells[i][0] * m, m - 1, m - 1, m > 9 ? 3 : 2, col);
 }
 
 static void bpDrawPanel() {
