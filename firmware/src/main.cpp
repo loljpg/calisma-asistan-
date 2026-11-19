@@ -1086,6 +1086,7 @@ static void checkOta(bool manual) {
     if (manual) setOtaMsg("En güncel sürüm yüklü (fw-" + String(FW_BUILD) + ")");
     return;
   }
+  esp_ota_mark_app_valid_cancel_rollback();  // doğrulanmamış yazılım yeni güncelleme kuramaz
   otaProgress = 0;
   dataDirty = true;
   WiFiClientSecure dl;
@@ -1177,7 +1178,8 @@ static void netTask(void*) {
     } else {
       setNet("Hesap bilgisi girilmedi", false);
     }
-    bool autoOta = FW_BUILD > 0 && now - bootAt > 20000 && (!otaOnce || now - lastOta > OTA_EVERY_MS);
+    // İlk denetim açılıştan 60 sn sonra: yeni yazılım önce kendini "sağlam" işaretlesin (45 sn).
+    bool autoOta = FW_BUILD > 0 && now - bootAt > 60000 && (!otaOnce || now - lastOta > OTA_EVERY_MS);
     if (wantOta || autoOta) {
       bool manual = wantOta;
       wantOta = false;
@@ -2584,6 +2586,7 @@ static void sdTryUpdate() {
     }
     f = SD.open(name, FILE_READ);
     if (!f) continue;
+    esp_ota_mark_app_valid_cancel_rollback();
     otaProgress = 0;
     drawOta();
     bool ok = Update.begin(size, U_FLASH);
@@ -3160,7 +3163,10 @@ static void bleHandle(char type, const std::vector<uint8_t>& p) {
       notifs.insert(notifs.begin(), n);
       if (notifs.size() > 8) notifs.pop_back();
       showNotif(n);
-      if (screen == SCR_HOME && !toastUntil && !notifListOpen) drawDate();
+      if (screen == SCR_HOME && !toastUntil) {
+        if (notifListOpen) drawNotifList();
+        else drawDate();
+      }
       break;
     }
     case 'X': {
