@@ -1211,6 +1211,14 @@ static void wifiRemember(const String& ssid, const String& pass) {
 static void wifiDoScan() {
   wifiScanBusy = true;
   int n = WiFi.scanNetworks(false, false);
+  if (n < 0) {
+    // Zayıf sinyalde kopan bağlantı sürekli yeniden denenir; ESP32 bağlanmaya çalışırken tarama
+    // yapamaz (liste boş kalırdı). Deneme durdurulur ve yeniden taranır; ağ görevi 30 sn sonra
+    // görünen kayıtlı ağların en güçlüsüne kendisi bağlanır.
+    WiFi.disconnect(false);
+    vTaskDelay(pdMS_TO_TICKS(400));
+    n = WiFi.scanNetworks(false, false);
+  }
   std::vector<WifiNet> list;
   for (int i = 0; i < n; i++) {
     String s = WiFi.SSID(i);
