@@ -2705,10 +2705,29 @@ static void musicBootTasks() {
     prefs.end();
   }
   if (!want || !sdOk) return;
-  uint32_t t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) delay(100);
+  // Zayıf sinyalde ilk bağlantı uzun sürebilir: 45 sn beklenir, arada kayıtlı ağlar taranıp
+  // görünenlerin en güçlüsü yeniden denenir. Ekranda geçen süre görünür.
+  uint32_t t0 = millis(), lastDraw = 0;
+  int tries = 0;
+  if (WiFi.status() != WL_CONNECTED) musicProgress("Müzik modülü için Wi-Fi bekleniyor", -1);
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 45000) {
+    uint32_t el = millis() - t0;
+    if ((tries == 0 && el > 10000) || (tries == 1 && el > 26000)) {
+      tries++;
+      wifiAutoPick();
+    }
+    if (millis() - lastDraw >= 1000) {
+      lastDraw = millis();
+      fillBg(60, 198, 200, 16);
+      text(String((millis() - t0) / 1000) + " sn", 160, 205, F_XS, C_TEXT2, C_BG, MC_DATUM);
+    }
+    delay(100);
+  }
   if (WiFi.status() != WL_CONNECTED) {
-    musicErr = "İndirilemedi: Wi-Fi bağlantısı yok";
+    int st = WiFi.status();
+    musicErr = st == WL_NO_SSID_AVAIL   ? "İndirilemedi: kayıtlı Wi-Fi ağı bulunamadı"
+               : st == WL_CONNECT_FAILED ? "İndirilemedi: Wi-Fi şifresi kabul edilmedi"
+                                         : "İndirilemedi: Wi-Fi'ye bağlanılamadı (sinyal zayıf)";
     return;
   }
   if (!SD.exists("/daxen")) SD.mkdir("/daxen");
