@@ -199,6 +199,12 @@ static bool kAlive(int pid) {
   return p && !p->done;
 }
 
+// Sistemin kendi sürecini durdurur (sonlandırılamaz işaretli olsa da)
+static void kStop(int pid) {
+  Proc* p = kFind(pid);
+  if (p && p->kind == PK_TASK) p->killReq = true;
+}
+
 static void kKill(int pid) {
   Proc* p = kFind(pid);
   if (p && p->kind == PK_TASK && p->killable) p->killReq = true;

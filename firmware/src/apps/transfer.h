@@ -56,14 +56,25 @@ static void trTap(int x, int y) {
 }
 
 static void trTick() {
-  static uint32_t last = 0;
+  static uint32_t last = 0, lastStat = 0;
   static bool lastConn = true;
+  static String lastSig;
   if (millis() - last > 1000) {
     last = millis();
     bool c = wifiConnected();
     if (c != lastConn) {
       lastConn = c;
       trDraw(true);
+      return;
+    }
+  }
+  // Yükleme web sürecinde sürer; ilerleme buradan izlenir
+  if (millis() - lastStat > 300 && sdOk && wifiConnected() && webRunning()) {
+    lastStat = millis();
+    String sig = webStatus() + "|" + String(webProgress()) + "|" + String(webUploadCount());
+    if (sig != lastSig) {
+      lastSig = sig;
+      trDrawStatus();
     }
   }
 }

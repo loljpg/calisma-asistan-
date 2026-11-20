@@ -40,7 +40,7 @@ ve başlıktaki sol ok her uygulamada geri gider.
 | **Çizim** | 10 renkli çizim defteri (`/daxen/cizim`) |
 | **Kartlar** | Aralıklı tekrarlı bilgi kartları: TYT matematik, geometri, fizik, kimya, edebiyat; kendi destelerin `/daxen/kartlar/*.txt` (`ön|arka` satırları) |
 | **Işık ölçer** | Ortam ışığı ve 1 dakikalık grafik |
-| **Aktarım** | Tarayıcıdan SD karta dosya yükleme ve indirme (aynı Wi-Fi ağında, ekrandaki adresi aç) |
+| **Aktarım** | Tarayıcıdan SD karta dosya yükleme ve indirme (aynı Wi-Fi ağında, ekrandaki adresi aç); sayfada ilerleme çubuğu, yükleme sürerken saat donmaz |
 | **Sistem** | Sürüm, çalışma süresi, son açılış sebebi, bellek, sıcaklık |
 | **Görevler** | Çekirdeğin süreçleri: servisler ve görevler, işlemci payı, yığın, bellek; görevleri sonlandırma |
 
@@ -60,10 +60,10 @@ hesap yaparken saat, dokunma ve alarmlar donmaz.
 | dokunma | servis | 10 ms | Dokunmatik ve BOOT tuşu |
 | kabuk | servis | 16 ms | Ekran, pencereler, uygulamanın adımı |
 | bluetooth | servis | 10 ms | Telefondan gelenler |
-| web | servis | 10 ms | Aktarım ve hesap sayfası sunucusu |
 | saat | servis | 200 ms | Dakika işleri, Pomodoro, gece bakımı |
 | ışık | servis | 50 ms | RGB ışık ve ekran parlaklığı |
 | ağ | görev, çekirdek 0 | — | Wi-Fi, bulut, hava, güncelleme |
+| web | görev, çekirdek 1 | — | Aktarım ve hesap sayfası sunucusu, yalnızca o ekran açıkken |
 | lua:… | görev, çekirdek 1 | — | Açık (ya da arka plandaki) Lua uygulaması |
 | satranç | görev, çekirdek 1 | — | Satranç motoru, yalnızca düşünürken |
 

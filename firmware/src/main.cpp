@@ -22,6 +22,7 @@
 #include <esp_ota_ops.h>
 #include <esp_wifi.h>
 #include <WebServer.h>
+#include <lwip/sockets.h>
 #include <sys/time.h>
 #include <time.h>
 #include <vector>
@@ -2246,12 +2247,24 @@ static void runCalibration() {
 // ============================================================================
 // Yalnızca Dosya aktarımı ekranı (ya da Ayarlar → Bulut hesabı → tarayıcıdan gir) açıkken çalışır.
 // Aynı Wi-Fi ağındaki telefon http://<kartın adresi>/ adresini açar.
+//
+// Sunucu çekirdekte ayrı bir süreçtir ("web"): büyük bir dosya gelirken arayüz donmaz. Sayfa
+// dosyaları JavaScript ile tek tek ham PUT olarak gönderir (1,4 KB'lık parçalar, kartta 4 KB
+// tamponla SD'ye yazılır); çok parçalı form yalnızca JavaScript yoksa kullanılır. Gelen dosya
+// bitene kadar ".part" adıyla yazılır, yarım dosya asıl adıyla görünmez.
 static WebServer* web = nullptr;
-static String webMsg;                // son işlem (ekranda gösterilir)
-static String webUpName;             // yüklenen dosya
-static uint32_t webUpBytes = 0, webUpTotal = 0;
-static int webUploads = 0;
+static String webMsg;                // son işlem (ekranda gösterilir)        mtx
+static String webUpName;             // yüklenen dosya                         mtx
+static volatile uint32_t webUpBytes = 0, webUpTotal = 0;
+static volatile int webUploads = 0;
+static volatile bool webUpOk = false;
 static File webUpFile;
+static String webUpPath;
+static uint8_t* webBuf = nullptr;
+static size_t webBufN = 0;
+static const size_t WEB_BUF = 4096;
+static int webPid = -1;
+static Proc* volatile webProcP = nullptr;
 
 static const char WEB_HEAD[] PROGMEM = R"(<!doctype html><html lang=tr><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>DAXEN VANE</title><style>
@@ -2310,9 +2323,20 @@ static void webPage() {
   web->setContentLength(CONTENT_LENGTH_UNKNOWN);
   web->send(200, "text/html; charset=utf-8", "");
   web->sendContent(FPSTR(WEB_HEAD));
-  String h = "<div class=box><form method=post enctype=multipart/form-data action='/up?d=" + webUrlEnc(dir) +
+  String h = "<div class=box><form id=fm method=post enctype=multipart/form-data action='/up?d=" + webUrlEnc(dir) +
              "'><b>Dosya gönder</b><p class=mut>Şarkılar için Muzik klasörünü seç. Birden çok dosya seçebilirsin.</p>"
-             "<input type=file name=f multiple> <button>Gönder</button></form></div>";
+             "<input type=file name=f id=fi multiple> <button id=gb>Gönder</button>"
+             "<div id=pt class=mut style='margin-top:8px'></div><div style='height:3px;background:#30353A;margin-top:6px'>"
+             "<div id=pb style='height:3px;width:0;background:#7892A5'></div></div></form></div>"
+             "<script>fm.onsubmit=async e=>{e.preventDefault();const fs=[...fi.files];if(!fs.length)return;gb.disabled=true;"
+             "for(let i=0;i<fs.length;i++){const x=fs[i];const ok=await new Promise(r=>{const q=new XMLHttpRequest();"
+             "q.open('PUT','/put?d=" + webUrlEnc(dir) + "&n='+encodeURIComponent(x.name));"
+             "q.setRequestHeader('Content-Type','application/octet-stream');"
+             "q.upload.onprogress=v=>{if(v.lengthComputable){const k=Math.floor(v.loaded*100/v.total);pb.style.width=k+'%';"
+             "pt.textContent=(i+1)+' / '+fs.length+' · '+x.name+' · %'+k}};"
+             "q.onload=()=>r(q.status==200);q.onerror=()=>r(false);q.send(x)});"
+             "if(!ok){pt.textContent='Gönderilemedi: '+x.name+'. Kart bu ekranda ve aynı Wi-Fi ağında mı?';gb.disabled=false;return}}"
+             "location.reload()}</script>";
   h += "<h2>Klasör: <span class=path>" + webEsc(dir) + "</span></h2>";
   if (dir != "/") h += "<div class=row><a href='/?d=" + webUrlEnc(dirName(dir)) + "'>&#8592; Üst klasör</a></div>";
   web->sendContent(h);
@@ -2353,38 +2377,107 @@ static void webRedirect(const String& to) {
   web->send(303, "text/plain", "");
 }
 
+static void webSetMsg(const String& m) {
+  Lock l;
+  webMsg = m;
+}
+
+static void webFlush() {
+  if (webUpFile && webBufN) webUpFile.write(webBuf, webBufN);
+  webBufN = 0;
+}
+
+static void webBeginFile(const String& dir, const String& rawName, uint32_t total) {
+  String name = safeName(baseName(rawName));
+  if (!name.length()) name = "dosya";
+  {
+    Lock l;
+    webUpName = name;
+  }
+  webUpBytes = 0;
+  webUpTotal = total;
+  webUpOk = false;
+  webUpPath = joinPath(dir, name);
+  String part = webUpPath + ".part";
+  if (SD.exists(part)) SD.remove(part);
+  webUpFile = SD.open(part, FILE_WRITE);
+  if (!webBuf) webBuf = (uint8_t*)malloc(WEB_BUF);
+  webBufN = 0;
+  webSetMsg(webUpFile ? "Alınıyor: " + name : "Yazılamadı: " + name);
+}
+
+static void webWrite(const uint8_t* d, size_t n) {
+  webUpBytes += n;
+  if (!webUpFile) return;
+  if (!webBuf) {
+    webUpFile.write(d, n);
+    return;
+  }
+  while (n) {
+    size_t k = std::min(n, WEB_BUF - webBufN);
+    memcpy(webBuf + webBufN, d, k);
+    webBufN += k;
+    d += k;
+    n -= k;
+    if (webBufN == WEB_BUF) webFlush();
+  }
+}
+
+static void webEndFile(bool ok) {
+  webFlush();
+  bool had = (bool)webUpFile;
+  if (webUpFile) webUpFile.close();
+  String part = webUpPath + ".part", name;
+  {
+    Lock l;
+    name = webUpName;
+  }
+  if (ok && had) {
+    if (SD.exists(webUpPath)) SD.remove(webUpPath);
+    ok = SD.rename(part, webUpPath);
+  } else {
+    ok = false;
+    if (SD.exists(part)) SD.remove(part);
+  }
+  if (ok) {
+    webUploads++;
+    webSetMsg("Alındı: " + name + " (" + fmtBytes(webUpBytes) + ")");
+  } else {
+    webSetMsg((had ? "Yarıda kesildi: " : "Yazılamadı: ") + name);
+  }
+  webUpOk = ok;
+  {
+    Lock l;
+    webUpName = "";
+  }
+  dataDirty = true;
+}
+
+// Çok parçalı form (JavaScript'siz yedek yol)
 static void webUploadChunk() {
   HTTPUpload& up = web->upload();
-  String dir = webSafePath(web->hasArg("d") ? web->arg("d") : String("/"));
   if (up.status == UPLOAD_FILE_START) {
-    String name = safeName(baseName(up.filename));
-    if (!name.length()) name = "dosya";
-    webUpName = name;
-    webUpBytes = 0;
-    webUpTotal = web->header("Content-Length").toInt();
-    String path = joinPath(dir, name);
-    if (SD.exists(path)) SD.remove(path);
-    webUpFile = SD.open(path, FILE_WRITE);
-    webMsg = webUpFile ? "Alınıyor: " + name : "Yazılamadı: " + name;
-    uiDataChanged();
+    webBeginFile(webSafePath(web->hasArg("d") ? web->arg("d") : String("/")), up.filename, web->header("Content-Length").toInt());
   } else if (up.status == UPLOAD_FILE_WRITE) {
-    if (webUpFile) webUpFile.write(up.buf, up.currentSize);
-    webUpBytes += up.currentSize;
-    static uint32_t lastDraw = 0;
-    if (millis() - lastDraw > 400) {  // yükleme sürerken döngü dönmez; ilerleme buradan çizilir
-      lastDraw = millis();
-      uiDataChanged();
-    }
+    webWrite(up.buf, up.currentSize);
   } else if (up.status == UPLOAD_FILE_END || up.status == UPLOAD_FILE_ABORTED) {
-    if (webUpFile) webUpFile.close();
-    if (up.status == UPLOAD_FILE_END) {
-      webUploads++;
-      webMsg = "Alındı: " + webUpName + " (" + fmtBytes(up.totalSize) + ")";
-    } else {
-      webMsg = "Yarıda kesildi: " + webUpName;
+    webEndFile(up.status == UPLOAD_FILE_END);
+  }
+}
+
+// Ham PUT: sayfadaki JavaScript her dosyayı böyle gönderir (hızlı yol)
+static void webRawChunk() {
+  HTTPRaw& r = web->raw();
+  if (r.status == RAW_START) {
+    webBeginFile(webSafePath(web->arg("d")), web->arg("n"), web->clientContentLength());
+  } else if (r.status == RAW_WRITE) {
+    webWrite(r.buf, r.currentSize);
+    if (webProcP && webProcP->killReq) {  // ekrandan çıkıldı: bağlantı kapatılır, yükleme yarıda kesilir
+      int fd = web->client().fd();
+      if (fd >= 0) lwip_shutdown(fd, SHUT_RDWR);
     }
-    webUpName = "";
-    uiDataChanged();
+  } else {
+    webEndFile(r.status == RAW_END);
   }
 }
 
@@ -2397,6 +2490,20 @@ static void webAccountPage() {
              webEsc(cfg.email) + "'>Şifre" + (cfg.password.length() ? " (değişmeyecekse boş bırak)" : "") +
              "<input type=password name=pass><button>Kaydet</button></form><p><a href='/'>&#8592; Dosyalar</a></p></main></body></html>";
   web->send(200, "text/html; charset=utf-8", h);
+}
+
+// Sunucu süreci: istekleri işler; uzun bir yükleme sürerken yalnızca bu süreç meşguldür
+static void webProc(Proc* p) {
+  webProcP = p;
+  while (!p->killReq) {
+    if (WiFi.status() == WL_CONNECTED) {
+      uint32_t t0 = micros();
+      web->handleClient();
+      kAddBusy(p, micros() - t0);
+    }
+    vTaskDelay(pdMS_TO_TICKS(4));
+  }
+  webProcP = nullptr;
 }
 
 static bool webStart() {
@@ -2419,12 +2526,13 @@ static bool webStart() {
     f.close();
   });
   web->on("/up", HTTP_POST, []() { webRedirect("/?d=" + webUrlEnc(webSafePath(web->arg("d")))); }, webUploadChunk);
+  web->on("/put", HTTP_PUT, []() { web->send(webUpOk ? 200 : 500, "text/plain", webUpOk ? "tamam" : "hata"); }, webRawChunk);
   web->on("/del", HTTP_POST, []() {
     String p = webSafePath(web->arg("f"));
     if (p != "/") {
       fRemoveAll(p);
-      webMsg = "Silindi: " + baseName(p);
-      uiDataChanged();
+      webSetMsg("Silindi: " + baseName(p));
+      dataDirty = true;
     }
     webRedirect("/?d=" + webUrlEnc(dirName(p)));
   });
@@ -2441,27 +2549,38 @@ static bool webStart() {
     mail.trim();
     accountSet(db.length() ? db : cfg.dbUrl, key.length() ? key : cfg.apiKey, mail.length() ? mail : cfg.email,
                pass.length() ? pass : cfg.password);
-    webMsg = "Hesap bilgileri kaydedildi";
-    uiDataChanged();
+    webSetMsg("Hesap bilgileri kaydedildi");
+    dataDirty = true;
     web->send(200, "text/html; charset=utf-8", String(FPSTR(WEB_HEAD)) + "<p>Kaydedildi. Kart buluta bağlanmayı deniyor.</p><p><a href='/'>Dosyalar</a></p></main></body></html>");
   });
   web->onNotFound([]() { web->send(404, "text/plain", "yok"); });
   web->begin();
-  webMsg = "";
+  webSetMsg("");
+  webPid = kSpawn("web", webProc, 10 * 1024, false, K_PROC_PRIO, 1);
+  if (webPid < 0) {  // süreç açılamadı (bellek)
+    web->stop();
+    delete web;
+    web = nullptr;
+    return false;
+  }
   return true;
 }
 
 static void webStop() {
   if (!web) return;
-  if (webUpFile) webUpFile.close();
+  kStop(webPid);
+  if (!kWait(webPid, 8000)) return;  // süreç hâlâ sunucuyu kullanıyor: silinmez (bir dahaki çağrıda)
+  if (webUpFile) webEndFile(false);
   web->stop();
   delete web;
   web = nullptr;
+  webPid = -1;
 }
 
 static bool webRunning() { return web != nullptr; }
 
 static String webStatus() {
+  Lock l;
   if (webUpName.length()) {
     String s = webUpName + " · " + fmtBytes(webUpBytes);
     if (webUpTotal > webUpBytes) s += " / " + fmtBytes(webUpTotal);
@@ -2470,14 +2589,14 @@ static String webStatus() {
   return webMsg;
 }
 
-static void webTick() {
-  if (!web) return;
-  if (WiFi.status() != WL_CONNECTED) return;
-  web->handleClient();
-}
+static void webTick() {}  // sunucu artık kendi sürecinde (webProc)
 
 static int webProgress() {
-  if (!webUpName.length() || webUpTotal == 0) return -1;
+  {
+    Lock l;
+    if (!webUpName.length()) return -1;
+  }
+  if (webUpTotal == 0) return -1;
   return (int)std::min<uint64_t>(100, (uint64_t)webUpBytes * 100 / webUpTotal);
 }
 static int webUploadCount() { return webUploads; }
@@ -2564,7 +2683,7 @@ static bool musicReadMarker(File& f, String& variant, int& build) {
 // Kökteki muzik-<model>.bin (elle kopyalanmış) sistem klasörüne taşınır
 static void musicAdoptRootFile() {
   const char* root = "/muzik-" FW_VARIANT ".bin";
-  if (!sdOk || !SD.exists(root)) return;
+  if (!sdOk || webUpFile || !SD.exists(root)) return;
   if (!SD.exists("/daxen")) SD.mkdir("/daxen");
   if (!SD.exists(MUSIC_DIR)) SD.mkdir(MUSIC_DIR);
   if (SD.exists(MUSIC_FILE)) SD.remove(MUSIC_FILE);
@@ -3217,7 +3336,6 @@ void setup() {
   kService("dokunma", 10, svcTouch);
   kService("kabuk", 16, shellTick);
   kService("bluetooth", 10, svcBle);
-  kService("web", 10, webTick);
   kService("saat", 200, svcClock);
   kService("ışık", 50, svcLight);
   kAdopt("ağ", netH, 1, 0, 16384);
