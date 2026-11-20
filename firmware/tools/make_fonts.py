@@ -2,8 +2,8 @@
 
 TFT_eSPI'nin yerleşik yazı tiplerinde Türkçe harfler (ç ğ ı İ ö ş ü) yok. Bu betik
 gereken harfleri .vlw biçiminde çizip src/fonts.h dosyasına yazar.
-Arayüz: Inter. Başlıklar ve büyük rakamlar: Lora (SemiBold). İkisi de SIL Open Font
-License 1.1 ile dağıtılır (gömülü kullanım serbest).
+DAXEN VANE tasarımı: bütün arayüz Inter (SIL Open Font License 1.1, gömülü kullanım serbest).
+Logonun serif yazısı yazı tipi değil, görseldir (tools/make_logo.py).
 """
 import struct
 from pathlib import Path
@@ -11,31 +11,30 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 INTER = Path("/usr/share/fonts/opentype/inter")
-LORA = Path("/usr/share/fonts/truetype/google-fonts/Lora-Variable.ttf")
 OUT = Path(__file__).resolve().parent.parent / "src" / "fonts.h"
 
 TEXT = (
     "".join(chr(c) for c in range(0x20, 0x7F))
-    + "ÇçĞğİıÖöŞşÜüÂâÎîÛû°·–—…→"
+    + "ÇçĞğİıÖöŞşÜüÂâÎîÛû°·–—…→←×÷−√π±≤≥²³½“”‘’«»₺€•"
 )
+# Okuyucu ve notlar için Batı Avrupa harfleri (şarkı ve dosya adları da)
+LATIN = "".join(chr(c) for c in range(0xC0, 0x100) if chr(c) not in "×÷")
 DIGITS = " 0123456789:-"
+NUMS = " 0123456789:.,%°+-−×÷=()^√π/!eE"
 
 FONTS = [
-    # (C adı, dosya, piksel boyutu, karakterler); "lora" = Lora SemiBold (600)
-    ("F_SMALL", "Inter-Medium.otf", 15, TEXT),
-    ("F_TEXT", "Inter-SemiBold.otf", 18, TEXT),
-    ("F_TITLE", "lora", 24, TEXT),
-    ("F_BIG", "lora", 72, DIGITS),
+    # (C adı, dosya, piksel boyutu, karakterler)
+    ("F_XS", "Inter-SemiBold.otf", 12, TEXT),
+    ("F_SM", "Inter-Medium.otf", 15, TEXT + LATIN),
+    ("F_MD", "Inter-SemiBold.otf", 18, TEXT + LATIN),
+    ("F_LG", "Inter-Regular.otf", 26, NUMS),
+    ("F_XL", "Inter-Light.otf", 64, DIGITS),
 ]
-# Büyük rakamlarda üst/alt boşluk bırakılmaz: 58 piksellik ara belleğe sığsın.
-TIGHT = {"F_BIG"}
+# Büyük rakamlarda üst/alt boşluk bırakılmaz: ara belleğe sığsın.
+TIGHT = {"F_XL"}
 
 
 def load(path, size):
-    if path == "lora":
-        font = ImageFont.truetype(str(LORA), size)
-        font.set_variation_by_axes([600])
-        return font
     return ImageFont.truetype(str(INTER / path), size)
 
 
@@ -72,7 +71,7 @@ def build(path, size, chars, tight=False):
 def main():
     lines = [
         "// Bu dosya tools/make_fonts.py ile üretildi, elle değiştirme.",
-        "// Yazı tipleri: Inter (rsms.me/inter) ve Lora (Cyreal), SIL Open Font License 1.1",
+        "// Yazı tipi: Inter (rsms.me/inter), SIL Open Font License 1.1",
         "#pragma once",
         "#include <Arduino.h>",
         "",

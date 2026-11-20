@@ -15,7 +15,7 @@
 #endif
 
 #define GITHUB_REPO "loljpg/calisma-asistan-"
-#define PORTAL_NAME "CalismaSaati-Kurulum"
+#define SYSTEM_NAME "DAXEN VANE"
 
 // ---------- Hava durumu (Sakarya) ----------
 #define WEATHER_CITY "Sakarya"
@@ -45,38 +45,10 @@
 #define SCREEN_W 320
 #define SCREEN_H 240
 
-// RGB565 renkleri
+// RGB565 (kırparak; tasarım renkleri için ui/theme.h rgbn yuvarlar)
 #define RGB(r, g, b) ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
 
-// "Sentez" tasarımı: gündüz açık kâğıt, gece koyu. Renkler main.cpp'deki paletlerden gelir.
-struct Palette {
-  uint16_t bg, grid, surface, line, lineStrong, text, muted, faint, red, redSoft, redLine;
-  uint16_t ink, onInk, inkMuted, ink2, inkLine, track, ok, cloud;
-};
-extern const Palette* th;
-
-#define COL_BG (th->bg)
-#define COL_GRID (th->grid)
-#define COL_SURFACE (th->surface)
-#define COL_LINE (th->line)
-#define COL_LINE_STRONG (th->lineStrong)
-#define COL_TEXT (th->text)
-#define COL_MUTED (th->muted)
-#define COL_FAINT (th->faint)
-#define COL_RED (th->red)
-#define COL_RED_SOFT (th->redSoft)
-#define COL_RED_LINE (th->redLine)
-#define COL_INK (th->ink)
-#define COL_ON_INK (th->onInk)
-#define COL_INK_MUTED (th->inkMuted)
-#define COL_INK2 (th->ink2)
-#define COL_INK_LINE (th->inkLine)
-#define COL_TRACK (th->track)
-#define COL_OK (th->ok)
-#define COL_CLOUD (th->cloud)
-#define INK_TEXT RGB(22, 23, 26)  // beyaz düğme üstündeki yazı
-
-#define GRID_STEP 22
+// DAXEN VANE renkleri ui/theme.h'de (tek yerden yönetilir).
 #define NIGHT_FROM 22  // otomatik temada gece başlangıcı (saat)
 #define NIGHT_TO 7
 
