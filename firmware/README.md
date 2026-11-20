@@ -59,7 +59,7 @@ hesap yaparken saat, dokunma ve alarmlar donmaz.
 | --- | --- | --- | --- |
 | dokunma | servis | 10 ms | Dokunmatik ve BOOT tuşu |
 | kabuk | servis | 16 ms | Ekran, pencereler, uygulamanın adımı |
-| bluetooth | servis | 20 ms | Telefondan gelenler |
+| bluetooth | servis | 10 ms | Telefondan gelenler |
 | web | servis | 10 ms | Aktarım ve hesap sayfası sunucusu |
 | saat | servis | 200 ms | Dakika işleri, Pomodoro, gece bakımı |
 | ışık | servis | 50 ms | RGB ışık ve ekran parlaklığı |

@@ -3197,7 +3197,7 @@ void setup() {
   kernelBegin();
   kService("dokunma", 10, svcTouch);
   kService("kabuk", 16, shellTick);
-  kService("bluetooth", 20, svcBle);
+  kService("bluetooth", 10, svcBle);
   kService("web", 10, webTick);
   kService("saat", 200, svcClock);
   kService("ışık", 50, svcLight);
@@ -3214,7 +3214,7 @@ static void svcTouch() {  // 10 ms: BOOT tuşu ve dokunmatik
   shellTouch(t, tx, ty);
 }
 
-static void svcBle() {  // 20 ms: telefondan gelenler
+static void svcBle() {  // 10 ms: telefondan gelenler
   bleProcess();
   applyRemoteTimer();
   if (dataDirty) {
