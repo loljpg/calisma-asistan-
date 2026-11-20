@@ -59,7 +59,7 @@ struct Config {
   bool autoBright = false;  // ışık sensörüne göre parlaklık
   String wCity = WEATHER_CITY;
   float wLat = 40.78f, wLon = 30.40f;
-  uint16_t worldMask = 0x0043;  // Dünya saatleri: seçili şehirler (bit)
+  uint16_t worldMask = 0x0141;  // Londra, Tokyo, New York  // Dünya saatleri: seçili şehirler (bit)
 };
 
 struct Notif {

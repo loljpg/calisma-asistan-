@@ -3,8 +3,6 @@
 #include "shell.h"
 #include "cat.h"
 
-static const App* const* appTable();  // os/registry.h
-static int appTableCount();
 static int luaAppCount();             // SD karttaki Lua uygulamaları (apps/lua.h)
 static String luaAppLabel(int i);
 static void luaAppOpen(int i);
@@ -305,6 +303,10 @@ static void drawBanner() {
 // Ekranı yeniden çiz
 // ============================================================================
 static void shellRedraw(bool full) {
+  if (ringOn) {
+    ringDraw();
+    return;
+  }
   if (kbm.active) {
     if (full) kbmDraw();
     return;
@@ -322,7 +324,6 @@ static void shellRedraw(bool full) {
 // ============================================================================
 // Dokunma: basma/sürükleme/bırakma → dokunuş, uzun basış, kaydırma
 // ============================================================================
-static bool sysWake();  // main.cpp: gece kısıkken ilk dokunuş yalnızca ekranı açar
 
 struct Gesture {
   bool down = false, swallow = false, raw = false, held = false, holdTried = false, kb = false;
@@ -390,6 +391,18 @@ static void shellTouch(bool t, int x, int y) {
     gs.lastSeen = ms;
     lastInteract = ms;
   }
+  if (ringOn) {  // alarm çalıyor: yalnızca Ertele / Kapat
+    static bool rdown = false;
+    if (t && !rdown) {
+      rdown = true;
+      gs.sx = x;
+      gs.sy = y;
+    } else if (!t && rdown && ms - gs.lastSeen > 40) {
+      rdown = false;
+      ringTap(gs.sx, gs.sy);
+    }
+    return;
+  }
   if (t && !gs.down) {
     gs = Gesture();
     gs.down = true;
@@ -456,6 +469,8 @@ static void shellBoot(int stage) {
 // Her döngüde
 static void shellTick() {
   uint32_t ms = millis();
+  clockBgTick();
+  if (ringOn) return;
   if (kbm.active) {
     kbmTick();
     return;
@@ -508,7 +523,7 @@ static void shellTick() {
 // ============================================================================
 static void uiRedraw(bool full) { shellRedraw(full); }
 static void uiToast(const String& msg) {
-  if (kbm.active) return;
+  if (kbm.active || ringOn) return;
   toast(msg);
 }
 static bool appWantsQuiet() { return curApp && curApp->raw && shScreen == SH_APP; }  // oyun ve çizimde afiş yok

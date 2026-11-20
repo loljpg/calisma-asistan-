@@ -515,7 +515,10 @@ static bool setBack() {
 static void setOpen() {
   if (!setDirect) setPage = SP_MAIN;
 }
-static void setClose() { setDirect = false; }
+static void setClose() {
+  setDirect = false;
+  webStop();  // Bulut hesabı → tarayıcıdan gir ile açıldıysa
+}
 
 static const App APP_SETTINGS = {"Ayarlar", "Ayarlar", I_SETTINGS, setOpen, setDraw, setTap, nullptr, setSwipe, nullptr, setTick, setBack, setClose};
 
@@ -524,6 +527,14 @@ static void settingsOpenPage(uint8_t p) {
   setDirect = true;
   setPage = p;
   appOpen(&APP_SETTINGS);
+  if (p == SP_WIFI) wifiScan();
+}
+
+// Başka bir uygulamanın içinden bir ayar sayfası (geri: o uygulamaya döner)
+static void settingsChild(uint8_t p) {
+  setDirect = true;
+  setPage = p;
+  appOpenChild(&APP_SETTINGS);
   if (p == SP_WIFI) wifiScan();
 }
 

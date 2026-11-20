@@ -1,4 +1,4 @@
-name: Masa saati yazılımı (ESP32 CYD)
+name: DAXEN VANE yazılımı (ESP32 CYD)
 
 on:
   push:
@@ -31,11 +31,11 @@ jobs:
       - name: PlatformIO kur
         run: pip install --upgrade platformio "esptool<5"
 
-      - name: Derle (ILI9341 ve ST7789)
+      - name: Derle (ILI9341 ve ST7789; DAXEN VANE ve Müzik)
         working-directory: firmware
         env:
           PLATFORMIO_BUILD_FLAGS: -DFW_BUILD=${{ github.run_number }}
-        run: pio run -e cyd -e cyd_st7789
+        run: pio run -e cyd -e cyd_st7789 -e muzik_cyd -e muzik_cyd_st7789
 
       - name: Dosyaları hazırla
         working-directory: firmware
@@ -46,6 +46,7 @@ jobs:
           for env in cyd cyd_st7789; do
             B=.pio/build/$env
             cp "$B/firmware.bin" "../dist/firmware-$env.bin"
+            cp ".pio/build/muzik_$env/firmware.bin" "../dist/muzik-$env.bin"
             esptool.py --chip esp32 merge_bin -o "../dist/ilk-kurulum-$env.bin" \
               --flash_mode dio --flash_freq 40m --flash_size 4MB \
               0x1000 "$B/bootloader.bin" 0x8000 "$B/partitions.bin" \
@@ -58,7 +59,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: fw-v${{ github.run_number }}
-          name: Masa saati fw-v${{ github.run_number }}
+          name: DAXEN VANE fw-v${{ github.run_number }}
           make_latest: "false"
           body: |
             **İlk yükleme:** ESPFlash ile **0x0** adresine yaz.
@@ -69,4 +70,7 @@ jobs:
 
             Sonraki sürümler kart Wi-Fi'ye bağlıyken kendiliğinden yüklenir
             (`firmware-*.bin` dosyaları bunun içindir, elle yüklemene gerek yok).
+
+            `muzik-*.bin`: kulaklıkla SD müzik modülü. Müzik uygulaması gerekince kendisi indirir;
+            istersen SD kartın köküne de kopyalayabilirsin.
           files: dist/*.bin

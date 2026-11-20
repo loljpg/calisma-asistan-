@@ -21,6 +21,7 @@
 #include <NimBLEDevice.h>
 #include <esp_ota_ops.h>
 #include <esp_wifi.h>
+#include <WebServer.h>
 #include <sys/time.h>
 #include <time.h>
 #include <vector>
@@ -2202,136 +2203,7 @@ static void bleMediaKey(const char* cmd) {
   bleSendJson('K', d);
 }
 
-// ============================================================================
-// Dokunmatik ve buton
-// ============================================================================
-// XPT2046 yazılımsal SPI ile okunur (VSPI SD kartın). Okuma sırası ve ortalama
-// XPT2046_Touchscreen kütüphanesiyle aynıdır; eski kalibrasyon geçerli kalır.
-struct TouchRaw {
-  int x = 0, y = 0, z = 0;
-};
-
-static void tsBegin() {
-  pinMode(TOUCH_CS, OUTPUT);
-  digitalWrite(TOUCH_CS, HIGH);
-  pinMode(TOUCH_CLK, OUTPUT);
-  digitalWrite(TOUCH_CLK, LOW);
-  pinMode(TOUCH_MOSI, OUTPUT);
-  pinMode(TOUCH_MISO, INPUT);
-  pinMode(TOUCH_IRQ, INPUT);
-}
-
-static uint8_t tsXfer(uint8_t out) {
-  uint8_t in = 0;
-  for (int i = 7; i >= 0; i--) {
-    digitalWrite(TOUCH_MOSI, (out >> i) & 1);
-    delayMicroseconds(1);
-    digitalWrite(TOUCH_CLK, HIGH);
-    delayMicroseconds(1);
-    in = (in << 1) | (digitalRead(TOUCH_MISO) ? 1 : 0);
-    digitalWrite(TOUCH_CLK, LOW);
-  }
-  return in;
-}
-
-static uint16_t tsXfer16(uint16_t out) {
-  uint16_t hi = tsXfer(out >> 8);
-  return (hi << 8) | tsXfer(out & 0xFF);
-}
-
-static int16_t besttwoavg(int16_t x, int16_t y, int16_t z) {
-  int16_t da = abs(x - y), db = abs(x - z), dc = abs(z - y);
-  if (da <= db && da <= dc) return (x + y) >> 1;
-  if (db <= da && db <= dc) return (x + z) >> 1;
-  return (y + z) >> 1;
-}
-
-static TouchRaw tsRead() {
-  static bool awake = false;
-  static uint32_t lastAt = 0;
-  static TouchRaw last;
-  if (millis() - lastAt < 3) return last;
-  TouchRaw r;
-  // Dokunulmuyorken IRQ yüksektir; bir dokunuş başladıktan sonra parmak kalkana kadar okunur.
-  if (!awake && digitalRead(TOUCH_IRQ) == HIGH) {
-    last = r;
-    return r;
-  }
-  awake = true;
-  int16_t d[6] = {0, 0, 0, 0, 0, 0};
-  digitalWrite(TOUCH_CS, LOW);
-  tsXfer(0xB1);
-  int16_t z1 = tsXfer16(0xC1) >> 3;
-  int z = z1 + 4095;
-  int16_t z2 = tsXfer16(0x91) >> 3;
-  z -= z2;
-  if (z >= 400) {
-    tsXfer16(0x91);  // ilk ölçüm gürültülü
-    d[0] = tsXfer16(0xD1) >> 3;
-    d[1] = tsXfer16(0x91) >> 3;
-    d[2] = tsXfer16(0xD1) >> 3;
-    d[3] = tsXfer16(0x91) >> 3;
-  }
-  d[4] = tsXfer16(0xD0) >> 3;  // son ölçüm, ardından bekleme kipi (IRQ açık)
-  d[5] = tsXfer16(0) >> 3;
-  digitalWrite(TOUCH_CS, HIGH);
-  lastAt = millis();
-  if (z < 400) {
-    if (z < 75) awake = false;
-    last = r;
-    return r;
-  }
-  r.x = besttwoavg(d[0], d[2], d[4]);
-  r.y = besttwoavg(d[1], d[3], d[5]);
-  r.z = z;
-  last = r;
-  return r;
-}
-
-static bool tsTouched() { return tsRead().z > 0; }
-
-static bool getTouch(int& x, int& y) {
-  TouchRaw p = tsRead();
-  if (!p.z) return false;
-  int rx = cfg.swapXY ? p.y : p.x, ry = cfg.swapXY ? p.x : p.y;
-  int dx = cfg.x2 - cfg.x1, dy = cfg.y2 - cfg.y1;
-  if (dx == 0 || dy == 0) return false;
-  x = 20 + (long)(rx - cfg.x1) * 280 / dx;
-  y = 20 + (long)(ry - cfg.y1) * 200 / dy;
-  x = constrain(x, 0, SCREEN_W - 1);
-  y = constrain(y, 0, SCREEN_H - 1);
-  return true;
-}
-
-// Dokunuşu bekler; BOOT'a basılırsa ya da 60 sn dokunulmazsa false döner.
-static bool waitTap(int& rx, int& ry) {
-  while (tsTouched()) delay(10);
-  delay(150);
-  uint32_t t0 = millis();
-  while (!tsTouched()) {
-    if (digitalRead(PIN_BOOT) == LOW || millis() - t0 > 60000) {
-      while (digitalRead(PIN_BOOT) == LOW) delay(10);
-      return false;
-    }
-    delay(10);
-  }
-  long sx = 0, sy = 0;
-  int n = 0;
-  t0 = millis();
-  while (millis() - t0 < 1500) {
-    TouchRaw p = tsRead();
-    if (!p.z) break;
-    sx += p.x;
-    sy += p.y;
-    n++;
-    delay(15);
-  }
-  while (tsTouched()) delay(10);
-  if (!n) return false;
-  rx = sx / n;
-  ry = sy / n;
-  return true;
-}
+#include "core/touch.h"
 
 static void runCalibration() {
   const int px[3] = {20, 300, 20}, py[3] = {20, 20, 220};
@@ -2367,17 +2239,537 @@ static void runCalibration() {
 }
 
 // ============================================================================
-// Web sunucusu ve müzik yazılımı (sonraki aşamalarda doldurulur)
+// Web sunucusu: telefondan tarayıcıyla SD karta dosya gönderme ve hesap bilgileri
 // ============================================================================
-static bool webStart() { return false; }
-static void webStop() {}
-static bool webRunning() { return false; }
-static String webStatus() { return ""; }
-static int musicState() { return 1; }
-static String musicInfo() { return ""; }
-static void musicDownload() {}
-static void musicLaunch() {}
-static void musicBootTasks() {}
+// Yalnızca Dosya aktarımı ekranı (ya da Ayarlar → Bulut hesabı → tarayıcıdan gir) açıkken çalışır.
+// Aynı Wi-Fi ağındaki telefon http://<kartın adresi>/ adresini açar.
+static WebServer* web = nullptr;
+static String webMsg;                // son işlem (ekranda gösterilir)
+static String webUpName;             // yüklenen dosya
+static uint32_t webUpBytes = 0, webUpTotal = 0;
+static int webUploads = 0;
+static File webUpFile;
+
+static const char WEB_HEAD[] PROGMEM = R"(<!doctype html><html lang=tr><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1"><title>DAXEN VANE</title><style>
+body{margin:0;background:#050505;color:#C5C9CE;font:15px/1.45 system-ui,sans-serif}
+main{max-width:640px;margin:auto;padding:18px}h1{font:600 13px system-ui;letter-spacing:.3em;color:#858B91;margin:0 0 16px}
+h2{font-size:17px;margin:20px 0 8px}a{color:#C5C9CE;text-decoration:none}
+.row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #30353A}
+.row span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mut{color:#858B91;font-size:13px}
+.box{background:#151515;border:1px solid #30353A;border-radius:4px;padding:12px;margin:12px 0}
+input,button{font:inherit;background:#101010;color:#C5C9CE;border:1px solid #30353A;border-radius:3px;padding:8px 10px}
+button{border-color:#7892A5;cursor:pointer}input[type=text],input[type=password]{width:100%;box-sizing:border-box;margin:4px 0 10px}
+.del{border:none;background:none;color:#555B60;padding:4px}form.inl{display:inline}.path{color:#7892A5}
+</style></head><body><main><h1>DAXEN VANE</h1>)";
+
+static String webEsc(const String& s) {
+  String o;
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '<') o += "&lt;";
+    else if (c == '>') o += "&gt;";
+    else if (c == '&') o += "&amp;";
+    else if (c == '"') o += "&quot;";
+    else o += c;
+  }
+  return o;
+}
+
+static String webUrlEnc(const String& s) {
+  String o;
+  const char* hex = "0123456789ABCDEF";
+  for (size_t i = 0; i < s.length(); i++) {
+    uint8_t c = s[i];
+    if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '/' || c == '~') o += (char)c;
+    else {
+      o += '%';
+      o += hex[c >> 4];
+      o += hex[c & 15];
+    }
+  }
+  return o;
+}
+
+static String webSafePath(String p) {
+  if (!p.startsWith("/")) p = "/" + p;
+  if (p.indexOf("..") >= 0) p = "/";
+  while (p.length() > 1 && p.endsWith("/")) p.remove(p.length() - 1);
+  return p;
+}
+
+static void webPage() {
+  if (!sdOk) {
+    web->send(200, "text/html; charset=utf-8", String(FPSTR(WEB_HEAD)) + "<p>SD kart takılı değil.</p></main></body></html>");
+    return;
+  }
+  String dir = webSafePath(web->hasArg("d") ? web->arg("d") : String("/"));
+  web->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  web->send(200, "text/html; charset=utf-8", "");
+  web->sendContent(FPSTR(WEB_HEAD));
+  String h = "<div class=box><form method=post enctype=multipart/form-data action='/up?d=" + webUrlEnc(dir) +
+             "'><b>Dosya gönder</b><p class=mut>Şarkılar için Muzik klasörünü seç. Birden çok dosya seçebilirsin.</p>"
+             "<input type=file name=f multiple> <button>Gönder</button></form></div>";
+  h += "<h2>Klasör: <span class=path>" + webEsc(dir) + "</span></h2>";
+  if (dir != "/") h += "<div class=row><a href='/?d=" + webUrlEnc(dirName(dir)) + "'>&#8592; Üst klasör</a></div>";
+  web->sendContent(h);
+  File d = SD.open(dir);
+  std::vector<std::pair<String, uint32_t>> dirs, files;
+  if (d && d.isDirectory()) {
+    for (File f = d.openNextFile(); f && dirs.size() + files.size() < 500; f = d.openNextFile()) {
+      String n = baseName(f.name());
+      if (!n.startsWith(".")) (f.isDirectory() ? dirs : files).push_back({n, (uint32_t)f.size()});
+      f.close();
+    }
+    d.close();
+  }
+  auto byName = [](const std::pair<String, uint32_t>& a, const std::pair<String, uint32_t>& b) { return trLower(a.first) < trLower(b.first); };
+  std::sort(dirs.begin(), dirs.end(), byName);
+  std::sort(files.begin(), files.end(), byName);
+  for (auto& e : dirs) {
+    String p = joinPath(dir, e.first);
+    web->sendContent("<div class=row>&#128193;<span><a href='/?d=" + webUrlEnc(p) + "'>" + webEsc(e.first) +
+                     "</a></span><form class=inl method=post action='/del?f=" + webUrlEnc(p) +
+                     "' onsubmit='return confirm(\"Klasör ve içindekiler silinsin mi?\")'><button class=del>Sil</button></form></div>");
+  }
+  for (auto& e : files) {
+    String p = joinPath(dir, e.first);
+    web->sendContent("<div class=row><span><a href='/dl?f=" + webUrlEnc(p) + "'>" + webEsc(e.first) + "</a></span><span class=mut style='flex:none'>" +
+                     fmtBytes(e.second) + "</span><form class=inl method=post action='/del?f=" + webUrlEnc(p) +
+                     "' onsubmit='return confirm(\"Silinsin mi?\")'><button class=del>Sil</button></form></div>");
+  }
+  if (dirs.empty() && files.empty()) web->sendContent("<p class=mut>Klasör boş.</p>");
+  web->sendContent("<div class=box><form method=post action='/mkdir?d=" + webUrlEnc(dir) +
+                   "'><b>Yeni klasör</b><input type=text name=n placeholder='Klasör adı'><button>Oluştur</button></form></div>"
+                   "<p class=mut><a href='/hesap'>Bulut hesabı bilgileri &#8594;</a></p></main></body></html>");
+  web->sendContent("");
+}
+
+static void webRedirect(const String& to) {
+  web->sendHeader("Location", to);
+  web->send(303, "text/plain", "");
+}
+
+static void webUploadChunk() {
+  HTTPUpload& up = web->upload();
+  String dir = webSafePath(web->hasArg("d") ? web->arg("d") : String("/"));
+  if (up.status == UPLOAD_FILE_START) {
+    String name = safeName(baseName(up.filename));
+    if (!name.length()) name = "dosya";
+    webUpName = name;
+    webUpBytes = 0;
+    webUpTotal = web->header("Content-Length").toInt();
+    String path = joinPath(dir, name);
+    if (SD.exists(path)) SD.remove(path);
+    webUpFile = SD.open(path, FILE_WRITE);
+    webMsg = webUpFile ? "Alınıyor: " + name : "Yazılamadı: " + name;
+    uiDataChanged();
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (webUpFile) webUpFile.write(up.buf, up.currentSize);
+    webUpBytes += up.currentSize;
+    static uint32_t lastDraw = 0;
+    if (millis() - lastDraw > 400) {  // yükleme sürerken döngü dönmez; ilerleme buradan çizilir
+      lastDraw = millis();
+      uiDataChanged();
+    }
+  } else if (up.status == UPLOAD_FILE_END || up.status == UPLOAD_FILE_ABORTED) {
+    if (webUpFile) webUpFile.close();
+    if (up.status == UPLOAD_FILE_END) {
+      webUploads++;
+      webMsg = "Alındı: " + webUpName + " (" + fmtBytes(up.totalSize) + ")";
+    } else {
+      webMsg = "Yarıda kesildi: " + webUpName;
+    }
+    webUpName = "";
+    uiDataChanged();
+  }
+}
+
+static bool fRemoveAll(const String& path);  // apps/files.h
+
+static void webAccountPage() {
+  String h = String(FPSTR(WEB_HEAD)) + "<h2>Bulut hesabı</h2><p class=mut>Telefondaki uygulamaya girdiğin Firebase bilgilerinin aynısı.</p>"
+             "<form method=post action='/hesap' class=box>Veritabanı adresi<input type=text name=db value='" + webEsc(cfg.dbUrl) +
+             "'>Web API anahtarı<input type=text name=key value='" + webEsc(cfg.apiKey) + "'>E-posta<input type=text name=mail value='" +
+             webEsc(cfg.email) + "'>Şifre" + (cfg.password.length() ? " (değişmeyecekse boş bırak)" : "") +
+             "<input type=password name=pass><button>Kaydet</button></form><p><a href='/'>&#8592; Dosyalar</a></p></main></body></html>";
+  web->send(200, "text/html; charset=utf-8", h);
+}
+
+static bool webStart() {
+  if (web) return true;
+  if (WiFi.status() != WL_CONNECTED) return false;
+  web = new (std::nothrow) WebServer(80);
+  if (!web) return false;
+  const char* hdrs[] = {"Content-Length"};
+  web->collectHeaders(hdrs, 1);
+  web->on("/", HTTP_GET, webPage);
+  web->on("/dl", HTTP_GET, []() {
+    String p = webSafePath(web->arg("f"));
+    File f = SD.open(p);
+    if (!f || f.isDirectory()) {
+      web->send(404, "text/plain", "yok");
+      return;
+    }
+    web->sendHeader("Content-Disposition", "attachment; filename=\"" + baseName(p) + "\"");
+    web->streamFile(f, "application/octet-stream");
+    f.close();
+  });
+  web->on("/up", HTTP_POST, []() { webRedirect("/?d=" + webUrlEnc(webSafePath(web->arg("d")))); }, webUploadChunk);
+  web->on("/del", HTTP_POST, []() {
+    String p = webSafePath(web->arg("f"));
+    if (p != "/") {
+      fRemoveAll(p);
+      webMsg = "Silindi: " + baseName(p);
+      uiDataChanged();
+    }
+    webRedirect("/?d=" + webUrlEnc(dirName(p)));
+  });
+  web->on("/mkdir", HTTP_POST, []() {
+    String d = webSafePath(web->arg("d"));
+    String n = safeName(web->arg("n"));
+    if (n.length()) SD.mkdir(joinPath(d, n));
+    webRedirect("/?d=" + webUrlEnc(d));
+  });
+  web->on("/hesap", HTTP_GET, webAccountPage);
+  web->on("/hesap", HTTP_POST, []() {
+    String db = normalizeDbUrl(web->arg("db")), key = web->arg("key"), mail = web->arg("mail"), pass = web->arg("pass");
+    key.trim();
+    mail.trim();
+    accountSet(db.length() ? db : cfg.dbUrl, key.length() ? key : cfg.apiKey, mail.length() ? mail : cfg.email,
+               pass.length() ? pass : cfg.password);
+    webMsg = "Hesap bilgileri kaydedildi";
+    uiDataChanged();
+    web->send(200, "text/html; charset=utf-8", String(FPSTR(WEB_HEAD)) + "<p>Kaydedildi. Kart buluta bağlanmayı deniyor.</p><p><a href='/'>Dosyalar</a></p></main></body></html>");
+  });
+  web->onNotFound([]() { web->send(404, "text/plain", "yok"); });
+  web->begin();
+  webMsg = "";
+  return true;
+}
+
+static void webStop() {
+  if (!web) return;
+  if (webUpFile) webUpFile.close();
+  web->stop();
+  delete web;
+  web = nullptr;
+}
+
+static bool webRunning() { return web != nullptr; }
+
+static String webStatus() {
+  if (webUpName.length()) {
+    String s = webUpName + " · " + fmtBytes(webUpBytes);
+    if (webUpTotal > webUpBytes) s += " / " + fmtBytes(webUpTotal);
+    return s;
+  }
+  return webMsg;
+}
+
+static void webTick() {
+  if (!web) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+  web->handleClient();
+}
+
+static int webProgress() {
+  if (!webUpName.length() || webUpTotal == 0) return -1;
+  return (int)std::min<uint64_t>(100, (uint64_t)webUpBytes * 100 / webUpTotal);
+}
+static int webUploadCount() { return webUploads; }
+
+// Şehir arama (Hava durumu → ara). Engelleyici; ekranda "Aranıyor…" görünür.
+static bool weatherSearch(const String& q, std::vector<GeoHit>& out) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  String name = q;
+  name.trim();
+  int code;
+  String resp = httpGetPlain("http://geocoding-api.open-meteo.com/v1/search?count=6&language=tr&format=json&name=" + webUrlEnc(name), code);
+  if (code != 200) return false;
+  JsonDocument d;
+  if (deserializeJson(d, resp)) return false;
+  for (JsonVariantConst r : d["results"].as<JsonArrayConst>()) {
+    GeoHit h;
+    h.name = String((const char*)(r["name"] | ""));
+    String a1 = String((const char*)(r["admin1"] | "")), c = String((const char*)(r["country"] | ""));
+    h.region = a1.length() && a1 != h.name ? a1 + ", " + c : c;
+    h.lat = r["latitude"] | 0.0f;
+    h.lon = r["longitude"] | 0.0f;
+    if (h.name.length()) out.push_back(h);
+  }
+  return true;
+}
+
+static void splashLogo();
+// ============================================================================
+// Müzik yazılımı (kulaklıkla SD müzik): indirme, bölüme yazma, açma
+// ============================================================================
+// Müzik ayrı bir yazılımdır (klasik Bluetooth ve MP3 çözücü bu yazılıma sığmıyor). SD karttaki
+// /daxen/sys/muzik-<model>.bin boştaki güncelleme bölümüne yazılır ve kart oradan başlar. Müzik
+// yazılımından çıkınca ya da bir sorun olursa kart kendiliğinden bu yazılıma döner.
+#define MUSIC_DIR "/daxen/sys"
+#define MUSIC_FILE MUSIC_DIR "/muzik-" FW_VARIANT ".bin"
+#define MUSIC_MIN_BUILD 0
+static String musicErr;
+static int musicCachedState = -1;
+static uint32_t musicCachedSize = 0;
+
+// Dosyadaki "DXMU:<model>:<sürüm>;" işaretini arar
+static bool musicReadMarker(File& f, String& variant, int& build) {
+  static const char key[] = "DXMU:";
+  uint8_t buf[512];
+  size_t kl = 5, match = 0;
+  String tail;
+  bool inMarker = false;
+  f.seek(0);
+  while (f.available()) {
+    int n = f.read(buf, sizeof buf);
+    for (int i = 0; i < n; i++) {
+      char c = buf[i];
+      if (inMarker) {
+        if (c == ';') {
+          int k = tail.indexOf(':');
+          if (k > 0) {
+            variant = tail.substring(0, k);
+            build = tail.substring(k + 1).toInt();
+            return true;
+          }
+          inMarker = false;
+          tail = "";
+        } else if (tail.length() < 40 && c >= 32 && c < 127) {
+          tail += c;
+        } else {
+          inMarker = false;
+          tail = "";
+        }
+        continue;
+      }
+      if (c == key[match]) {
+        if (++match == kl) {
+          inMarker = true;
+          match = 0;
+        }
+      } else {
+        match = c == key[0] ? 1 : 0;
+      }
+    }
+  }
+  return false;
+}
+
+// Kökteki muzik-<model>.bin (elle kopyalanmış) sistem klasörüne taşınır
+static void musicAdoptRootFile() {
+  const char* root = "/muzik-" FW_VARIANT ".bin";
+  if (!sdOk || !SD.exists(root)) return;
+  if (!SD.exists("/daxen")) SD.mkdir("/daxen");
+  if (!SD.exists(MUSIC_DIR)) SD.mkdir(MUSIC_DIR);
+  if (SD.exists(MUSIC_FILE)) SD.remove(MUSIC_FILE);
+  SD.rename(root, MUSIC_FILE);
+}
+
+static int musicState() {
+  if (!sdOk) return 2;
+  musicAdoptRootFile();
+  File f = SD.open(MUSIC_FILE);
+  if (!f) return 1;
+  uint32_t sz = f.size();
+  if (musicCachedState >= 0 && sz == musicCachedSize) {
+    f.close();
+    return musicCachedState;
+  }
+  String v;
+  int b = 0;
+  bool ok = musicReadMarker(f, v, b) && v == FW_VARIANT && b >= MUSIC_MIN_BUILD;
+  f.close();
+  musicCachedSize = sz;
+  musicCachedState = ok ? 0 : 1;
+  return musicCachedState;
+}
+
+static String musicInfo() {
+  if (musicErr.length()) return musicErr;
+  switch (musicState()) {
+    case 0: return "Müzik modülü hazır";
+    case 2: return "SD kart takılı değil";
+    default: return "Müzik modülü SD kartta yok (1,3 MB indirilecek)";
+  }
+}
+
+static void musicDownload() {
+  {
+    Lock l;
+    prefs.begin("cs", false);
+    prefs.putBool("getmus", true);
+    prefs.end();
+  }
+  uiSplash("Müzik modülü indirilecek…");
+  delay(600);
+  esp_ota_mark_app_valid_cancel_rollback();
+  ESP.restart();
+}
+
+static void musicProgress(const String& title, int pct) {
+  static int last = -2;
+  if (pct < 0 || last < 0 || pct < last) {
+    splashLogo();
+    text(title, 160, 172, F_SM, C_TEXT, C_BG, MC_DATUM);
+    text("Kapatma", 160, 222, F_XS, C_TEXT3, C_BG, MC_DATUM);
+  }
+  last = pct;
+  progress(60, 190, 200, 2, std::max(0, pct), C_ACC);
+  fillBg(60, 198, 200, 16);
+  if (pct >= 0) text("%" + String(pct), 160, 205, F_XS, C_TEXT2, C_BG, MC_DATUM);
+}
+
+// Müzik yazılımını boştaki bölüme yazar (gerekirse) ve oradan başlar.
+static void musicLaunch() {
+  if (musicState() != 0) return;
+  const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
+  if (!next) {
+    musicErr = "Güncelleme bölümü bulunamadı";
+    return;
+  }
+  esp_ota_mark_app_valid_cancel_rollback();  // dönüş için bu yazılım "sağlam" olmalı
+  uint8_t sha[32], saved[32];
+  size_t n;
+  String lbl;
+  {
+    Lock l;
+    prefs.begin("mus2", true);
+    n = prefs.getBytes("sha", saved, 32);
+    lbl = prefs.getString("lbl", "");
+    prefs.end();
+  }
+  bool same = n == 32 && lbl == next->label && esp_partition_get_sha256(next, sha) == ESP_OK && !memcmp(sha, saved, 32);
+  if (same) {
+    musicProgress("Müzik açılıyor", 100);
+    if (esp_ota_set_boot_partition(next) == ESP_OK) {
+      delay(200);
+      ESP.restart();
+    }
+  }
+  File f = SD.open(MUSIC_FILE);
+  if (!f) {
+    musicErr = "Müzik dosyası açılamadı";
+    return;
+  }
+  size_t size = f.size();
+  musicProgress("Müzik modülü yükleniyor", 0);
+  if (!Update.begin(size)) {
+    f.close();
+    musicErr = "Yazılamadı: " + String(Update.errorString());
+    return;
+  }
+  uint8_t buf[2048];
+  size_t done = 0;
+  int lastPct = -1;
+  while (done < size) {
+    int r = f.read(buf, sizeof buf);
+    if (r <= 0 || Update.write(buf, r) != (size_t)r) break;
+    done += r;
+    int pct = done * 100 / size;
+    if (pct != lastPct) {
+      lastPct = pct;
+      musicProgress("Müzik modülü yükleniyor", pct);
+    }
+  }
+  f.close();
+  if (done != size || !Update.end(true)) {
+    musicErr = "Yükleme yarıda kaldı: " + String(Update.errorString());
+    Update.abort();
+    return;
+  }
+  if (esp_partition_get_sha256(next, sha) == ESP_OK) {
+    Lock l;
+    prefs.begin("mus2", false);
+    prefs.putBytes("sha", sha, 32);
+    prefs.putString("lbl", next->label);
+    prefs.end();
+  }
+  delay(200);
+  ESP.restart();
+}
+
+// Açılışta (Bluetooth başlamadan, bellek bolken): istenmişse modülü indirip açar.
+static void musicBootTasks() {
+  bool want;
+  {
+    Lock l;
+    prefs.begin("cs", false);
+    want = prefs.getBool("getmus", false);
+    if (want) prefs.remove("getmus");
+    prefs.end();
+  }
+  if (!want || !sdOk) return;
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) delay(100);
+  if (WiFi.status() != WL_CONNECTED) {
+    musicErr = "İndirilemedi: Wi-Fi bağlantısı yok";
+    return;
+  }
+  if (!SD.exists("/daxen")) SD.mkdir("/daxen");
+  if (!SD.exists(MUSIC_DIR)) SD.mkdir(MUSIC_DIR);
+  String url = "https://github.com/" GITHUB_REPO "/releases/download/fw-v" + String(FW_BUILD) + "/muzik-" FW_VARIANT ".bin";
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+  http.setTimeout(20000);
+  musicProgress("Müzik modülü indiriliyor", 0);
+  int code = -1;
+  if (http.begin(client, url)) {
+    http.setUserAgent("daxen-vane");
+    code = http.GET();
+  }
+  if (code != 200) {
+    http.end();
+    musicErr = "İndirilemedi (" + String(code) + ")";
+    return;
+  }
+  int total = http.getSize();
+  const char* tmp = MUSIC_DIR "/muzik.tmp";
+  File out = SD.open(tmp, FILE_WRITE);
+  WiFiClient* s = http.getStreamPtr();
+  uint8_t buf[2048];
+  int got = 0, lastPct = -1;
+  uint32_t lastData = millis();
+  while (http.connected() && (total < 0 || got < total) && millis() - lastData < 20000) {
+    size_t a = s->available();
+    if (!a) {
+      delay(5);
+      continue;
+    }
+    int r = s->readBytes(buf, std::min(a, sizeof buf));
+    if (r > 0) {
+      out.write(buf, r);
+      got += r;
+      lastData = millis();
+      int pct = total > 0 ? (int)((int64_t)got * 100 / total) : 0;
+      if (pct != lastPct) {
+        lastPct = pct;
+        musicProgress("Müzik modülü indiriliyor", pct);
+      }
+    }
+  }
+  out.close();
+  http.end();
+  if (total > 0 && got != total) {
+    SD.remove(tmp);
+    musicErr = "İndirme yarıda kaldı";
+    return;
+  }
+  if (SD.exists(MUSIC_FILE)) SD.remove(MUSIC_FILE);
+  SD.rename(tmp, MUSIC_FILE);
+  musicCachedState = -1;
+  musicErr = "";
+  if (musicState() != 0) {
+    musicErr = "İndirilen dosya bu karta uymuyor";
+    return;
+  }
+  musicLaunch();
+}
+
 
 // ============================================================================
 // BOOT tuşu: kısa basış ana ekran, 2 sn Ayarlar, 6 sn Wi-Fi ayarı
@@ -2872,6 +3264,7 @@ void loop() {
   }
 
   shellTick();
+  webTick();
   updateLeds();
   updateBacklight();
   delay(5);

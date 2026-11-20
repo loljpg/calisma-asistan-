@@ -16,19 +16,19 @@
 #include "apps/phone.h"
 #include "apps/files.h"
 #include "apps/games.h"
+#include "apps/transfer.h"
+#include "apps/todo.h"
+#include "apps/calc.h"
+#include "apps/clock.h"
+#include "apps/weather.h"
+#include "apps/notes.h"
+#include "apps/music.h"
 #include "apps/placeholder.h"
-PLACEHOLDER(APP_NOTES, "Notlar", "Notlar", I_NOTES)
-PLACEHOLDER(APP_MUSIC, "Müzik", "Müzik", I_HEADPHONES)
-PLACEHOLDER(APP_CALC, "Hesap makinesi", "Hesap Mak.", I_CALC)
-PLACEHOLDER(APP_CLOCK, "Saat", "Saat", I_ALARM)
-PLACEHOLDER(APP_WEATHER, "Hava durumu", "Hava", I_PARTLY)
-PLACEHOLDER(APP_TODO, "Yapılacaklar", "Yapılacaklar", I_TODO)
 PLACEHOLDER(APP_PHOTOS, "Fotoğraflar", "Fotoğraflar", I_PHOTO)
 PLACEHOLDER(APP_READER, "Okuyucu", "Okuyucu", I_BOOK)
 PLACEHOLDER(APP_DRAW, "Çizim", "Çizim", I_PENCIL)
 PLACEHOLDER(APP_CARDS, "Bilgi kartları", "Kartlar", I_CARDS)
 PLACEHOLDER(APP_LIGHT, "Işık ölçer", "Işık ölçer", I_LIGHT)
-PLACEHOLDER(APP_TRANSFER, "Dosya aktarımı", "Aktarım", I_TRANSFER)
 
 #include "os/home.h"
 #include "os/registry.h"

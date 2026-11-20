@@ -43,11 +43,17 @@ static void sysSetBacklight(int level);
 static int sysLight();
 static void sysLed(uint8_t r, uint8_t g, uint8_t b);
 static void sysCalibrate();
+static bool sysWake();  // gece kısıkken ekranı açar; kısıktıysa true
 static uint32_t sysHeapFree();
 static uint32_t sysHeapMin();
 static uint32_t sysHeapMaxAlloc();
 static float sysTemp();
 static void weatherRefresh();
+struct GeoHit {
+  String name, region;
+  float lat = 0, lon = 0;
+};
+static bool weatherSearch(const String& q, std::vector<GeoHit>& out);  // Open-Meteo şehir arama (engelleyici)
 static void accountSet(const String& db, const String& key, const String& mail, const String& pass);
 
 // --- Web sunucusu (dosya aktarımı ve hesap sayfası) ---
@@ -55,6 +61,9 @@ static bool webStart();
 static void webStop();
 static bool webRunning();
 static String webStatus();
+static int webProgress();  // yükleme sürüyorsa yüzde, yoksa -1
+static int webUploadCount();
+static void webTick();
 
 // --- Müzik yazılımı (kulaklıkla SD müzik) ---
 // 0: hazır (SD'de var), 1: SD'de yok, 2: SD kart yok

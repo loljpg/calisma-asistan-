@@ -32,6 +32,8 @@ enum AppId : uint8_t {
   AID_TODO, AID_GAMES, AID_PHOTOS, AID_READER, AID_DRAW, AID_CARDS, AID_LIGHT, AID_TRANSFER, AID_SYSINFO, AID_COUNT
 };
 static void openApp(uint8_t id);
+static const App* const* appTable();  // os/registry.h
+static int appTableCount();
 static void homeShow();
 static void launcherShow();
 static void appOpen(const App* a, bool fromHome = false);
