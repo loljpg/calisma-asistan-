@@ -1,6 +1,11 @@
 #pragma once
 // Oyunlar: oyun listesi. Her oyun ayrı bir uygulamadır; geri gelince listeye dönülür.
 #include "games/blokpatlat.h"
+#include "games/snake.h"
+#include "games/g2048.h"
+#include "games/mines.h"
+#include "games/sudoku.h"
+#include "games/chess.h"
 
 struct GameDef {
   const App* app;
@@ -9,9 +14,14 @@ struct GameDef {
 };
 static const GameDef GAMES[] = {
     {&APP_BLOKPATLAT, "Parçaları yerleştir, satırları patlat", "bp"},
+    {&APP_SNAKE, "Kaydırarak yön ver, yemi ye", "snake"},
+    {&APP_2048, "Aynı sayıları birleştir", "g2048"},
+    {&APP_MINES, "Mayınlara basmadan tarlayı aç", ""},
+    {&APP_SUDOKU, "Kolay, orta ve zor bulmacalar", ""},
+    {&APP_CHESS, "DAXEN'e karşı oyna", ""},
 };
 static const int GAME_N = sizeof(GAMES) / sizeof(GAMES[0]);
-static const int GM_ROW = 42;
+static const int GM_ROW = 35;
 
 static uint32_t gameBest(const char* ns) {
   if (!ns || !*ns) return 0;

@@ -317,6 +317,13 @@ static void playTrack(int i, uint32_t offset = 0) {
   }
   curTitle = ti.length() ? ti : trackName(cur);
   curArtist = ar;
+  if (!ti.length() && !ar.length()) {  // etiket yoksa "Sanatçı - Şarkı.mp3" adından ayır
+    int d = curTitle.indexOf(" - ");
+    if (d > 0) {
+      curArtist = curTitle.substring(0, d);
+      curTitle = curTitle.substring(d + 3);
+    }
+  }
   cmdStart = start;
   cmdOffset = offset;
   flushReq = true;
@@ -447,8 +454,8 @@ static void drawVolume() {
   fillBg(0, 198, SCR_W, 42);
   drawIcon(volume ? I_VOLUME : I_SPEAKER_OFF, 12, 207, 20, C_TEXT2, C_BG);
   iconButton(40, 202, 30, I_MINUS);
-  progress(80, 216, 186, 2, volume, C_TEXT);
-  text(String(volume), 266, 207, F_XS, C_TEXT3, C_BG, TR_DATUM);
+  progress(80, 216, 156, 2, volume, C_TEXT);
+  text(String(volume), 268, 210, F_XS, C_TEXT3, C_BG, TR_DATUM);
   iconButton(278, 202, 30, I_PLUS);
 }
 
@@ -461,20 +468,26 @@ static void drawNowInfo() {
     text(tracks.empty() ? "MP3'leri Muzik klasörüne koy" : String(tracks.size()) + " şarkı", 96, HDR_H + 36, F_SM, C_TEXT2, C_BG);
     return;
   }
-  auto ts = wrapText(curTitle, F_MD, 212, 2);
+  bool conn = btConnected();
+  auto ts = wrapText(curTitle, F_MD, 212, conn ? 2 : 1);
   int y = HDR_H + 8;
   for (auto& l : ts) {
     text(l, 96, y, F_MD, C_TEXT, C_BG);
     y += 22;
   }
-  if (curArtist.length()) text(fit(curArtist, F_SM, 212), 96, y + 2, F_SM, C_TEXT2, C_BG);
-  String bt = btConnected() ? "Kulaklık: " + (btTarget.length() ? btTarget : String("bağlı"))
-                            : (btTarget.length() ? "Bağlanıyor: " + btTarget : String("Kulaklık bağlı değil"));
-  text(fit(bt, F_XS, 212), 96, HDR_H + 68, F_XS, btConnected() ? C_TEXT3 : C_ACC, C_BG);
+  String sub = curArtist.length() ? curArtist : curFolder;
+  if (sub.length()) text(fit(sub, F_SM, 212), 96, y + 2, F_SM, C_TEXT2, C_BG);
+  if (!conn) {
+    String bt = btTarget.length() ? "Bağlanıyor: " + btTarget : String("Kulaklık bağlı değil · dokun");
+    text(fit(bt, F_XS, 212), 96, HDR_H + 66, F_XS, C_ACC, C_BG);
+  }
 }
 
 static void drawNow(bool full) {
-  if (full) drawHeaderNow();
+  if (full) {
+    drawHeaderNow();
+    fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
+  }
   drawNowInfo();
   drawProgress();
   drawControls();
@@ -570,8 +583,8 @@ static void drawExitDialog() {
   panel(20, 64, 280, 120, C_SURF, C_LINE);
   tft.fillRect(20, 64, 280, 2, C_ACC);
   text("Müzikten çıkılsın mı?", 34, 78, F_MD, C_TEXT, C_SURF);
-  text("DAXEN VANE'e dönülür; kaldığın yer", 34, 104, F_SM, C_TEXT2, C_SURF);
-  text("saklanır.", 34, 122, F_SM, C_TEXT2, C_SURF);
+  auto ls = wrapText("DAXEN VANE'e dönülür, kaldığın yer saklanır.", F_SM, 252, 2);
+  for (size_t i = 0; i < ls.size(); i++) text(ls[i], 34, 104 + i * 18, F_SM, C_TEXT2, C_SURF);
   button(34, 142, 120, 32, "Vazgeç", B_NORMAL, I_NONE, C_SURF);
   button(166, 142, 120, 32, "Çık", B_PRIMARY, I_NONE, C_SURF);
 }
@@ -617,7 +630,7 @@ static void onTap(int x, int y) {
     } else if (y >= 198) {
       if (x < 76) setVolume(volume - 5);
       else if (x >= 270) setVolume(volume + 5);
-      else setVolume((x - 80) * 100 / 186);
+      else setVolume((x - 80) * 100 / 156);
     } else if (y >= HDR_H + 60 && y < HDR_H + 84 && !btConnected()) {
       go(MS_BT);
     }

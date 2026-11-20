@@ -41,6 +41,7 @@ static void sysRequestOta();
 static void sysRestart();
 static void sysSetBacklight(int level);
 static int sysLight();
+static int sysLightPct();  // ortam ışığı %0 (karanlık) - %100 (aydınlık)
 static void sysLed(uint8_t r, uint8_t g, uint8_t b);
 static void sysCalibrate();
 static bool sysWake();  // gece kısıkken ekranı açar; kısıktıysa true

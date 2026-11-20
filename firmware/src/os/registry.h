@@ -8,3 +8,35 @@ static const App* const APP_TABLE[AID_COUNT] = {
 };
 static const App* const* appTable() { return APP_TABLE; }
 static int appTableCount() { return AID_COUNT; }
+
+// Dosyayı türüne göre uygun uygulamada açar (Dosyalar'dan, Notlar'dan)
+static void openFileWith(const String& path) {
+  String e = extOf(path);
+  if (e == "jpg" || e == "jpeg" || e == "bmp" || e == "cizim") {
+    phOpenPath = path;
+    appOpenChild(&APP_PHOTOS);
+  } else if (e == "txt" || e == "md" || e == "csv" || e == "log" || e == "json" || e == "ini" || e == "lua") {
+    if (path.startsWith(NOTES_DIR "/") && e == "txt") {
+      appOpenChild(&APP_NOTES);
+      edOpen(path);
+    } else {
+      rdOpenPath = path;
+      appOpenChild(&APP_READER);
+    }
+  } else if (e == "el") {
+    appOpenChild(&APP_NOTES);
+    hwOpen(path);
+  } else if (e == "mp3" || e == "wav") {
+    appOpenChild(&APP_MUSIC);
+  } else if (e == "bin") {
+    alertBox("Yazılım dosyası", "firmware-" FW_VARIANT ".bin adıyla SD kartın köküne koyarsan açılışta yüklenir. muzik-" FW_VARIANT
+                                ".bin müzik modülüdür.");
+  } else {
+    toast("Bu dosya türü açılamıyor");
+  }
+}
+
+static void openInReader(const String& path) {
+  rdOpenPath = path;
+  appOpenChild(&APP_READER);
+}

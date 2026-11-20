@@ -40,6 +40,7 @@ static void appOpen(const App* a, bool fromHome = false);
 static void appExit();
 static void appOpenChild(const App* a);         // geri gelince bu uygulamaya dönülür
 static void openFileWith(const String& path);   // dosyayı türüne göre uygun uygulamada açar
+static void openInReader(const String& path);
 static void shellRedraw(bool full);
 
 // ============================================================================

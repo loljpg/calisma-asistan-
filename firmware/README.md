@@ -1,50 +1,64 @@
-# Masa saati yazılımı (ESP32 CYD)
+# DAXEN VANE · masa saati yazılımı (ESP32 CYD)
 
-ESP32-2432S028R ("Cheap Yellow Display") için. Ekstra parça gerekmez: kart, USB kablosu ve
-powerbank yeterli.
+ESP32-2432S028R ("Cheap Yellow Display") için küçük bir işletim sistemi. Ekstra parça gerekmez:
+kart, USB kablosu ve powerbank yeterli. SD kart isteğe bağlıdır ama notlar, kitaplar, fotoğraflar,
+müzik ve kendi uygulamaların için gerekir.
 
-## Ekranlar
+<img src="onizleme.png" width="880" alt="Ekranların önizlemesi: açılış, ana ekran, uygulamalar, YKS, hava, saat, notlar, satranç, müzik, kartlar, Lua uygulaması, ayarlar">
 
-<img src="onizleme.png" width="720" alt="Ekranların yaklaşık önizlemesi: üstte gündüz, altta gece">
+Tasarım: "Obsidian Silver". Siyah zemin, grafit paneller, gümüş yazılar, tek vurgu rengi çelik
+mavisi. Yazılar Inter, simgeler çizgi tabanlı ve vektörel. Ayarlar → Ekran → *Kapak rengini vurgu
+yap* açıksa telefonda çalan şarkının kapağı vurgu rengini belirler.
 
-| Ekran | Ne gösterir |
+## Ana ekran
+
+Üstte tarih, bildirim sayısı, Bluetooth ve Wi-Fi. Ortada saat ve hava durumu, altında YKS'ye kalan
+gün ve seri (alev), topuyla oynayan kedi, şimdiki ya da sıradaki oturum kartı ve alt çubuk:
+YKS, Notlar, Müzik, Ayarlar, Uygulamalar.
+
+Dokunma: dokun, **basılı tut** (bağlam menüsü), kaydır. Ekranın **sol kenarından sağa kaydırmak**
+ve başlıktaki sol ok her uygulamada geri gider.
+
+## Uygulamalar
+
+| Uygulama | Ne yapar |
 | --- | --- |
-| **Ana** | Saat, tarih (6 sn'de bir YKS'ye kalan gün ve seriyle değişir), Sakarya hava durumu, şimdiki/sıradaki oturum, günlük hedef çubuğu |
-| **Program** | Günün planı. Sağdaki kareye dokun: tamamlandı / geri al. Satıra dokun: o dersle kronometre. Satıra **basılı tut**: menü (kronometreyle başlat, ertele, işareti kaldır) |
-| **Kronometre** | Başlat / Duraklat, Bitir (telefona oturum olarak gider), Sıfırla, Pomodoro (25 dk'da mola uyarısı). Telefondaki kronometreyle ortak: birinde başlatınca diğerinde de çalışır |
-| **Müzik** | Telefonda çalan şarkı: kapak, ad, sanatçı, ilerleme. Önceki / oynat-durdur / sonraki, ses − + |
-| **Oyun** | Blok Patlat: yandaki parçayı sürükleyip 8×8 tahtaya bırak, dolan satır ve sütunlar patlar. Skor ve en iyi skor saklanır |
-| **Ayarlar** (dişli) | 1. sayfa: Wi-Fi ve hesap, Bluetooth eşleştirme, tema, kapak rengini temaya uygula. *Diğer ayarlar*: dokunmatik ayarı, renkleri ters çevir, güncelleme, Bluetooth eşleşmesini sil |
+| **YKS** | Plan (dokun: tamamlandı, basılı tut: başlat / ertele), Sayaç (Pomodoro dahil, telefondaki sayaçla ortak), Özet |
+| **Notlar** | Klavyeyle metin notu ve parmakla el yazısı notu (`/daxen/notlar`) |
+| **Dosyalar** | SD kart: aç, yeniden adlandır, kopyala, kes, yapıştır, sil, klasör oluştur |
+| **Ayarlar** | Wi-Fi (ağ listesi, şifre, 5 kayıtlı ağ), Bluetooth, Ekran (parlaklık, gece kısma, otomatik parlaklık, dokunmatik ayarı), Bulut hesabı, Depolama, Güncelleme, Sistem |
+| **Müzik** | SD karttaki MP3'leri Bluetooth kulaklığa çalar (aşağıya bak) |
+| **Medya** | Telefonda çalan şarkıyı yönetir |
+| **Bildirimler** | Telefondan gelen bildirimler |
+| **Hesap Mak.** | Bilimsel hesap makinesi: işlem önceliği, parantez, trigonometri (derece/radyan), Ans |
+| **Saat** | Alarm (günler, erteleme), geri sayım, kronometre (turlar), dünya saatleri |
+| **Hava** | Şimdi, 24 saatlik grafik, 7 günlük tahmin, şehir arama (Open-Meteo) |
+| **Yapılacaklar** | Basit yapılacaklar listesi |
+| **Oyunlar** | Blok Patlat, Yılan, 2048, Mayın Tarlası, Sudoku, Satranç (3 zorluk) |
+| **Fotoğraflar** | SD'deki JPEG ve BMP resimleri (`/daxen/foto`, `/DCIM`, `/Resimler`, `/Pictures`) |
+| **Okuyucu** | Metin kitapları, kaldığı sayfayı hatırlar (`/daxen/kitaplar`) |
+| **Çizim** | 10 renkli çizim defteri (`/daxen/cizim`) |
+| **Kartlar** | Aralıklı tekrarlı bilgi kartları: TYT matematik, geometri, fizik, kimya, edebiyat; kendi destelerin `/daxen/kartlar/*.txt` (`ön|arka` satırları) |
+| **Işık ölçer** | Ortam ışığı ve 1 dakikalık grafik |
+| **Aktarım** | Tarayıcıdan SD karta dosya yükleme ve indirme (aynı Wi-Fi ağında, ekrandaki adresi aç) |
+| **Sistem** | Sürüm, çalışma süresi, son açılış sebebi, bellek, sıcaklık |
 
-Alt çubuktaki simgeler soldan sağa: Ana, Program, Kronometre, Müzik, Oyun, Ayarlar.
+**Kendi uygulamaların:** SD karttaki `/daxen/uygulamalar/*.lua` dosyaları Uygulamalar ekranında
+görünür. İlk açılışta dört örnek ve `REHBER.txt` yazılır. Ayrıntılar: [docs/lua.md](../docs/lua.md).
 
-**Kedi:** ana ekranda saatin altında topuyla oynayan küçük bir kedi var. Kendi kendine dolaşır,
-oturur, topu kovalar; gece 22:00–07:00 uyur. Üstüne dokununca sevinir. Kareleri
-`tools/make_cat.py` ile üretilir. **Seri:** tarihin yanında alevle gösterilir.
+## Müzik ve Bluetooth kulaklık
 
-**Kart kendiliğinden yeniden başlarsa:** Ayarlar → *Diğer ayarlar* sayfasının altında son açılışın
-sebebi (çökme, voltaj düştü, güç verildi…), önceki çalışma süresi ve en düşük boş bellek yazar.
-Kronometre kaldığı yerden sürer, gönderilmiş tikler ekranda kalır.
+ESP32'nin belleği, Wi-Fi + telefon bağlantısı ile kulaklık sesini aynı anda kaldırmıyor. Bu yüzden
+müzik ayrı bir yazılımdır: Müzik uygulamasında **Müziği aç**'a basınca cihaz müzik yazılımıyla
+yeniden başlar, çıkınca DAXEN kaldığı yerden açılır.
 
-**Bildirimler:** telefona gelen bildirim birkaç saniye ekranın üstünde görünür, sonra ana ekranda
-tarihin yanında küçük uygulama simgesi olarak kalır. Simgelere dokununca liste açılır (*Temizle*).
+1. MP3'leri SD kartta `/Muzik` klasörüne koy (Aktarım uygulamasıyla da olur).
+2. İlk seferde Müzik → **Modülü indir** (Wi-Fi gerekir, yaklaşık 1,3 MB). Ya da Releases'taki
+   `muzik-cyd_st7789.bin` dosyasını SD kartın köküne kopyala.
+3. Müziği aç → Kulaklık sekmesinden kulaklığını seç. Kulaklık eşleşme kipinde olmalı.
 
-**Bluetooth:** uygulamada Ayarlar → *Masa saatini bul*. İlk eşleşmede masa saatinde bir şey
-yapman gerekmez; başka bir telefonla eşleştirmek için önce masa saatinde Ayarlar → *Bluetooth*'a dokun
-(2 dakika eşleşme kipi). Bluetooth bağlıyken Wi-Fi gerekmez: plan, tikler, kronometre ve saat telefondan gelir.
-Ayrıntılar: [docs/bluetooth.md](../docs/bluetooth.md).
-
-**BOOT tuşu:** kısa bas → sonraki ekran, 2 saniye bas → Ayarlar, 6 saniye bas → kurulum portalı
-(Wi-Fi ve hesap). Açılışta "Dokunmatik ayarı için BOOT'a bas" yazarken basarsan dokunmatik
-yeniden ayarlanır.
-
-**Işık:** yeşil = kronometre çalışıyor, mavi yanıp sönme = 2 dk içinde oturum başlıyor ya da
-Pomodoro molası, kırmızı = buluta bağlanamıyor. Ekran 22:00–07:00 arası kısılır; ilk dokunuş
-yalnızca ekranı açar.
-
-**Tema:** telefondaki uygulamayla aynı "Sentez" tasarımı. *Otomatik* (varsayılan) gündüz açık
-kâğıt, 22:00–07:00 arası koyu görünüm kullanır. Ayarlar → *Tema* satırına her dokunuş
-Otomatik / Açık / Koyu arasında geçer.
+Müzik çalarken Wi-Fi, telefon bağlantısı ve bildirimler kapalıdır. Etiketsiz dosyalarda
+`Sanatçı - Şarkı.mp3` adı kullanılır.
 
 ## İlk yükleme (telefondan, OTG ile)
 
@@ -62,74 +76,68 @@ Otomatik / Açık / Koyu arasında geçer.
 4. Bağlanamazsa: kartta **BOOT** tuşunu basılı tut, **RST**'ye bir kez bas, BOOT'u bırak ve
    tekrar dene.
 
-**Kablo:** veri taşıyan bir kablo olmalı (yalnız şarj eden kablolar çalışmaz). İki USB'li kartın
-USB-C girişinde gerekli dirençler yok, bu yüzden **iki ucu USB-C olan kablo çalışmaz**: kart
-ne yazılım alır ne de açılır. Telefondan USB-C → micro-USB kablo kullan ya da telefona USB-C → USB-A
-OTG çevirici takıp normal kablo bağla. Powerbank için de aynısı geçerli: powerbank'in USB-A
-çıkışını kullan.
-
-Ekran beyaz kalır ya da karışık görünürse diğer dosyayı dene. Sadece renkler ters ise
-Ayarlar → *Renkleri ters çevir* yeterli. Kırmızı yerine mavi görüyorsan bunu bildir
-(renk sırası ayarı gerekir).
+**Kablo:** veri taşıyan bir kablo olmalı. İki USB'li kartın USB-C girişinde gerekli dirençler yok,
+bu yüzden **iki ucu USB-C olan kablo çalışmaz**. Telefondan USB-C → micro-USB kablo kullan ya da
+USB-C → USB-A OTG çevirici takıp normal kablo bağla. Powerbank'te de USB-A çıkışını kullan.
 
 ## İlk açılış
 
-1. **Dokunmatik ayarı:** ekrandaki üç artının ortasına sırayla dokun (BOOT ile atlanabilir).
-2. **Kurulum portalı:** telefonun Wi-Fi listesinde `CalismaSaati-Kurulum` ağına bağlan. Açılan
-   sayfada *Configure WiFi* → ev ağını seç, şifresini yaz. Altta Firebase alanlarını doldur:
-   - Veritabanı adresi: `https://…firebasedatabase.app`
-   - Web API anahtarı (uygulamadaki ile aynı)
-   - Uygulamada kullandığın e-posta ve şifre
-3. *Save*'e bas. Kart ağa bağlanır, saat ve hava durumu gelir, plan telefondan çekilir.
+1. **Dokunmatik ayarı:** ekrandaki artıların ortasına sırayla dokun (BOOT ile atlanabilir;
+   sonradan Ayarlar → Ekran → *Dokunmatiği ayarla*).
+2. **Wi-Fi:** kayıtlı ağ yoksa Ayarlar → Wi-Fi kendiliğinden açılır. Ağı seç, şifreyi ekrandaki
+   klavyeyle yaz. Eski yazılımda kaydedilmiş ağ otomatik alınır.
+3. **Bulut hesabı:** Ayarlar → Bulut hesabı. Alanları ekran klavyesiyle doldurabilir ya da
+   *Tarayıcıdan gir*'e basıp telefonda ekrandaki adresi açabilirsin.
+   Telefonla Bluetooth üzerinden eşleşiyorsan bu adım gerekmez.
 
-Sayfa kendiliğinden açılmazsa tarayıcıda `192.168.4.1` adresine git. Bilgileri sonradan
-Ayarlar → *Wi-Fi ve hesap ayarları* ile değiştirebilirsin (şifre alanı boş kalırsa eski şifre
-korunur).
+**BOOT tuşu:** kısa bas → ana ekran, 2 saniye → Ayarlar, 6 saniye → Wi-Fi ayarları.
+
+**Işık:** yeşil = sayaç çalışıyor, mavi yanıp sönme = 2 dk içinde oturum başlıyor ya da Pomodoro
+molası, kırmızı = buluta bağlanamıyor. *Gece ekranı kıs* açıksa ekran 22:00–07:00 arası kısılır (Ayarlar → Ekran).
+Otomatik parlaklık ortam ışığına göre ayarlar; sensör ters çalışıyorsa Işık ölçer → *Ters çevir*.
 
 ## Güncellemeler
 
 Kart her açılışta, Bluetooth başlamadan önce GitHub'daki en yeni **fw-v…** sürümünü denetler,
-varsa kendisi indirip kurar (Bluetooth açıkken şifreli bağlantıya bellek yetmiyor). Her gece
-04:00–04:30 arasında, kimse kullanmıyorsa kendini yeniden başlatır; böylece günde bir denetlenir.
-Ayarlar → *Diğer ayarlar* → *Güncellemeyi denetle* kartı yeniden başlatıp hemen denetler.
+varsa indirip kurar. Her gece 04:00–04:30 arasında, kimse kullanmıyorsa kendini yeniden başlatır.
+Ayarlar → Güncelleme → *Güncellemeyi denetle* hemen denetler. Yeni sürüm açıldıktan 45 saniye sonra
+sağlam sayılır; daha önce çökerse kart eski sürüme döner.
 
-**SD karttan (fw-5 ve sonrası):** Releases'taki `firmware-cyd_st7789.bin` (ya da `firmware-cyd.bin`)
-dosyasını kartın köküne kopyala, kartı tak, cihazı yeniden başlat. Dosya `update.bin` ya da
-`firmware.bin` adında da olabilir. Kart yalnızca aynı modelin **daha yeni** sürümünü yükler;
-işlediği dosyanın sonuna `.yuklendi`, `.eski` (aynı/eski sürüm) ya da `.bad` (yanlış dosya, örneğin
-`ilk-kurulum-…bin`) ekler. İlk kurulum dosyası SD'den yüklenmez; o yalnızca USB ile yazılır.
+**SD karttan:** Releases'taki `firmware-cyd_st7789.bin` (ya da `firmware-cyd.bin`) dosyasını kartın
+köküne kopyala, cihazı yeniden başlat. Dosya `update.bin` ya da `firmware.bin` adında da olabilir.
+Kart yalnızca aynı modelin **daha yeni** sürümünü yükler; işlediği dosyanın sonuna `.yuklendi`,
+`.eski` ya da `.bad` ekler. İlk kurulum dosyası SD'den yüklenmez.
 
 ## SD kart
 
-Takılı değilse her şey yine çalışır. Takılıysa (FAT32) kart `/calisma/` klasörünü kullanır:
+Takılı değilse sistem yine çalışır (notlar, müzik, fotoğraf ve Lua uygulamaları hariç). FAT32 olmalı.
 
-| Dosya | İçerik |
+| Klasör | İçerik |
 | --- | --- |
-| `kuyruk.txt` | İnternet yokken biriken tik, erteleme ve kronometre kayıtları; Wi-Fi gelince buluta gider ve silinir |
-| `kayit-AAAA-AA.txt` | Cihazda yapılan her şeyin aylık kalıcı kaydı (silinmez) |
-| `plan.json` | Son alınan plan; açılışta internet beklemeden gösterilir |
+| `/calisma/` | Plan önbelleği, internet yokken biriken kayıtlar ve aylık kalıcı kayıt |
+| `/daxen/notlar/` | Notlar (`.txt` metin, `.el` el yazısı) |
+| `/daxen/kitaplar/` | Okuyucu için `.txt` kitaplar |
+| `/daxen/foto/` | Fotoğraflar |
+| `/daxen/cizim/` | Çizimler |
+| `/daxen/kartlar/` | Kendi bilgi kartı destelerin |
+| `/daxen/uygulamalar/` | Lua uygulamaları ve verileri |
+| `/daxen/sys/` | Müzik yazılımı gibi sistem dosyaları |
+| `/Muzik/` | MP3'ler |
 
-Kart yokken kuyruk cihazın kendi hafızasında en fazla 40 kayıt tutar. Ayarlar ekranının alt
-satırı SD'nin takılı olup olmadığını ve bekleyen kayıt sayısını gösterir.
+## Telefonla eşleşme
 
-## Telefonla eşleşme nasıl çalışır?
-
-Ayrıntılar: [docs/firebase.md](../docs/firebase.md).
-
-- Kart ve telefon `device/` altını canlı dinler: değişiklik saniyesinde gelir. Bağlantı koparsa
-  kart planı 30 saniyede, kronometreyi 10 saniyede bir sorar. Ayarlar'da "(canlı)" yazısı
-  akışın açık olduğunu gösterir.
-- Telefon günün planını `device/view` altına yazar.
-- Kart tik, erteleme ve kronometre oturumlarını `device/events` altına gönderir; telefon
-  uygulaması bunları işler ve siler. Kart kendi değişikliklerini beklemeden hemen gösterir.
-- Ortak kronometre `device/timer` altındadır. Bitiren taraf oturumu kaydeder, süre iki kez sayılmaz.
-- İnternet yoksa olaylar SD'de (yoksa cihaz hafızasında) saklanır, bağlantı gelince gönderilir.
-- Kart dakikada bir `device/status` yazar; telefondaki "Masa saati bağlı" yazısı buradan gelir.
+Bluetooth: [docs/bluetooth.md](../docs/bluetooth.md). Bulut (Firebase): [docs/firebase.md](../docs/firebase.md).
+Bluetooth bağlıyken Wi-Fi gerekmez: plan, tikler, sayaç, saat, bildirimler ve medya telefondan gelir.
 
 ## Geliştirme notları
 
-- PlatformIO, `espressif32@6.9.0` (Arduino core 2.0.x). Ortamlar: `cyd` (ILI9341), `cyd_st7789`.
-- Dokunmatik (XPT2046) yazılımsal SPI ile okunur; donanım VSPI SD kartındır.
-- Türkçe harfler için yazı tipleri `tools/make_fonts.py` ile üretilir (`src/fonts.h`):
-  arayüz Inter, başlıklar ve büyük rakamlar Lora. İkisi de SIL Open Font License 1.1.
+- PlatformIO, `espressif32@6.9.0` (Arduino core 2.0.x).
+  Ortamlar: `cyd`, `cyd_st7789` (ana yazılım) ve `muzik_cyd`, `muzik_cyd_st7789` (müzik yazılımı).
+- `src/main.cpp` sistem çekirdeği (ağ, bulut, Bluetooth, güncelleme); `src/daxen.h` arayüzü toplar:
+  `core/` ortak durum ve yardımcılar, `ui/` tasarım sistemi (renkler, simgeler, bileşenler, klavye),
+  `os/` kabuk (ana ekran, başlatıcı, dokunma), `apps/` uygulamalar. Yeni uygulama: `apps/` altına
+  bir `App` tanımı yaz, `os/shell.h` içindeki `AppId` ve `os/registry.h` tablosuna ekle.
+- Renkler `ui/theme.h`, simgeler `ui/icons.h` (48'lik ızgarada vektör), logo `tools/make_logo.py`,
+  yazı tipleri `tools/make_fonts.py` (Inter, SIL Open Font License 1.1).
+- Müzik yazılımı `src/music/` (ESP32-A2DP ve libhelix), Lua 5.4 `lib/lua/` (MIT).
 - Derleme ve sürüm yayınlama `.github/workflows/firmware.yml` ile GitHub'da yapılır.

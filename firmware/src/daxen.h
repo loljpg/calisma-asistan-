@@ -23,16 +23,12 @@
 #include "apps/weather.h"
 #include "apps/notes.h"
 #include "apps/music.h"
-#include "apps/placeholder.h"
-PLACEHOLDER(APP_PHOTOS, "Fotoğraflar", "Fotoğraflar", I_PHOTO)
-PLACEHOLDER(APP_READER, "Okuyucu", "Okuyucu", I_BOOK)
-PLACEHOLDER(APP_DRAW, "Çizim", "Çizim", I_PENCIL)
-PLACEHOLDER(APP_CARDS, "Bilgi kartları", "Kartlar", I_CARDS)
-PLACEHOLDER(APP_LIGHT, "Işık ölçer", "Işık ölçer", I_LIGHT)
+#include "apps/photos.h"
+#include "apps/reader.h"
+#include "apps/draw.h"
+#include "apps/cards.h"
+#include "apps/light.h"
+#include "apps/lua.h"
 
 #include "os/home.h"
 #include "os/registry.h"
-static void openFileWith(const String& path) { toast(baseName(path)); }
-static int luaAppCount() { return 0; }
-static String luaAppLabel(int) { return ""; }
-static void luaAppOpen(int) {}

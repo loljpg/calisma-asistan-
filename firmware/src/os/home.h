@@ -5,6 +5,7 @@
 
 static int luaAppCount();             // SD karttaki Lua uygulamaları (apps/lua.h)
 static String luaAppLabel(int i);
+static uint8_t luaAppIcon(int i);
 static void luaAppOpen(int i);
 static void closeStack();
 
@@ -156,7 +157,7 @@ static void lnDrawCell(int k, bool pressed = false) {
     icon = appTable()[idx]->icon;
     label = appTable()[idx]->label;
   } else {
-    icon = I_CODE;
+    icon = luaAppIcon(idx - appTableCount());
     label = luaAppLabel(idx - appTableCount());
   }
   panel(cx + 22, cy + 6, 36, 36, pressed ? C_ACCBG : C_SURF, pressed ? C_ACC : C_LINE);
@@ -183,6 +184,7 @@ static void launcherDraw(bool full) {
 static void launcherShow() {
   if (curApp && curApp->close) curApp->close();
   closeStack();
+  luaScanned = false;  // SD'ye yeni .lua eklenmiş olabilir
   shScreen = SH_LAUNCHER;
   curApp = nullptr;
   lnPage = constrain(lnPage, 0, lnPages() - 1);

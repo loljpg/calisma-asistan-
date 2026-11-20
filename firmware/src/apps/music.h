@@ -39,9 +39,9 @@ static void muDraw(bool full) {
   tft.fillRect(12, y + 4, 6, 6, muState == 0 ? C_ACC : C_TEXT3);
   text(fit(muInfo, F_XS, 280), 24, y, F_XS, muState == 0 ? C_TEXT : C_TEXT2, C_BG);
   if (muState == 2) return;
-  if (muState == 0) button(12, 196, 196, 38, "Müziği aç", B_PRIMARY, I_PLAY);
-  else button(12, 196, 196, 38, "Modülü indir", wifiConnected() ? B_PRIMARY : B_DISABLED, I_UPDATE);
-  button(216, 196, 92, 38, "Şarkı ekle", B_NORMAL, I_TRANSFER);
+  if (muState == 0) button(12, 196, 160, 38, "Müziği aç", B_PRIMARY, I_PLAY);
+  else button(12, 196, 160, 38, "Modülü indir", wifiConnected() ? B_PRIMARY : B_DISABLED, I_UPDATE);
+  button(180, 196, 128, 38, "Şarkı ekle", B_NORMAL, I_TRANSFER);
 }
 
 static void muOpen() {
@@ -54,7 +54,7 @@ static void muOpen() {
 
 static void muTap(int x, int y) {
   if (y < 192 || muState == 2) return;
-  if (x >= 212) {
+  if (x >= 176) {
     appOpenChild(appTable()[AID_TRANSFER]);
     return;
   }

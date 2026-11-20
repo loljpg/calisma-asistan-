@@ -220,8 +220,8 @@ static void edOpen(const String& path) {
     size_t n = f.size();
     if (n > 12000) {
       f.close();
-      alertBox("Not çok uzun", "12 KB'tan büyük metinler Okuyucu'da açılır.");
-      openFileWith(path);
+      openInReader(path);
+      toast("12 KB'tan büyük metinler Okuyucu'da açılır");
       return;
     }
     edText.reserve(n + 64);

@@ -29,6 +29,7 @@
 #include <algorithm>
 
 #include "config.h"
+#include "lua.hpp"  // lib/lua (PlatformIO kitaplık bulucu için burada da)
 #include "daxen.h"
 
 #define STR_(x) #x
@@ -59,6 +60,7 @@ static void loadConfig() {
   cfg.bright = constrain(prefs.getInt("bri", 255), 16, 255);
   cfg.nightDim = prefs.getBool("ndim", true);
   cfg.autoBright = prefs.getBool("abri", false);
+  cfg.ldrInv = prefs.getBool("ldrinv", false);
   cfg.wCity = prefs.getString("wcity", WEATHER_CITY);
   cfg.wLat = prefs.getFloat("wlat", atof(WEATHER_LAT));
   cfg.wLon = prefs.getFloat("wlon", atof(WEATHER_LON));
@@ -105,6 +107,7 @@ static void saveConfig() {
   prefs.putInt("bri", cfg.bright);
   prefs.putBool("ndim", cfg.nightDim);
   prefs.putBool("abri", cfg.autoBright);
+  prefs.putBool("ldrinv", cfg.ldrInv);
   prefs.putString("wcity", cfg.wCity);
   prefs.putFloat("wlat", cfg.wLat);
   prefs.putFloat("wlon", cfg.wLon);
@@ -2850,6 +2853,10 @@ static bool isNightHour() {
 
 // Işık sensörü (GPIO34). Değer ne kadar yüksekse ortam o kadar karanlık.
 static int sysLight() { return analogRead(PIN_LDR); }
+static int sysLightPct() {
+  int v = constrain(sysLight(), 0, 4095);
+  return cfg.ldrInv ? v * 100 / 4095 : 100 - v * 100 / 4095;
+}
 
 static int blLevel = -1;
 static void sysSetBacklight(int level) {
@@ -2869,12 +2876,12 @@ static void updateBacklight() {
   if (cfg.autoBright) {
     if (ms - lastLdr > 500 || ldrAvg < 0) {
       lastLdr = ms;
-      int v = sysLight();
+      int v = sysLightPct();
       ldrAvg = ldrAvg < 0 ? v : ldrAvg * 0.85f + v * 0.15f;
     }
-    // aydınlık (düşük değer) tam parlaklık, karanlık (yüksek değer) %20'ye kadar iner
-    float t = constrain((ldrAvg - 150.f) / 1500.f, 0.f, 1.f);
-    level = (int)(cfg.bright * (1.f - 0.8f * t));
+    // aydınlıkta seçilen parlaklık, karanlıkta %20'ye kadar iner (sensör az ışıkta da hassas)
+    float t = constrain(ldrAvg / 60.f, 0.f, 1.f);
+    level = (int)(cfg.bright * (0.2f + 0.8f * t));
   }
   bool dim = cfg.nightDim && isNightHour() && (int32_t)(ms - wakeUntil) > 0;
   blDim = dim;

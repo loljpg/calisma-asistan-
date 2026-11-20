@@ -57,6 +57,7 @@ struct Config {
   int bright = 255;         // ekran parlaklığı (16-255)
   bool nightDim = true;     // 22:00-07:00 arası ekran kısılır
   bool autoBright = false;  // ışık sensörüne göre parlaklık
+  bool ldrInv = false;      // ışık sensörü okuması ters (aydınlıkta yüksek)
   String wCity = WEATHER_CITY;
   float wLat = 40.78f, wLon = 30.40f;
   uint16_t worldMask = 0x0141;  // Londra, Tokyo, New York  // Dünya saatleri: seçili şehirler (bit)
