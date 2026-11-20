@@ -185,43 +185,49 @@ static const uint8_t* luaFont(int s) {
 static int lclamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 // --- ekran ---
+// Not: Lua hataları longjmp ile döner; bu yüzden bütün argümanlar ekran kilidi alınmadan ÖNCE
+// okunur (kilit tutulurken hata olursa kilit bırakılmazdı). Koordinatlar ondalıklı da olabilir.
+static int lnum(lua_State* L, int i) { return (int)floorf((float)luaL_checknumber(L, i)); }
+static int lopt(lua_State* L, int i, int def) { return lua_isnoneornil(L, i) ? def : lnum(L, i); }
+static uint16_t lcol(lua_State* L, int i, uint16_t def) { return lua_isnoneornil(L, i) ? def : (uint16_t)(lnum(L, i) & 0xFFFF); }
+
 static int l_temizle(lua_State* L) {
+  uint16_t c = lcol(L, 1, C_BG);
   Gfx g;
-  if (!luaCanDraw()) return 0;
-  fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
-  if (lua_gettop(L) >= 1) tft.fillRect(0, HDR_H, SCR_W, SCR_H - HDR_H, (uint16_t)luaL_checkinteger(L, 1));
+  if (luaCanDraw()) tft.fillRect(0, HDR_H, SCR_W, SCR_H - HDR_H, c);
   return 0;
 }
 static int l_dikdortgen(lua_State* L) {
-  int x = luaL_checkinteger(L, 1), y = luaL_checkinteger(L, 2), w = luaL_checkinteger(L, 3), h = luaL_checkinteger(L, 4);
-  uint16_t c = (uint16_t)luaL_optinteger(L, 5, C_TEXT);
+  int x = lnum(L, 1), y = lnum(L, 2), w = lnum(L, 3), h = lnum(L, 4);
+  uint16_t c = lcol(L, 5, C_TEXT);
   bool fill = lua_isnoneornil(L, 6) ? true : lua_toboolean(L, 6);
-  Gfx g;
-  if (!luaCanDraw()) return 0;
   if (y < HDR_H) {
     h -= HDR_H - y;
     y = HDR_H;
   }
   if (w <= 0 || h <= 0) return 0;
+  Gfx g;
+  if (!luaCanDraw()) return 0;
   if (fill) tft.fillRect(x, y, w, h, c);
   else tft.drawRect(x, y, w, h, c);
   return 0;
 }
 static int l_cizgi(lua_State* L) {
   float x1 = luaL_checknumber(L, 1), y1 = luaL_checknumber(L, 2), x2 = luaL_checknumber(L, 3), y2 = luaL_checknumber(L, 4);
-  uint16_t c = (uint16_t)luaL_optinteger(L, 5, C_TEXT);
+  uint16_t c = lcol(L, 5, C_TEXT);
   float w = luaL_optnumber(L, 6, 1);
-  Gfx g;
-  if (!luaCanDraw()) return 0;
+  uint16_t bg = lcol(L, 7, C_BG);
   y1 = std::max<float>(y1, HDR_H);
   y2 = std::max<float>(y2, HDR_H);
+  Gfx g;
+  if (!luaCanDraw()) return 0;
   if (w <= 1.01f) tft.drawLine(x1, y1, x2, y2, c);
-  else tft.drawWideLine(x1, y1, x2, y2, w, c, (uint16_t)luaL_optinteger(L, 7, C_BG));
+  else tft.drawWideLine(x1, y1, x2, y2, std::min(w, 40.f), c, bg);
   return 0;
 }
 static int l_daire(lua_State* L) {
-  int x = luaL_checkinteger(L, 1), y = luaL_checkinteger(L, 2), r = lclamp(luaL_checkinteger(L, 3), 0, 200);
-  uint16_t c = (uint16_t)luaL_optinteger(L, 4, C_TEXT);
+  int x = lnum(L, 1), y = lnum(L, 2), r = lclamp(lnum(L, 3), 0, 200);
+  uint16_t c = lcol(L, 4, C_TEXT);
   bool fill = lua_isnoneornil(L, 5) ? true : lua_toboolean(L, 5);
   if (y - r < HDR_H) return 0;
   Gfx g;
@@ -231,9 +237,11 @@ static int l_daire(lua_State* L) {
   return 0;
 }
 static int l_piksel(lua_State* L) {
-  int x = luaL_checkinteger(L, 1), y = luaL_checkinteger(L, 2);
+  int x = lnum(L, 1), y = lnum(L, 2);
+  uint16_t c = lcol(L, 3, C_TEXT);
+  if (y < HDR_H) return 0;
   Gfx g;
-  if (y >= HDR_H && luaCanDraw()) tft.drawPixel(x, y, (uint16_t)luaL_optinteger(L, 3, C_TEXT));
+  if (luaCanDraw()) tft.drawPixel(x, y, c);
   return 0;
 }
 static int l_yazi(lua_State* L) {
@@ -241,31 +249,43 @@ static int l_yazi(lua_State* L) {
   const char* s = luaL_tolstring(L, 1, &len);
   String str(s);
   lua_pop(L, 1);
-  int x = luaL_checkinteger(L, 2), y = luaL_checkinteger(L, 3);
-  uint16_t c = (uint16_t)luaL_optinteger(L, 4, C_TEXT);
-  const uint8_t* f = luaFont(luaL_optinteger(L, 5, 2));
+  int x = lnum(L, 2), y = lnum(L, 3);
+  uint16_t c = lcol(L, 4, C_TEXT);
+  const uint8_t* f = luaFont(lopt(L, 5, 2));
   String al = luaL_optstring(L, 6, "sol");
-  uint16_t bg = (uint16_t)luaL_optinteger(L, 7, C_BG);
+  uint16_t bg = lcol(L, 7, C_BG);
   uint8_t d = al == "orta" ? TC_DATUM : (al == "sag" ? TR_DATUM : TL_DATUM);
-  Gfx g;
-  if (y >= HDR_H && luaCanDraw()) text(str, x, y, f, c, bg, d);
-  lua_pushinteger(L, textW(str, f));
+  int w;
+  {
+    Gfx g;
+    if (y >= HDR_H && luaCanDraw()) text(str, x, y, f, c, bg, d);
+    w = textW(str, f);
+  }
+  lua_pushinteger(L, w);
   return 1;
 }
 static int l_genislik(lua_State* L) {
-  Gfx g;
-  lua_pushinteger(L, textW(luaL_checkstring(L, 1), luaFont(luaL_optinteger(L, 2, 2))));
+  String str = luaL_checkstring(L, 1);
+  const uint8_t* f = luaFont(lopt(L, 2, 2));
+  int w;
+  {
+    Gfx g;
+    w = textW(str, f);
+  }
+  lua_pushinteger(L, w);
   return 1;
 }
 static int l_renk(lua_State* L) {
-  lua_pushinteger(L, rgbn(lclamp(luaL_checkinteger(L, 1), 0, 255), lclamp(luaL_checkinteger(L, 2), 0, 255), lclamp(luaL_checkinteger(L, 3), 0, 255)));
+  lua_pushinteger(L, rgbn(lclamp(lnum(L, 1), 0, 255), lclamp(lnum(L, 2), 0, 255), lclamp(lnum(L, 3), 0, 255)));
   return 1;
 }
 static int l_simge(lua_State* L) {
   String n = luaL_checkstring(L, 1);
-  int x = luaL_checkinteger(L, 2), y = luaL_checkinteger(L, 3), s = lclamp(luaL_optinteger(L, 4, 24), 8, 96);
+  int x = lnum(L, 2), y = lnum(L, 3), sz = lclamp(lopt(L, 4, 24), 8, 96);
+  uint16_t c = lcol(L, 5, C_TEXT), bg = lcol(L, 6, C_BG);
+  if (y < HDR_H) return 0;
   Gfx g;
-  if (y >= HDR_H && luaCanDraw()) drawIcon(luaIconByName(n), x, y, s, (uint16_t)luaL_optinteger(L, 5, C_TEXT), (uint16_t)luaL_optinteger(L, 6, C_BG));
+  if (luaCanDraw()) drawIcon(luaIconByName(n), x, y, sz, c, bg);
   return 0;
 }
 
@@ -402,7 +422,7 @@ static int l_isik(lua_State* L) {
   return 1;
 }
 static int l_led(lua_State* L) {
-  sysLed(lclamp(luaL_checkinteger(L, 1), 0, 255), lclamp(luaL_checkinteger(L, 2), 0, 255), lclamp(luaL_checkinteger(L, 3), 0, 255));
+  sysLed(lclamp(lnum(L, 1), 0, 255), lclamp(lnum(L, 2), 0, 255), lclamp(lnum(L, 3), 0, 255));
   return 0;
 }
 static int l_bellek(lua_State* L) {
