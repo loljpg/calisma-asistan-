@@ -42,9 +42,34 @@ ve başlıktaki sol ok her uygulamada geri gider.
 | **Işık ölçer** | Ortam ışığı ve 1 dakikalık grafik |
 | **Aktarım** | Tarayıcıdan SD karta dosya yükleme ve indirme (aynı Wi-Fi ağında, ekrandaki adresi aç) |
 | **Sistem** | Sürüm, çalışma süresi, son açılış sebebi, bellek, sıcaklık |
+| **Görevler** | Çekirdeğin süreçleri: servisler ve görevler, işlemci payı, yığın, bellek; görevleri sonlandırma |
 
 **Kendi uygulamaların:** SD karttaki `/daxen/uygulamalar/*.lua` dosyaları Uygulamalar ekranında
-görünür. İlk açılışta dört örnek ve `REHBER.txt` yazılır. Ayrıntılar: [docs/lua.md](../docs/lua.md).
+görünür. Her biri ayrı bir süreç olarak çalışır; `-- arkaplan: evet` diyen uygulama çıkınca da sürer.
+İlk açılışta örnekler ve `REHBER.txt` yazılır. Ayrıntılar: [docs/lua.md](../docs/lua.md).
+
+## Çekirdek ve süreçler
+
+Donanım zamanlayıcısı saniyede 1000 kez kesme üretir. Kesme, vakti gelen işi olduğunda çekirdeği
+uyandırır; çekirdek o an çalışan düşük öncelikli süreci keser, servisleri öncelik sırasıyla çalıştırır
+ve bir sonraki vakte kadar uyur. Böylece satranç motoru düşünürken ya da bir Lua uygulaması uzun bir
+hesap yaparken saat, dokunma ve alarmlar donmaz.
+
+| Süreç | Tür | Periyot | İş |
+| --- | --- | --- | --- |
+| dokunma | servis | 10 ms | Dokunmatik ve BOOT tuşu |
+| kabuk | servis | 16 ms | Ekran, pencereler, uygulamanın adımı |
+| bluetooth | servis | 20 ms | Telefondan gelenler |
+| web | servis | 10 ms | Aktarım ve hesap sayfası sunucusu |
+| saat | servis | 200 ms | Dakika işleri, Pomodoro, gece bakımı |
+| ışık | servis | 50 ms | RGB ışık ve ekran parlaklığı |
+| ağ | görev, çekirdek 0 | — | Wi-Fi, bulut, hava, güncelleme |
+| lua:… | görev, çekirdek 1 | — | Açık (ya da arka plandaki) Lua uygulaması |
+| satranç | görev, çekirdek 1 | — | Satranç motoru, yalnızca düşünürken |
+
+Servisler çekirdek görevinde (öncelik 3) çalışır ve ekrana serbestçe çizer. Görevlerin kendi yığını
+vardır (öncelik 1), ekrana yalnızca ekran kilidiyle çizer. Sonlandırma işbirliklidir: süreç isteği
+görür ve kendisi çıkar, böylece yarım kalan SD yazması ya da tutulan bir kilit olmaz.
 
 ## Müzik ve Bluetooth kulaklık
 
@@ -133,9 +158,10 @@ Bluetooth bağlıyken Wi-Fi gerekmez: plan, tikler, sayaç, saat, bildirimler ve
 
 - PlatformIO, `espressif32@6.9.0` (Arduino core 2.0.x).
   Ortamlar: `cyd`, `cyd_st7789` (ana yazılım) ve `muzik_cyd`, `muzik_cyd_st7789` (müzik yazılımı).
-- `src/main.cpp` sistem çekirdeği (ağ, bulut, Bluetooth, güncelleme); `src/daxen.h` arayüzü toplar:
+- `src/main.cpp` sistem hizmetleri (ağ, bulut, Bluetooth, güncelleme) ve servislerin kaydı;
+  `src/os/kernel.h` zamanlayıcı kesmesi ve süreç zamanlayıcı; `src/daxen.h` arayüzü toplar:
   `core/` ortak durum ve yardımcılar, `ui/` tasarım sistemi (renkler, simgeler, bileşenler, klavye),
-  `os/` kabuk (ana ekran, başlatıcı, dokunma), `apps/` uygulamalar. Yeni uygulama: `apps/` altına
+  `os/` çekirdek ve kabuk (ana ekran, başlatıcı, dokunma), `apps/` uygulamalar. Yeni uygulama: `apps/` altına
   bir `App` tanımı yaz, `os/shell.h` içindeki `AppId` ve `os/registry.h` tablosuna ekle.
 - Renkler `ui/theme.h`, simgeler `ui/icons.h` (48'lik ızgarada vektör), logo `tools/make_logo.py`,
   yazı tipleri `tools/make_fonts.py` (Inter, SIL Open Font License 1.1).

@@ -124,6 +124,12 @@
 */
 #define LUA_32BITS	1
 
+/*
+** DAXEN VANE: Lua süreci 14 KB yığınla çalışır. Ayrıştırıcının iç içe derinliği
+** (ve C çağrıları) buna göre sınırlanır; aşılırsa çökme yerine "C stack overflow" hatası.
+*/
+#define LUAI_MAXCCALLS	48
+
 
 /*
 @@ LUA_C89_NUMBERS ensures that Lua uses the largest types available for

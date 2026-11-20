@@ -9,6 +9,7 @@
 #include "ui/icons.h"
 #include "ui/widgets.h"
 #include "ui/keyboard.h"
+#include "os/kernel.h"
 #include "os/shell.h"
 
 #include "apps/yks.h"
@@ -29,6 +30,7 @@
 #include "apps/cards.h"
 #include "apps/light.h"
 #include "apps/lua.h"
+#include "apps/taskman.h"
 
 #include "os/home.h"
 #include "os/registry.h"

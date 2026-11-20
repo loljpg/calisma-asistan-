@@ -2,4 +2,5 @@
 
 Kaynak: https://www.lua.org (MIT lisansı, Copyright © 1994–2023 Lua.org, PUC-Rio).
 DAXEN VANE için yalnızca gereken dosyalar alındı (io, os, package ve debug kitaplıkları yok).
-Değişiklik: `luaconf.h` içinde `LUA_32BITS` 1 (tamsayılar 32 bit, ondalıklı sayılar float; ESP32 için hızlı ve küçük).
+Değişiklikler (`luaconf.h`): `LUA_32BITS` 1 (tamsayılar 32 bit, ondalıklı sayılar float; ESP32 için hızlı ve küçük)
+ve `LUAI_MAXCCALLS` 48 (Lua süreci 14 KB yığınla çalışır; derin iç içe kod yığını taşırmak yerine hata verir).

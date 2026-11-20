@@ -5,25 +5,40 @@ ayrı birer uygulama olarak gösterir. Dosyayı Aktarım uygulamasıyla tarayıc
 ya da kartı bilgisayara takıp kopyalayabilirsin. Uygulamalar ekranı her açıldığında klasör
 yeniden okunur.
 
-Klasör ilk kez oluşturulurken içine dört örnek (`merhaba.lua`, `zar.lua`, `sayac.lua`,
-`top.lua`) ve bu belgenin kısa hali `REHBER.txt` yazılır. Örnekleri silebilirsin; yalnızca
+Klasör ilk kez oluşturulurken içine örnekler (`merhaba.lua`, `zar.lua`, `sayac.lua`, `top.lua`,
+`zamanlayici.lua`) ve bu belgenin kısa hali `REHBER.txt` yazılır. Örnekleri silebilirsin; yalnızca
 klasörün kendisi silinirse örnekler bir sonraki açılışta yeniden yazılır.
 
 Dil Lua 5.4'tür; tam sayılar ve ondalıklı sayılar 32 bittir. `string`, `table`, `math`,
 `utf8` ve `coroutine` kitaplıkları açıktır. `io`, `os`, `require`, `dofile`, `loadfile`
 kapalıdır; dosyalara yalnızca aşağıdaki `dosya` arabirimiyle erişilir. `print` seri porta yazar.
 
+## Süreç olarak çalışma
+
+Her Lua uygulaması DAXEN çekirdeğinde ayrı bir süreçtir: kendi yığını (14 KB) vardır ve
+zamanlayıcı kesmesiyle zaman dilimlenir. Uygulaman uzun bir hesap yapsa da saat, dokunma,
+alarmlar ve telefon bağlantısı donmaz. Dokunmalar sürece ileti olarak gelir; olay işlevlerin
+sırayla çağrılır. Geri tuşu süreci önce `kapat()` ile kibarca, olmazsa zorla sonlandırır.
+Çalışan süreçler **Görevler** uygulamasında görünür.
+
 ## Dosyanın başı
 
 ```lua
 -- ad: Benim Uygulamam
 -- simge: oyun
+-- arkaplan: evet
 ```
 
-İlk altı satırdaki `-- ad:` ve `-- simge:` satırları okunur. `ad` yoksa dosya adı kullanılır.
+İlk altı satırdaki `-- ad:`, `-- simge:` ve `-- arkaplan:` satırları okunur. `ad` yoksa dosya adı kullanılır.
+
+`arkaplan: evet` olan uygulama çıkınca kapanmaz, arka planda sürer: `adim()` çağrılmaya devam
+eder, `sistem.bildir()` balonları her ekranda görünür, ama ekrana çizim yapılmaz. Uygulamayı
+tekrar açınca `ciz()` gelir. Arka plandaki uygulama `sistem.cikis()` ile ya da Görevler'den
+sonlandırılır; başka bir Lua uygulaması açılınca da kapanır (aynı anda bir Lua süreci çalışır).
+Örnek: `zamanlayici.lua`.
 
 Simge adları: `kod oyun zar saat alarm not liste hesap grafik muzik kalem kitap isik hedef
-kronometre dunya bulut gunes ates bayrak kart yilan foto klavye cip`
+kronometre dunya bulut gunes ates bayrak kart yilan foto klavye cip nabiz`
 
 ## Olaylar
 
@@ -36,7 +51,7 @@ Uygulama, tanımladığın genel işlevlerle çalışır. Hepsi isteğe bağlıd
 | `dokun(x, y)` | Ekrana dokunup bırakınca |
 | `kaydir(yon)` | Kaydırma: `"sol"`, `"sag"`, `"yukari"`, `"asagi"` |
 | `bas(x, y)`, `surukle(x, y)`, `birak(x, y)` | Parmağı adım adım izlemek için. Bunlardan biri tanımlıysa `dokun` ve `kaydir` gelmez |
-| `adim(dt)` | Saniyede yaklaşık 30 kez; `dt` geçen milisaniye. Animasyon ve oyunlar için |
+| `adim(dt)` | Saniyede yaklaşık 30 kez; `dt` geçen milisaniye. Animasyon ve oyunlar için. Arka planda da çalışır |
 | `kapat()` | Uygulamadan çıkarken |
 
 Sol üst köşedeki geri tuşu ve ekranın sol kenarından sağa kaydırma her zaman sisteme aittir.
@@ -98,7 +113,8 @@ Her uygulamanın kendi klasörü vardır: `/daxen/uygulamalar/veri/<dosya adı>/
 ## Sınırlar
 
 - Bellek: Bluetooth ve Wi-Fi açıkken boş belleğin bir kısmı, en çok 96 KB. Dolarsa `not enough memory` hatası görünür.
-- Bir işlev 4 saniyeden uzun sürerse durdurulur (sonsuz döngüye karşı).
+- Süreç yığını 14 KB; çok derin iç içe kod (48 düzeyden fazla) `C stack overflow` hatası verir.
+- Sonsuz döngüye giren uygulama sistemi dondurmaz; geri tuşuyla ya da Görevler'den sonlandırılır.
 - Hata olursa ekranda dosya adı ve satır numarasıyla görünür; dosyayı düzeltip uygulamayı yeniden aç.
 
 ## Örnek

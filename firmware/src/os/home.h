@@ -528,6 +528,7 @@ static void uiToast(const String& msg) {
   if (kbm.active || ringOn) return;
   toast(msg);
 }
+static bool shellOverlayActive() { return ov.kind || kbm.active || ringOn || bannerUntil || otaProgress >= 0; }
 static bool appWantsQuiet() { return curApp && curApp->raw && shScreen == SH_APP; }  // oyun ve çizimde afiş yok
 static void uiNotif(const Notif& n) {
   banner = n;

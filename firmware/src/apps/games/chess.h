@@ -217,13 +217,17 @@ static int chEval(const ChPos& p) {
 
 static uint32_t chNodes = 0, chNodeLimit = 30000;
 static const int CH_MATE = 100000;
+// Motor ayrı bir çekirdek sürecinde düşünür (os/kernel.h); arayüz bu arada donmaz.
+static volatile bool chAiAbort = false;
+static Proc* volatile chAiProcP = nullptr;
+static inline bool chAiStopReq() { return chAiAbort || (chAiProcP && chAiProcP->killReq); }
 
 static int chQuiesce(const ChPos& p, int alpha, int beta, int depth) {
   chNodes++;
   int stand = chEval(p);
   if (stand >= beta) return beta;
   if (alpha < stand) alpha = stand;
-  if (depth <= 0 || chNodes > chNodeLimit * 2) return alpha;
+  if (depth <= 0 || chNodes > chNodeLimit * 2 || chAiStopReq()) return alpha;
   std::vector<ChMove> mv;
   chGen(p, mv, true);
   std::sort(mv.begin(), mv.end(), [&](const ChMove& a, const ChMove& b) { return abs(p.b[a.to]) * 10 - abs(p.b[a.from]) > abs(p.b[b.to]) * 10 - abs(p.b[b.from]); });
@@ -257,7 +261,7 @@ static int chSearch(const ChPos& p, int depth, int alpha, int beta, int ply) {
     int sc = -chSearch(n, depth - 1, -beta, -alpha, ply + 1);
     if (sc >= beta) return beta;
     if (sc > alpha) alpha = sc;
-    if (chNodes > chNodeLimit) break;
+    if (chNodes > chNodeLimit || chAiStopReq()) break;
   }
   if (!any) return chInCheck(p, p.side) ? -CH_MATE + ply : 0;
   return alpha;
@@ -280,6 +284,7 @@ static bool chBest(const ChPos& p, int depth, int noise, ChMove& best) {
       bestSc = sc;
       best = m;
     }
+    if (chAiStopReq()) break;
   }
   return true;
 }
@@ -313,7 +318,9 @@ static void chSave() {
   prefs.end();
 }
 
+static void chAiCancel();
 static void chNewGame() {
+  chAiCancel();
   chInit(chP);
   chHist.clear();
   chSel = chLastFrom = chLastTo = -1;
@@ -504,21 +511,63 @@ static void chApply(const ChMove& m) {
   chDrawSide();
 }
 
+// --- Motor süreci ---
+static ChPos chAiPos;
+static ChMove chAiMove;
+static int chAiDepth = 2, chAiNoise = 8, chAiPid = -1;
+static volatile bool chAiBusy = false, chAiDone = false, chAiOk = false;
+static uint8_t chDots = 0;
+static uint32_t chDotsAt = 0;
+
+static void chAiProc(Proc* pr) {
+  chAiProcP = pr;
+  uint32_t t0 = micros();
+  ChMove m;
+  bool ok = chBest(chAiPos, chAiDepth, chAiNoise, m);
+  kAddBusy(pr, micros() - t0);
+  chAiMove = m;
+  chAiOk = ok && !chAiStopReq();
+  chAiProcP = nullptr;
+  chAiDone = true;
+}
+
+static void chAiCancel() {
+  if (!chAiBusy) return;
+  chAiAbort = true;
+  kWait(chAiPid, 2000);
+  chAiBusy = chAiDone = false;
+}
+
 static void chThink() {
-  if (chP.side == chHuman) return;
+  if (chP.side == chHuman || chAiBusy) return;
   chUpdateStatus();
   if (chMoves.empty()) return;
   chDrawSide();
-  int depth = chLevel == 0 ? 1 : (chLevel == 1 ? 2 : 3);
+  chAiPos = chP;
+  chAiDepth = chLevel == 0 ? 1 : (chLevel == 1 ? 2 : 3);
+  chAiNoise = chLevel == 0 ? 60 : 8;
   chNodeLimit = chLevel == 0 ? 4000 : (chLevel == 1 ? 20000 : 60000);
-  ChMove m;
-  if (chBest(chP, depth, chLevel == 0 ? 60 : 8, m)) chApply(m);
+  chAiAbort = chAiDone = false;
+  chAiBusy = true;
+  chAiPid = kSpawn("satranç", chAiProc, 10 * 1024, true);
+  if (chAiPid < 0) {  // süreç açılamadıysa (bellek) burada düşünülür
+    chAiBusy = false;
+    ChMove m;
+    if (chBest(chP, chAiDepth, chAiNoise, m)) chApply(m);
+  }
 }
 
 static void chTap(int x, int y) {
   if (y < HDR_H) return;
   if (x >= 218) {
-    if (y >= HDR_H + 108 && y < HDR_H + 142 && chHist.size() >= 2) {
+    if (y >= HDR_H + 108 && y < HDR_H + 142 && chAiBusy && !chHist.empty()) {
+      chAiCancel();  // DAXEN düşünürken: yalnızca senin son hamlen geri alınır
+      chP = chHist.back();
+      chHist.pop_back();
+      chLastFrom = chLastTo = chSel = -1;
+      chSave();
+      chDraw(false);
+    } else if (y >= HDR_H + 108 && y < HDR_H + 142 && chHist.size() >= 2) {
       chP = chHist[chHist.size() - 2];  // senin ve DAXEN'in son hamlesi
       chHist.resize(chHist.size() - 2);
       chLastFrom = chLastTo = chSel = -1;
@@ -555,10 +604,23 @@ static void chTap(int x, int y) {
 }
 
 static void chTick() {
+  if (chAiBusy && chAiDone) {
+    chAiBusy = chAiDone = false;
+    if (chAiOk && chP.side != chHuman) chApply(chAiMove);
+    else chDrawSide();
+    return;
+  }
+  if (chAiBusy && millis() - chDotsAt > 300) {  // düşünme göstergesi
+    chDotsAt = millis();
+    chDots = (chDots + 1) % 3;
+    for (int i = 0; i < 3; i++) tft.fillCircle(226 + i * 10, HDR_H + 54, 2, i == chDots ? C_ACC : C_TEXT3);
+  }
   if (chThinkReq) {
     chThinkReq = false;
     chThink();
   }
 }
 
-static const App APP_CHESS = {"Satranç", "Satranç", I_ROOK, nullptr, chDraw, chTap, nullptr, nullptr, nullptr, chTick, nullptr, nullptr};
+static void chClose() { chAiCancel(); }
+
+static const App APP_CHESS = {"Satranç", "Satranç", I_ROOK, nullptr, chDraw, chTap, nullptr, nullptr, nullptr, chTick, nullptr, chClose};

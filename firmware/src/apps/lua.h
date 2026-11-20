@@ -2,8 +2,15 @@
 // Kendi uygulamaların: SD karttaki /daxen/uygulamalar/*.lua dosyaları başlatıcıda uygulama olarak
 // görünür. Lua 5.4 (32 bit). Türkçe arabirim: ekran, renk, zaman, dosya, ayar, sistem.
 // Ayrıntılar: SD kartta /daxen/uygulamalar/REHBER.txt ve depoda docs/lua.md.
+//
+// Her Lua uygulaması çekirdekte ayrı bir süreçtir (os/kernel.h): kendi yığını vardır, kesmeyle
+// zaman dilimlenir. Arayüz dokunmaları ileti kuyruğuna koyar; süreç kuyruğu boşaltıp Lua
+// işlevlerini çağırır ve ekrana Gfx kilidiyle çizer. Uygulama uzun hesap yapsa da saat, dokunma
+// ve alarmlar donmaz; geri tuşu ya da Görevler uygulaması süreci her an sonlandırabilir.
 #include "../os/shell.h"
+#include "../os/kernel.h"
 #include <SD.h>
+#include <deque>
 #include "lua.hpp"
 
 #define LUA_APPS_DIR "/daxen/uygulamalar"
@@ -11,16 +18,46 @@
 struct LuaAppInfo {
   String path, name;
   uint8_t icon = I_CODE;
+  bool bg = false;  // "-- arkaplan: evet": çıkınca kapanmaz, arka planda sürer
 };
 static std::vector<LuaAppInfo> luaApps;
 static bool luaScanned = false;
 static int luaCur = -1;
 
+// Süreç durumu (LS yalnızca Lua sürecine aittir)
 static lua_State* LS = nullptr;
 static size_t luaMem = 0, luaMemMax = 0;
-static String luaErr;
-static bool luaRawInput = false, luaHasStep = false, luaExitReq = false, luaQuiet = false;
-static uint32_t luaCallStart = 0, luaLastStep = 0;
+static uint32_t luaCallStart = 0, luaLastStep = 0, luaSlice = 0;
+static Proc* luaProcP = nullptr;
+static String luaRunPath, luaRunName;  // çalışan sürecin dosyası (liste yeniden okunsa da değişmez)
+static bool luaRunBg = false;
+static volatile bool luaQuit = false, luaErrPending = false;
+static int luaSvcPid = -1;
+// Arayüzle ortak (dizgiler mtx kilidiyle)
+static String luaErr, luaToastMsg;
+static volatile bool luaRawInput = false, luaHasStep = false, luaExitReq = false;
+static volatile bool luaDrawReq = false, luaErrNew = false, luaFg = false;
+static int luaPid = -1;
+
+// Arayüzden sürece iletiler
+enum LuaEvKind : uint8_t { LE_TAP, LE_SWIPE, LE_DOWN, LE_MOVE, LE_UP, LE_CLOSE };
+struct LuaEv {
+  uint8_t k;
+  int16_t x, y;
+};
+static std::deque<LuaEv> luaQ;
+
+static void luaPost(LuaEv e) {
+  {
+    Lock l;
+    if (e.k == LE_MOVE && !luaQ.empty() && luaQ.back().k == LE_MOVE) luaQ.back() = e;  // sürükleme birleştirilir
+    else if (luaQ.size() < 24 || e.k == LE_CLOSE) luaQ.push_back(e);
+  }
+  kNotify(luaPid);
+}
+
+// Sürecin ekrana çizebileceği an: uygulama önde ve üstünde pencere/klavye/afiş yok (Gfx içinde çağrılır)
+static bool luaCanDraw() { return luaFg && !shellOverlayActive(); }
 
 // --- Simge adları (-- simge: ...) ---
 struct LuaIconName {
@@ -33,6 +70,7 @@ static const LuaIconName LUA_ICONS[] = {
     {"kalem", I_PENCIL},   {"kitap", I_BOOK},     {"isik", I_LIGHT},   {"hedef", I_TARGET},    {"kronometre", I_STOPWATCH},
     {"dunya", I_GLOBE},    {"bulut", I_CLOUD},    {"gunes", I_SUN},    {"ates", I_FLAME},      {"bayrak", I_FLAG},
     {"kart", I_CARDS},     {"yilan", I_SNAKE},    {"foto", I_PHOTO},   {"klavye", I_KEYBOARD}, {"cip", I_CHIP},
+    {"nabiz", I_PULSE},
 };
 
 static uint8_t luaIconByName(const String& n) {
@@ -68,6 +106,7 @@ static void luaScan() {
         v.trim();
         if (key == "ad" && v.length()) a.name = v;
         else if (key == "simge") a.icon = luaIconByName(trLower(v));
+        else if (key == "arkaplan") a.bg = trLower(v) == "evet";
       }
       luaApps.push_back(a);
     }
@@ -100,15 +139,24 @@ static void* luaAlloc(void*, void* ptr, size_t osize, size_t nsize) {
   return p;
 }
 
-// Uzun süren (sonsuz döngüye girmiş) işlevler durdurulur.
+// Her 1000 Lua komutunda bir: sonlandırma isteği ve zaman dilimi
 static void luaHook(lua_State* L, lua_Debug* ar) {
-  if (millis() - luaCallStart <= 4000) return;
-  if (lua_getinfo(L, "Sl", ar) && ar->currentline > 0) luaL_error(L, "%s:%d: zaman aşımı, işlev 4 saniyeden uzun sürdü", ar->short_src, ar->currentline);
-  luaL_error(L, "zaman aşımı: bir işlev 4 saniyeden uzun sürdü");
+  if (luaProcP && luaProcP->killReq) luaL_error(L, "sonlandırıldı");
+#ifndef HOST
+  if (millis() - luaSlice > 40) {  // uzun hesapta düşük öncelikli görevlere de nefes
+    vTaskDelay(1);
+    luaSlice = millis();
+  }
+#else
+  if (millis() - luaCallStart > 4000) {  // önizlemede sonlandıracak kimse yok
+    if (lua_getinfo(L, "Sl", ar) && ar->currentline > 0) luaL_error(L, "%s:%d: zaman aşımı", ar->short_src, ar->currentline);
+    luaL_error(L, "zaman aşımı");
+  }
+#endif
 }
 
 static String luaDataDir() {
-  String stem = baseName(luaApps[luaCur].path);
+  String stem = baseName(luaRunPath);
   stem = stem.substring(0, stem.lastIndexOf('.'));
   return String(LUA_APPS_DIR "/veri/") + safeName(stem);
 }
@@ -138,6 +186,8 @@ static int lclamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v
 
 // --- ekran ---
 static int l_temizle(lua_State* L) {
+  Gfx g;
+  if (!luaCanDraw()) return 0;
   fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
   if (lua_gettop(L) >= 1) tft.fillRect(0, HDR_H, SCR_W, SCR_H - HDR_H, (uint16_t)luaL_checkinteger(L, 1));
   return 0;
@@ -146,6 +196,8 @@ static int l_dikdortgen(lua_State* L) {
   int x = luaL_checkinteger(L, 1), y = luaL_checkinteger(L, 2), w = luaL_checkinteger(L, 3), h = luaL_checkinteger(L, 4);
   uint16_t c = (uint16_t)luaL_optinteger(L, 5, C_TEXT);
   bool fill = lua_isnoneornil(L, 6) ? true : lua_toboolean(L, 6);
+  Gfx g;
+  if (!luaCanDraw()) return 0;
   if (y < HDR_H) {
     h -= HDR_H - y;
     y = HDR_H;
@@ -159,6 +211,8 @@ static int l_cizgi(lua_State* L) {
   float x1 = luaL_checknumber(L, 1), y1 = luaL_checknumber(L, 2), x2 = luaL_checknumber(L, 3), y2 = luaL_checknumber(L, 4);
   uint16_t c = (uint16_t)luaL_optinteger(L, 5, C_TEXT);
   float w = luaL_optnumber(L, 6, 1);
+  Gfx g;
+  if (!luaCanDraw()) return 0;
   y1 = std::max<float>(y1, HDR_H);
   y2 = std::max<float>(y2, HDR_H);
   if (w <= 1.01f) tft.drawLine(x1, y1, x2, y2, c);
@@ -170,13 +224,16 @@ static int l_daire(lua_State* L) {
   uint16_t c = (uint16_t)luaL_optinteger(L, 4, C_TEXT);
   bool fill = lua_isnoneornil(L, 5) ? true : lua_toboolean(L, 5);
   if (y - r < HDR_H) return 0;
+  Gfx g;
+  if (!luaCanDraw()) return 0;
   if (fill) tft.fillCircle(x, y, r, c);
   else tft.drawCircle(x, y, r, c);
   return 0;
 }
 static int l_piksel(lua_State* L) {
   int x = luaL_checkinteger(L, 1), y = luaL_checkinteger(L, 2);
-  if (y >= HDR_H) tft.drawPixel(x, y, (uint16_t)luaL_optinteger(L, 3, C_TEXT));
+  Gfx g;
+  if (y >= HDR_H && luaCanDraw()) tft.drawPixel(x, y, (uint16_t)luaL_optinteger(L, 3, C_TEXT));
   return 0;
 }
 static int l_yazi(lua_State* L) {
@@ -190,12 +247,13 @@ static int l_yazi(lua_State* L) {
   String al = luaL_optstring(L, 6, "sol");
   uint16_t bg = (uint16_t)luaL_optinteger(L, 7, C_BG);
   uint8_t d = al == "orta" ? TC_DATUM : (al == "sag" ? TR_DATUM : TL_DATUM);
-  if (y < HDR_H) return 0;
-  text(str, x, y, f, c, bg, d);
+  Gfx g;
+  if (y >= HDR_H && luaCanDraw()) text(str, x, y, f, c, bg, d);
   lua_pushinteger(L, textW(str, f));
   return 1;
 }
 static int l_genislik(lua_State* L) {
+  Gfx g;
   lua_pushinteger(L, textW(luaL_checkstring(L, 1), luaFont(luaL_optinteger(L, 2, 2))));
   return 1;
 }
@@ -206,7 +264,8 @@ static int l_renk(lua_State* L) {
 static int l_simge(lua_State* L) {
   String n = luaL_checkstring(L, 1);
   int x = luaL_checkinteger(L, 2), y = luaL_checkinteger(L, 3), s = lclamp(luaL_optinteger(L, 4, 24), 8, 96);
-  if (y >= HDR_H) drawIcon(luaIconByName(n), x, y, s, (uint16_t)luaL_optinteger(L, 5, C_TEXT), (uint16_t)luaL_optinteger(L, 6, C_BG));
+  Gfx g;
+  if (y >= HDR_H && luaCanDraw()) drawIcon(luaIconByName(n), x, y, s, (uint16_t)luaL_optinteger(L, 5, C_TEXT), (uint16_t)luaL_optinteger(L, 6, C_BG));
   return 0;
 }
 
@@ -328,10 +387,13 @@ static int l_ayar_kaydet(lua_State* L) {
 
 // --- sistem ---
 static int l_bildir(lua_State* L) {
-  toast(luaL_checkstring(L, 1));
+  String m = luaL_checkstring(L, 1);
+  Lock l;
+  luaToastMsg = m;  // balonu arayüz çizer
   return 0;
 }
 static int l_cikis(lua_State*) {
+  luaQuit = true;
   luaExitReq = true;
   return 0;
 }
@@ -425,18 +487,27 @@ static bool luaHas(const char* fn) {
   return f;
 }
 
-static void luaShowError() {
-  fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
-  drawIcon(I_CODE, 12, HDR_H + 12, 24, C_ACC, C_BG);
-  text("Uygulama hatası", 46, HDR_H + 14, F_MD, C_TEXT, C_BG);
-  auto ls = wrapText(luaErr, F_XS, 296, 9);
-  for (size_t i = 0; i < ls.size(); i++) text(ls[i], 12, HDR_H + 52 + i * 16, F_XS, C_TEXT2, C_BG);
-  text("Dosyayı düzelt, uygulamayı yeniden aç.", 12, SCR_H - 18, F_XS, C_TEXT3, C_BG);
+static void luaShutdown() {
+  if (LS) lua_close(LS);
+  LS = nullptr;
+  luaMem = 0;
 }
 
-// İşlevi çağırır (tanımlı değilse false). Hata olursa ortam kapanır, hata gösterilir.
-static bool luaCall(const char* fn, std::initializer_list<lua_Integer> ints = {}, const char* str = nullptr) {
-  if (!LS || luaErr.length()) return false;
+static void luaSetError(const String& e) {
+  String m = e;
+  m.replace(LUA_APPS_DIR "/", "");
+  {
+    Lock l;
+    luaErr = m;
+  }
+  if (!luaFg) luaErrPending = true;  // arka plandayken: uygulama açılınca gösterilir
+  luaErrNew = true;
+}
+
+// --- Süreç tarafı ---
+// İşlevi çağırır (tanımlı değilse false). Hata olursa Lua kapanır, hata arayüze bildirilir.
+static bool luaCallFn(const char* fn, std::initializer_list<lua_Integer> ints = {}, const char* str = nullptr) {
+  if (!LS) return false;
   lua_getglobal(LS, fn);
   if (!lua_isfunction(LS, -1)) {
     lua_pop(LS, 1);
@@ -451,49 +522,34 @@ static bool luaCall(const char* fn, std::initializer_list<lua_Integer> ints = {}
     lua_pushinteger(LS, v);
     n++;
   }
-  luaCallStart = millis();
-  if (lua_pcall(LS, n, 0, 0) != LUA_OK) {
-    luaErr = lua_tostring(LS, -1) ? lua_tostring(LS, -1) : "bilinmeyen hata";
-    lua_pop(LS, 1);
-    luaErr.replace(LUA_APPS_DIR "/", "");
-    lua_close(LS);
-    LS = nullptr;
-    if (!luaQuiet) luaShowError();
-    return true;
+  luaCallStart = luaSlice = millis();
+  uint32_t t0 = micros();
+  int r = lua_pcall(LS, n, 0, 0);
+  kAddBusy(luaProcP, micros() - t0);
+  if (r != LUA_OK) {
+    bool killed = luaProcP && luaProcP->killReq;
+    if (!killed) luaSetError(lua_tostring(LS, -1) ? lua_tostring(LS, -1) : "bilinmeyen hata");
+    luaShutdown();
   }
   return true;
 }
 
-static void luaStop() {
-  if (LS) {
-    luaQuiet = true;
-    luaCall("kapat");
-    luaQuiet = false;
-    if (LS) lua_close(LS);
-  }
-  LS = nullptr;
-  luaMem = 0;
-}
-
-static void luaStart() {
-  luaStop();
-  luaErr = "";
-  luaExitReq = false;
-  if (luaCur < 0 || luaCur >= (int)luaApps.size()) return;
-  File f = SD.open(luaApps[luaCur].path);
+static void luaProcInit() {
+  String path = luaRunPath;
+  File f = SD.open(path);
   if (!f) {
-    luaErr = "Dosya açılamadı";
+    luaSetError("Dosya açılamadı");
     return;
   }
   String src = f.readString();
   f.close();
-  // Bellek: Bluetooth ve Wi-Fi açıkken kalan yığının bir kısmı
+  // Bellek: Bluetooth ve Wi-Fi açıkken boş yığının bir kısmı (sürecin yığını ayrıldıktan sonra)
   luaMemMax = std::min<size_t>(96 * 1024, sysHeapMaxAlloc() > 24 * 1024 ? sysHeapFree() - 24 * 1024 : 16 * 1024);
   luaMemMax = std::max<size_t>(luaMemMax, 16 * 1024);
   luaMem = 0;
   LS = lua_newstate(luaAlloc, nullptr);
   if (!LS) {
-    luaErr = "Bellek yetmedi";
+    luaSetError("Bellek yetmedi");
     return;
   }
   luaL_requiref(LS, "_G", luaopen_base, 1);
@@ -505,47 +561,151 @@ static void luaStart() {
   lua_settop(LS, 0);
   luaOpenApi(LS);
   lua_sethook(LS, luaHook, LUA_MASKCOUNT, 1000);
-  String chunk = "@" + baseName(luaApps[luaCur].path);
-  luaCallStart = millis();
-  if (luaL_loadbuffer(LS, src.c_str(), src.length(), chunk.c_str()) != LUA_OK || lua_pcall(LS, 0, 0, 0) != LUA_OK) {
-    luaErr = lua_tostring(LS, -1) ? lua_tostring(LS, -1) : "yüklenemedi";
-    lua_close(LS);
-    LS = nullptr;
+  String chunk = "@" + baseName(path);
+  luaCallStart = luaSlice = millis();
+  uint32_t t0 = micros();
+  int r = luaL_loadbuffer(LS, src.c_str(), src.length(), chunk.c_str());
+  src = String();
+  if (r == LUA_OK) r = lua_pcall(LS, 0, 0, 0);
+  kAddBusy(luaProcP, micros() - t0);
+  if (r != LUA_OK) {
+    if (!(luaProcP && luaProcP->killReq)) luaSetError(lua_tostring(LS, -1) ? lua_tostring(LS, -1) : "yüklenemedi");
+    luaShutdown();
     return;
   }
-  src = String();
   luaRawInput = luaHas("bas") || luaHas("surukle") || luaHas("birak");
   luaHasStep = luaHas("adim");
-  luaCall("baslat");
+  luaLastStep = millis();
+  luaCallFn("baslat");
+  luaDrawReq = true;
 }
 
+static void luaDispatch(const LuaEv& e) {
+  static const char* const DIRS[] = {"sol", "sag", "yukari", "asagi"};
+  switch (e.k) {
+    case LE_TAP: luaCallFn("dokun", {e.x, e.y}); break;
+    case LE_SWIPE: luaCallFn("kaydir", {}, DIRS[e.x & 3]); break;
+    case LE_DOWN: luaCallFn("bas", {e.x, e.y}); break;
+    case LE_MOVE: luaCallFn("surukle", {e.x, e.y}); break;
+    case LE_UP: luaCallFn("birak", {e.x, e.y}); break;
+  }
+}
+
+// Bir tur: iletileri işle, gerekirse çiz, adım at. false: süreç bitmeli.
+static bool luaProcStep(bool block) {
+#ifndef HOST
+  if (block) {
+    uint32_t wait = 250;
+    if (luaHasStep) {
+      uint32_t el = millis() - luaLastStep;
+      wait = el >= 33 ? 0 : 33 - el;
+    }
+    if (wait) ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait));
+  }
+#endif
+  for (int n = 0; n < 16 && LS; n++) {
+    LuaEv e;
+    {
+      Lock l;
+      if (luaQ.empty()) break;
+      e = luaQ.front();
+      luaQ.pop_front();
+    }
+    if (e.k == LE_CLOSE) {
+      luaCallFn("kapat");
+      luaShutdown();
+      return false;
+    }
+    luaDispatch(e);
+  }
+  if (LS && luaDrawReq) {
+    luaDrawReq = false;
+    luaCallFn("ciz");
+  }
+  if (LS && luaHasStep && millis() - luaLastStep >= 33) {
+    uint32_t dt = millis() - luaLastStep;
+    luaLastStep = millis();
+    luaCallFn("adim", {(lua_Integer)std::min<uint32_t>(dt, 1000)});
+  }
+  if (LS && luaQuit && !luaFg) {  // arka planda sistem.cikis()
+    luaCallFn("kapat");
+    luaShutdown();
+  }
+  return LS != nullptr;
+}
+
+#ifndef HOST
+static void luaProcMain(Proc* p) {
+  luaProcP = p;
+  luaProcInit();
+  while (LS && !p->killReq && luaProcStep(true)) {
+  }
+  luaShutdown();
+  luaProcP = nullptr;
+}
+#endif
+
 // ============================================================================
-// Uygulama
+// Uygulama (arayüz tarafı)
 // ============================================================================
+static void luaShowError() {
+  String e;
+  {
+    Lock l;
+    e = luaErr;
+  }
+  fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
+  drawIcon(I_CODE, 12, HDR_H + 12, 24, C_ACC, C_BG);
+  text("Uygulama hatası", 46, HDR_H + 14, F_MD, C_TEXT, C_BG);
+  auto ls = wrapText(e, F_XS, 296, 9);
+  for (size_t i = 0; i < ls.size(); i++) text(ls[i], 12, HDR_H + 52 + i * 16, F_XS, C_TEXT2, C_BG);
+  text("Dosyayı düzelt, uygulamayı yeniden aç.", 12, SCR_H - 18, F_XS, C_TEXT3, C_BG);
+}
+
+static bool luaHasError() {
+  Lock l;
+  return luaErr.length() > 0;
+}
+
 static void luaDraw(bool full) {
-  if (full) header(luaCur >= 0 && luaCur < (int)luaApps.size() ? luaApps[luaCur].name : String("Uygulama"));
-  if (luaErr.length()) {
+  if (full) {
+    header(luaRunName.length() ? luaRunName : String("Uygulama"));
+    fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
+  }
+  if (luaHasError()) {
     luaShowError();
     return;
   }
-  if (!LS) return;
-  if (!luaCall("ciz")) fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
+  luaDrawReq = true;
+  kNotify(luaPid);
 }
 
 static void luaTap(int x, int y) {
-  if (y >= HDR_H) luaCall("dokun", {x, y});
+  if (y >= HDR_H) luaPost({LE_TAP, (int16_t)x, (int16_t)y});
 }
 
-static void luaSwipe(int dir) {
-  const char* n[] = {"sol", "sag", "yukari", "asagi"};
-  luaCall("kaydir", {}, n[dir & 3]);
-}
+static void luaSwipe(int dir) { luaPost({LE_SWIPE, (int16_t)dir, 0}); }
 
 static bool luaRaw(uint8_t ev, int x, int y) {
-  if (!LS || !luaRawInput) return false;
+  if (!luaRawInput || luaHasError()) return false;
   if (ev == TE_DOWN && y < HDR_H) return false;
-  luaCall(ev == TE_DOWN ? "bas" : (ev == TE_MOVE ? "surukle" : "birak"), {x, y});
+  luaPost({(uint8_t)(ev == TE_DOWN ? LE_DOWN : (ev == TE_MOVE ? LE_MOVE : LE_UP)), (int16_t)x, (int16_t)y});
   return true;
+}
+
+// Çekirdek servisi (50 ms): süreçten gelen balon ve hatalar; uygulama arka plandayken de çalışır
+static void luaSvc() {
+  String t;
+  {
+    Lock l;
+    t = luaToastMsg;
+    luaToastMsg = "";
+  }
+  if (t.length()) uiToast(t);
+  if (luaErrNew && !luaFg) {
+    luaErrNew = false;
+    uiToast(luaRunName + " durdu: hata");
+  }
 }
 
 static void luaTick() {
@@ -554,23 +714,84 @@ static void luaTick() {
     appExit();
     return;
   }
-  if (LS && luaHasStep && millis() - luaLastStep >= 33) {
-    uint32_t dt = millis() - luaLastStep;
-    luaLastStep = millis();
-    luaCall("adim", {(lua_Integer)std::min<uint32_t>(dt, 1000)});
+  if (luaErrNew) {
+    luaErrNew = false;
+    if (luaCanDraw()) luaShowError();
   }
+#ifdef HOST
+  luaSvc();
+  if (LS) luaProcStep(false);  // önizlemede süreç yok: arayüz turunda işlenir
+#endif
 }
 
 static void luaOpenFn() {
-  luaStart();
-  luaLastStep = millis();
+  String path = luaCur >= 0 && luaCur < (int)luaApps.size() ? luaApps[luaCur].path : String("");
+  if (kAlive(luaPid) && path == luaRunPath) {  // arka plandaki süreç öne alınır
+    luaFg = true;
+    luaExitReq = false;
+    return;
+  }
+  if (luaErrPending && path == luaRunPath) {  // arka planda hatayla durmuştu: önce hata gösterilir
+    luaErrPending = luaErrNew = false;
+    luaFg = true;
+    return;
+  }
+#ifndef HOST
+  if (luaSvcPid < 0) luaSvcPid = kService("lua ileti", 50, luaSvc);
+#endif
+  {
+    Lock l;
+    luaErr = "";
+    luaToastMsg = "";
+    luaQ.clear();
+  }
+  luaRunPath = path;
+  luaRunName = luaCur >= 0 && luaCur < (int)luaApps.size() ? luaApps[luaCur].name : String("Uygulama");
+  luaRunBg = luaCur >= 0 && luaCur < (int)luaApps.size() && luaApps[luaCur].bg;
+  luaErrNew = luaDrawReq = luaExitReq = luaRawInput = luaHasStep = luaQuit = luaErrPending = false;
+  luaFg = true;
+#ifdef HOST
+  luaProcP = nullptr;
+  luaProcInit();
+#else
+  String stem = baseName(path);
+  stem = stem.substring(0, stem.lastIndexOf('.'));
+  String n = "lua:" + stem;
+  luaPid = kSpawn(n.c_str(), luaProcMain, 14 * 1024, true);
+  if (luaPid < 0) luaSetError("Süreç başlatılamadı: bellek yetmedi");
+#endif
 }
-static void luaCloseFn() { luaStop(); }
+
+// Lua sürecini durdurur: önce kapat() için ileti, olmazsa sonlandırma
+static bool luaStopProc() {
+#ifdef HOST
+  luaCallFn("kapat");
+  luaShutdown();
+  return true;
+#else
+  if (!kAlive(luaPid)) return true;
+  luaPost({LE_CLOSE, 0, 0});
+  if (kWait(luaPid, 400)) return true;
+  kKill(luaPid);
+  return kWait(luaPid, 1500);
+#endif
+}
+
+static void luaCloseFn() {
+  bool keep = luaRunBg && !luaQuit && kAlive(luaPid) && !luaHasError();
+  luaFg = false;
+  if (keep) return;  // arka planda sürer; Görevler'den sonlandırılabilir
+  luaStopProc();
+}
 
 static const App APP_LUA = {"Uygulama", "Uygulama", I_CODE, luaOpenFn, luaDraw, luaTap, nullptr, luaSwipe, luaRaw, luaTick, nullptr, luaCloseFn};
 
 static void luaAppOpen(int i) {
   if (i < 0 || i >= (int)luaApps.size()) return;
+  if (kAlive(luaPid) && luaApps[i].path != luaRunPath && !luaStopProc()) {  // arka plandaki başka uygulama
+    toast("Önceki uygulama kapanıyor, biraz bekle");
+    return;
+  }
   luaCur = i;
   appOpen(&APP_LUA);
 }
@@ -709,6 +930,69 @@ function birak(px, py)
 end
 )";
 
+static const char LUA_EX_ZAMAN[] PROGMEM = R"(-- ad: Zamanlayıcı
+-- simge: kronometre
+-- arkaplan: evet
+-- Geri sayım. Uygulamadan çıksan da arka planda sayar, bitince haber verir.
+local sure = 5 * 60
+local kalan = sure
+local calisiyor = false
+local son = zaman.ms()
+
+local function iki(n) return string.format("%02d", n) end
+
+local function dugme(x, y, w, h, yazi, vurgu)
+  local zemin = vurgu and renk.vurgu or renk.yuzey
+  ekran.dikdortgen(x, y, w, h, zemin, true)
+  ekran.dikdortgen(x, y, w, h, renk.cizgi, false)
+  ekran.yazi(yazi, x + w / 2, y + h / 2 - 8, vurgu and renk.zemin or renk.gumus, 2, "orta", zemin)
+end
+
+local function sayi()
+  ekran.dikdortgen(20, 44, 280, 76, renk.zemin, true)
+  ekran.yazi(iki(kalan // 60) .. ":" .. iki(kalan % 60), 160, 50, calisiyor and renk.vurgu or renk.gumus, 5, "orta")
+end
+
+function ciz()
+  ekran.temizle()
+  sayi()
+  ekran.yazi(calisiyor and "Çıksan da sayar" or "Süreyi ayarla, başlat", 160, 134, renk.soluk, 1, "orta")
+  dugme(16, 168, 90, 48, "−1 dk")
+  dugme(115, 168, 90, 48, calisiyor and "Durdur" or "Başlat", true)
+  dugme(214, 168, 90, 48, "+1 dk")
+end
+
+function dokun(x, y)
+  if y < 160 then return end
+  if x < 110 then
+    sure = math.max(60, sure - 60); kalan = sure; calisiyor = false
+  elseif x < 210 then
+    if kalan == 0 then kalan = sure end
+    calisiyor = not calisiyor
+    son = zaman.ms()
+  else
+    sure = math.min(99 * 60, sure + 60); kalan = sure; calisiyor = false
+  end
+  ciz()
+end
+
+function adim(dt)
+  if not calisiyor then return end
+  if zaman.ms() - son < 1000 then return end
+  son = son + 1000
+  kalan = kalan - 1
+  if kalan <= 0 then
+    kalan = 0
+    calisiyor = false
+    sistem.bildir("Zamanlayıcı: süre doldu")
+    sistem.led(0, 0, 255)
+    ciz()
+  else
+    sayi()
+  end
+end
+)";
+
 static const char LUA_GUIDE[] PROGMEM = R"(DAXEN VANE · Kendi uygulamanı yaz (Lua)
 =========================================
 
@@ -717,6 +1001,11 @@ Dosyanın ilk satırları uygulamanın adını ve simgesini söyler:
 
   -- ad: Benim Uygulamam
   -- simge: oyun
+  -- arkaplan: evet      (isteğe bağlı: çıkınca kapanmaz, arka planda sürer)
+
+Her uygulama ayrı bir süreç olarak çalışır: uzun bir hesap yapsa da saat, dokunma ve alarmlar
+donmaz. Çalışan süreçleri Görevler uygulamasında görür, istersen sonlandırırsın. Arka planda
+süren uygulama ekrana çizemez ama adim() ve sistem.bildir() çalışır; tekrar açınca ciz() gelir.
 
 Simgeler: kod oyun zar saat alarm not liste hesap grafik muzik kalem kitap isik hedef
 kronometre dunya bulut gunes ates bayrak kart yilan foto klavye cip
@@ -763,8 +1052,9 @@ Dosyalar yalnızca uygulamanın kendi klasöründedir (uygulamalar/veri/<dosya a
   sistem.bellek()            uygulamanın kalan belleği (bayt)
 
 Lua'nın string, table, math, utf8 ve coroutine kitaplıkları vardır (io ve os yok).
-Bir işlev 4 saniyeden uzun sürerse durdurulur. Hata olursa ekranda satır numarasıyla görünür.
-Örnekler: merhaba.lua, zar.lua, sayac.lua, top.lua. Değiştirip dene!
+Takılan bir uygulamadan geri tuşuyla çıkabilirsin; süreç sonlandırılır.
+Hata olursa ekranda satır numarasıyla görünür.
+Örnekler: merhaba.lua, zar.lua, sayac.lua, top.lua, zamanlayici.lua (arka planda sayar). Değiştirip dene!
 )";
 
 static void luaWriteFile(const char* path, const char* data) {
@@ -775,12 +1065,19 @@ static void luaWriteFile(const char* path, const char* data) {
 }
 
 static void luaEnsureExamples() {
-  if (SD.exists(LUA_APPS_DIR)) return;
-  if (!SD.exists("/daxen")) SD.mkdir("/daxen");
-  SD.mkdir(LUA_APPS_DIR);
-  luaWriteFile(LUA_APPS_DIR "/merhaba.lua", LUA_EX_MERHABA);
-  luaWriteFile(LUA_APPS_DIR "/zar.lua", LUA_EX_ZAR);
-  luaWriteFile(LUA_APPS_DIR "/sayac.lua", LUA_EX_SAYAC);
-  luaWriteFile(LUA_APPS_DIR "/top.lua", LUA_EX_TOP);
-  luaWriteFile(LUA_APPS_DIR "/REHBER.txt", LUA_GUIDE);
+  if (!SD.exists(LUA_APPS_DIR)) {
+    if (!SD.exists("/daxen")) SD.mkdir("/daxen");
+    SD.mkdir(LUA_APPS_DIR);
+    luaWriteFile(LUA_APPS_DIR "/merhaba.lua", LUA_EX_MERHABA);
+    luaWriteFile(LUA_APPS_DIR "/zar.lua", LUA_EX_ZAR);
+    luaWriteFile(LUA_APPS_DIR "/sayac.lua", LUA_EX_SAYAC);
+    luaWriteFile(LUA_APPS_DIR "/top.lua", LUA_EX_TOP);
+  }
+  // 2. sürüm: süreçler ve arka plan (yeni örnek ve güncel rehber, bir kez)
+  if (!SD.exists(LUA_APPS_DIR "/veri/.surum2")) {
+    if (!SD.exists(LUA_APPS_DIR "/zamanlayici.lua")) luaWriteFile(LUA_APPS_DIR "/zamanlayici.lua", LUA_EX_ZAMAN);
+    luaWriteFile(LUA_APPS_DIR "/REHBER.txt", LUA_GUIDE);
+    if (!SD.exists(LUA_APPS_DIR "/veri")) SD.mkdir(LUA_APPS_DIR "/veri");
+    luaWriteFile(LUA_APPS_DIR "/veri/.surum2", "2");
+  }
 }

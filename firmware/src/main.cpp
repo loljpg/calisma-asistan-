@@ -3095,6 +3095,11 @@ static void wifiImportStored() {
   if (!have) wifiRemember(s, p);
 }
 
+static void svcTouch();
+static void svcBle();
+static void svcClock();
+static void svcLight();
+
 void setup() {
   diagBoot();
   Serial.begin(115200);
@@ -3182,97 +3187,113 @@ void setup() {
   musicBootTasks();
   bleBegin();
 
-  xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, nullptr, 0);
+  TaskHandle_t netH = nullptr;
+  xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, &netH, 0);
   lastInteract = millis();
   homeShow();
   if (!haveWifi && !bleHasToken) settingsOpenPage(SP_WIFI);  // ilk kurulum: önce Wi-Fi
+
+  // Çekirdek: zamanlayıcı kesmesi ve servisler (kayıt sırası öncelik sırasıdır)
+  kernelBegin();
+  kService("dokunma", 10, svcTouch);
+  kService("kabuk", 16, shellTick);
+  kService("bluetooth", 20, svcBle);
+  kService("web", 10, webTick);
+  kService("saat", 200, svcClock);
+  kService("ışık", 50, svcLight);
+  kAdopt("ağ", netH, 1, 0, 16384);
 }
 
-void loop() {
-  static uint32_t lastTick = 0;
+// ============================================================================
+// Çekirdek servisleri (os/kernel.h zamanlar)
+// ============================================================================
+static void svcTouch() {  // 10 ms: BOOT tuşu ve dokunmatik
+  handleBoot();
+  int tx = 0, ty = 0;
+  bool t = getTouch(tx, ty);
+  shellTouch(t, tx, ty);
+}
+
+static void svcBle() {  // 20 ms: telefondan gelenler
+  bleProcess();
+  applyRemoteTimer();
+  if (dataDirty) {
+    dataDirty = false;
+    uiDataChanged();
+  }
+}
+
+static void svcClock() {  // 200 ms: dakika işleri, Pomodoro, bakım, tanı
   static int lastMinute = -1;
   static uint32_t lastSec = 0;
   static String lastDay;
-
-  if (otaProgress >= 0) {
-    uiOtaProgress();
-    updateLeds();
-    delay(50);
-    return;
-  }
-
   static uint32_t lastDiag = 0;
+  static bool markedValid = false;
+
   if (millis() - lastDiag > 5000) {
     lastDiag = millis();
     rtcUpSec = millis() / 1000;
     rtcMinHeap = ESP.getMinFreeHeap();
   }
-  static bool markedValid = false;
   if (!markedValid && millis() > 45000) {
     markedValid = true;
     esp_ota_mark_app_valid_cancel_rollback();
   }
 
-  handleBoot();
-  int tx = 0, ty = 0;
-  bool t = getTouch(tx, ty);
-  shellTouch(t, tx, ty);
-  bleProcess();
-  applyRemoteTimer();
-
-  if (dataDirty) {
-    dataDirty = false;
-    uiDataChanged();
+  struct tm tmv;
+  int minute = localNow(tmv) ? tmv.tm_hour * 60 + tmv.tm_min : -1;
+  String day = todayStr();
+  if (day != lastDay) {
+    lastDay = day;
+    dataDirty = true;
   }
-
-  if (millis() - lastTick >= 200) {
-    lastTick = millis();
-    struct tm tmv;
-    int minute = localNow(tmv) ? tmv.tm_hour * 60 + tmv.tm_min : -1;
-    String day = todayStr();
-    if (day != lastDay) {
-      lastDay = day;
-      dataDirty = true;
+  if (minute != lastMinute) {
+    lastMinute = minute;
+    // Gece bakımı: 04:00–04:30 arası, 20 saatten uzun açıksa ve kimse kullanmıyorsa yeniden başlar.
+    // Açılışta güncelleme denetlenir, bellek de tazelenir. Kronometre ve kayıtlar korunur.
+    if (minute >= 240 && minute < 270 && millis() > 20UL * 3600UL * 1000UL && !swRunning && swElapsedMs() == 0 &&
+        millis() - lastInteract > 10UL * 60UL * 1000UL && !bleInflight && !kbm.active) {
+      esp_ota_mark_app_valid_cancel_rollback();
+      ESP.restart();
     }
-    if (minute != lastMinute) {
-      lastMinute = minute;
-      // Gece bakımı: 04:00–04:30 arası, 20 saatten uzun açıksa ve kimse kullanmıyorsa yeniden başlar.
-      // Açılışta güncelleme denetlenir, bellek de tazelenir. Kronometre ve kayıtlar korunur.
-      if (minute >= 240 && minute < 270 && millis() > 20UL * 3600UL * 1000UL && !swRunning && swElapsedMs() == 0 &&
-          millis() - lastInteract > 10UL * 60UL * 1000UL && !bleInflight && !kbm.active) {
-        esp_ota_mark_app_valid_cancel_rollback();
-        ESP.restart();
+    // Yaklaşan oturum (2 dk içinde) LED ile haber verilir.
+    upcomingSoon = false;
+    int studied;
+    View v;
+    std::vector<Item> items = displayItems(studied, v);
+    if (planIsToday(v) && minute >= 0 && !swRunning) {
+      for (auto& it : items) {
+        int s = toMin(it.saat);
+        if (it.durum != "tamam" && s - minute >= 0 && s - minute <= 2) upcomingSoon = true;
       }
-      // Yaklaşan oturum (2 dk içinde) LED ile haber verilir.
-      upcomingSoon = false;
-      int studied;
-      View v;
-      std::vector<Item> items = displayItems(studied, v);
-      if (planIsToday(v) && minute >= 0 && !swRunning) {
-        for (auto& it : items) {
-          int s = toMin(it.saat);
-          if (it.durum != "tamam" && s - minute >= 0 && s - minute <= 2) upcomingSoon = true;
-        }
-      }
-    }
-    uint32_t sec = swElapsedMs() / 1000;
-    if (sec != lastSec) {
-      lastSec = sec;
-      if (swRunning && cfg.pomodoro) {
-        if (sec >= (uint32_t)(pomoCount + 1) * POMODORO_WORK_SEC) {
-          pomoCount++;
-          pomoBreak = true;
-          pomoBreakUntil = millis() + 5UL * 60UL * 1000UL;
-          uiToast("Mola zamanı: 5 dakika ara ver");
-        }
-      }
-      if (pomoBreak && (int32_t)(millis() - pomoBreakUntil) > 0) pomoBreak = false;
     }
   }
+  uint32_t sec = swElapsedMs() / 1000;
+  if (sec != lastSec) {
+    lastSec = sec;
+    if (swRunning && cfg.pomodoro) {
+      if (sec >= (uint32_t)(pomoCount + 1) * POMODORO_WORK_SEC) {
+        pomoCount++;
+        pomoBreak = true;
+        pomoBreakUntil = millis() + 5UL * 60UL * 1000UL;
+        uiToast("Mola zamanı: 5 dakika ara ver");
+      }
+    }
+    if (pomoBreak && (int32_t)(millis() - pomoBreakUntil) > 0) pomoBreak = false;
+  }
+}
 
-  shellTick();
-  webTick();
+static void svcLight() {  // 50 ms: RGB ışık ve ekran parlaklığı
   updateLeds();
   updateBacklight();
-  delay(5);
+}
+
+void loop() {
+  if (otaProgress >= 0) {  // SD'den güncelleme sürerken yalnızca ilerleme
+    uiOtaProgress();
+    updateLeds();
+    delay(50);
+    return;
+  }
+  kernelLoop();
 }
