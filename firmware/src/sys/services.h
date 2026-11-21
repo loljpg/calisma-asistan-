@@ -67,6 +67,12 @@ static void sysRestart() {
 static uint32_t sysHeapFree() { return ESP.getFreeHeap(); }
 static uint32_t sysHeapMin() { return ESP.getMinFreeHeap(); }
 static uint32_t sysHeapMaxAlloc() { return ESP.getMaxAllocHeap(); }
+static uint32_t sysSketchSize() {  // görüntüyü baştan sona okur (yavaş): bir kez hesaplanır
+  static uint32_t s = 0;
+  if (!s) s = ESP.getSketchSize();
+  return s;
+}
+static uint32_t sysSketchFree() { return ESP.getFreeSketchSpace(); }
 static void weatherRefresh() { wantWeather = true; }
 
 static void accountSet(const String& db, const String& key, const String& mail, const String& pass) {

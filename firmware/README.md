@@ -39,9 +39,10 @@ ve başlıktaki sol ok her uygulamada geri gider.
 | **Çizim** | 10 renkli çizim defteri (`/daxen/cizim`) |
 | **Kartlar** | Aralıklı tekrarlı bilgi kartları: TYT matematik, geometri, fizik, kimya, edebiyat; kendi destelerin `/daxen/kartlar/*.txt` (`ön|arka` satırları) |
 | **Işık ölçer** | Ortam ışığı ve 1 dakikalık grafik |
-| **Aktarım** | Tarayıcıdan SD karta dosya yükleme ve indirme (aynı Wi-Fi ağında, ekrandaki adresi aç); sayfada ilerleme çubuğu, yükleme sürerken saat donmaz |
-| **Sistem** | Sürüm, çalışma süresi, son açılış sebebi, bellek, sıcaklık |
-| **Görevler** | Çekirdeğin süreçleri: servisler ve görevler, işlemci payı, yığın, bellek; görevleri sonlandırma |
+| **Aktarım** | Tarayıcıdan SD karta dosya yükleme ve indirme (aynı Wi-Fi ağında, ekrandaki adresi aç ve ekrandaki 6 haneli kodla gir); sayfada ilerleme çubuğu, yükleme sürerken saat donmaz |
+| **Sistem** | Sürüm, çip, çalışma süresi, son açılış sebebi (önceki çökme kaydı varsa belirtilir), bellek (boş, en az, en büyük blok), Wi-Fi adresi ve sinyali |
+| **Görevler** | Çekirdeğin süreçleri: servisler ve görevler, işlemci payı, yığın, bellek; görevleri sonlandırma. Wi-Fi, TCP/IP ve Bluetooth sistem görevleri de görünür (yığın ve durum; işlemci payı ölçülemez, "—") |
+| **Terminal** | Kendi komut yorumlayıcısı (Linux değil): `help`, `sysinfo`, `memory`, `tasks`, `logs`, `storage`, `apps`, `app launch`, `wifi status`, `bluetooth status`, `version`, `uptime`, `history`, `clear`, `reboot`. USB seri porttan da (115200) çalışır. Ayrıntılar: [docs/terminal.md](../docs/terminal.md) |
 
 **Kendi uygulamaların:** SD karttaki `/daxen/uygulamalar/*.lua` dosyaları Uygulamalar ekranında
 görünür. Her biri ayrı bir süreç olarak çalışır; `-- arkaplan: evet` diyen uygulama çıkınca da sürer.
@@ -62,6 +63,7 @@ hesap yaparken saat, dokunma ve alarmlar donmaz.
 | saat | servis | 200 ms | Dakika işleri, Pomodoro, gece bakımı |
 | ışık | servis | 50 ms | RGB ışık ve ekran parlaklığı |
 | ağ | görev, çekirdek 0 | — | Wi-Fi, bulut, hava, güncelleme |
+| wifi, tcp/ip, bt-host, bt-denetleyici | sistem görevi | — | ESP-IDF ve NimBLE'nin kendi görevleri (yalnızca izlenir) |
 | web | görev, çekirdek 1 | — | Aktarım ve hesap sayfası sunucusu, yalnızca o ekran açıkken |
 | lua:… | görev, çekirdek 1 | — | Açık (ya da arka plandaki) Lua uygulaması |
 | satranç | görev, çekirdek 1 | — | Satranç motoru, yalnızca düşünürken |
@@ -121,6 +123,12 @@ varsa indirip kurar. Her gece 04:00–04:30 arasında, kimse kullanmıyorsa kend
 Ayarlar → Güncelleme → *Güncellemeyi denetle* hemen denetler. Yeni sürüm açıldıktan 45 saniye sonra
 sağlam sayılır; daha önce çökerse kart eski sürüme döner.
 
+GitHub bağlantılarının sertifikaları kartta gömülü 8 kök sertifikayla doğrulanır
+(`certs/ota-roots.pem` → `src/sys/ota_roots.h`, `tools/make_ota_roots.py`). CI her derlemede GitHub'ın
+gerçek zincirlerini kartın algoritmasıyla dener (`tools/check_ota_chains.py`); tutmazsa yayın yapılmaz.
+Doğrulama kartta başarısız olursa güncelleme kurulmaz ve sebep günlüğe yazılır; SD karttan güncelleme
+her zaman çalışır. Kart saati denetlenmez (sertifika tarihleri kartta karşılaştırılmaz).
+
 **SD karttan:** Releases'taki `firmware-cyd_st7789.bin` (ya da `firmware-cyd.bin`) dosyasını kartın
 köküne kopyala, cihazı yeniden başlat. Dosya `update.bin` ya da `firmware.bin` adında da olabilir.
 Kart yalnızca aynı modelin **daha yeni** sürümünü yükler; işlediği dosyanın sonuna `.yuklendi`,
@@ -139,7 +147,7 @@ Takılı değilse sistem yine çalışır (notlar, fotoğraf ve Lua uygulamalar�
 | `/daxen/cizim/` | Çizimler |
 | `/daxen/kartlar/` | Kendi bilgi kartı destelerin |
 | `/daxen/uygulamalar/` | Lua uygulamaları ve verileri |
-| `/daxen/sys/` | Sistem dosyaları |
+| `/daxen/sys/` | Sistem dosyaları; `gunluk.txt` sistem günlüğü (32 KB'ta `gunluk.1.txt`'ye döner) |
 
 ## Telefonla eşleşme
 

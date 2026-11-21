@@ -32,6 +32,7 @@
 #include "apps/light.h"
 #include "apps/lua.h"
 #include "apps/taskman.h"
+#include "apps/terminal.h"
 
 #include "os/home.h"
 #include "os/registry.h"

@@ -473,6 +473,70 @@ static void testOtaRoots() {
   CHECK(found);
 }
 
+// ---------------------------------------------------------------------------
+// Komut yorumlayıcısı (core/cmd.h) ve terminal komutları (apps/terminal.h)
+// ---------------------------------------------------------------------------
+static int g_cmdHits = 0;
+static void cDummy(const std::vector<String>& a, CmdOut& o) {
+  g_cmdHits++;
+  o.add("arg=" + String((int)a.size()));
+}
+static void testCmd() {
+  group("komut yorumlayıcısı");
+  std::vector<String> w;
+  String err;
+  CHECK(cmdSplit("  wifi   ping  \"bir iki\"  ", w, err) && w.size() == 3 && w[2] == "bir iki");
+  CHECK(cmdSplit("", w, err) && w.empty());
+  CHECK(!cmdSplit("a \"kapanmadı", w, err));
+  CHECK(!cmdSplit(String("x") + (char)7, w, err));
+  String uzun;
+  for (int i = 0; i < CMD_LINE_MAX + 1; i++) uzun += 'a';
+  CHECK(!cmdSplit(uzun, w, err));
+  CHECK(!cmdSplit("a b c d e f g h i", w, err));  // en fazla 2 + 6 kelime
+  static const Cmd T[] = {
+      {"say", nullptr, CL_USER, 0, 2, cDummy, "[a] [b]", ""},
+      {"grup", "bir", CL_USER, 1, 1, cDummy, "<x>", ""},
+      {"gizli", nullptr, CL_DEV, 0, 0, cDummy, "", ""},
+  };
+  CmdOut o;
+  cmdRun(T, 3, "SAY 1 2", CL_USER, o);
+  CHECK(g_cmdHits == 1 && o.lines.size() == 1 && o.lines[0] == "arg=2");
+  o = CmdOut();
+  cmdRun(T, 3, "say 1 2 3", CL_USER, o);  // fazla argüman
+  CHECK(g_cmdHits == 1 && o.lines[0].startsWith("Kullanım: say"));
+  o = CmdOut();
+  cmdRun(T, 3, "grup", CL_USER, o);  // alt komut yok
+  CHECK(g_cmdHits == 1 && o.lines.size() == 2 && o.lines[1].indexOf("grup bir") >= 0);
+  o = CmdOut();
+  cmdRun(T, 3, "grup bir x", CL_USER, o);
+  CHECK(g_cmdHits == 2);
+  o = CmdOut();
+  cmdRun(T, 3, "gizli", CL_USER, o);  // yetki yetmez
+  CHECK(g_cmdHits == 2 && o.lines[0].indexOf("geliştirici") >= 0);
+  o = CmdOut();
+  cmdRun(T, 3, "rm -rf /", CL_USER, o);  // tabloda yok: hiçbir şey çalışmaz
+  CHECK(g_cmdHits == 2 && o.lines[0].startsWith("Bilinmeyen komut: rm"));
+  CmdHistory h;
+  for (int i = 0; i < 20; i++) h.push("k" + String(i));
+  h.push("k19");
+  CHECK(h.items.size() == 16 && h.items.front() == "k4" && h.items.back() == "k19");
+
+  group("terminal komutları");
+  CmdOut m = termExec("memory");
+  CHECK(m.lines.size() == 4 && m.lines[0].startsWith("Boş: "));
+  CHECK(termExec("clear").clear);
+  sysLog("test", "bir");
+  sysLog("test", "iki");
+  CmdOut lg = termExec("logs 2");
+  CHECK(lg.lines.size() == 2 && lg.lines[1].endsWith("test: iki"));
+  CmdOut hp = termExec("help");
+  CHECK(hp.lines.size() > 10);
+  CmdOut ts = termExec("tasks");
+  CHECK(ts.lines.size() >= 2);
+  CHECK(termExec("version").lines[0].startsWith("Yazılım: fw-"));
+  CHECK(termExec("app launch yokboyle").lines[0].startsWith("Böyle bir uygulama yok"));
+}
+
 int main() {
   setupState();
   testCalib();
@@ -485,6 +549,7 @@ int main() {
   testMigrate();
   testLog();
   testOtaRoots();
+  testCmd();
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

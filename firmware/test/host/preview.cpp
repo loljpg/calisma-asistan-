@@ -383,6 +383,10 @@ int main(int argc, char** argv) {
     tap(160, SCR_H - 24);
     shot("e3-gorev-sonlandir");
     ov = Overlay();
+    appOpen(&APP_TERMINAL);
+    tlRun("sysinfo");
+    shot("e5-terminal");
+    ov = Overlay();
     // satranç motoru süreçte: insan hamlesi → düşünme → yanıt
     appOpen(&APP_GAMES);
     appOpenChild(&APP_CHESS);

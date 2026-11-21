@@ -281,6 +281,7 @@ static void svcClock() {  // 200 ms: dakika işleri, Pomodoro, bakım, tanı
     rtcMinHeap = ESP.getMinFreeHeap();
   }
   diagTick();
+  termSerialPoll();  // USB seri porttan terminal komutları (apps/terminal.h)
   if (!markedValid && millis() > 45000) {
     markedValid = true;
     esp_ota_mark_app_valid_cancel_rollback();
