@@ -572,6 +572,7 @@ static void luaProcInit() {
     luaSetError("Bellek yetmedi");
     return;
   }
+  lua_gc(LS, LUA_GCGEN, 0, 0);  // kuşak tabanlı çöp toplama: kısa ömürlü nesnelerde kısa duraklamalar
   luaL_requiref(LS, "_G", luaopen_base, 1);
   luaL_requiref(LS, LUA_TABLIBNAME, luaopen_table, 1);
   luaL_requiref(LS, LUA_STRLIBNAME, luaopen_string, 1);

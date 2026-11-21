@@ -94,6 +94,11 @@ static bool chInCheck(const ChPos& p, int side) {
 }
 
 static void chPush(std::vector<ChMove>& v, int f, int t, uint8_t flags, int8_t promo = 0) { v.push_back(ChMove{(uint8_t)f, (uint8_t)t, promo, flags}); }
+// Terfi: vezir önce (dokunarak oynayan oyuncuya vezir verilir), sonra at, kale, fil
+static void chPushPromo(std::vector<ChMove>& v, int f, int t, uint8_t flags) {
+  static const int8_t PR[4] = {CP_Q, CP_N, CP_R, CP_B};
+  for (int8_t pr : PR) chPush(v, f, t, flags, pr);
+}
 
 static void chGen(const ChPos& p, std::vector<ChMove>& mv, bool capsOnly = false) {
   int s = p.side;
@@ -106,7 +111,7 @@ static void chGen(const ChPos& p, std::vector<ChMove>& mv, bool capsOnly = false
       bool promoRank = nr == (s == 1 ? 0 : 7);
       if (nr >= 0 && nr < 8) {
         if (!capsOnly && !p.b[nr * 8 + c]) {
-          if (promoRank) chPush(mv, i, nr * 8 + c, 0, CP_Q);
+          if (promoRank) chPushPromo(mv, i, nr * 8 + c, 0);
           else {
             chPush(mv, i, nr * 8 + c, 0);
             int sr = s == 1 ? 6 : 1;
@@ -117,7 +122,10 @@ static void chGen(const ChPos& p, std::vector<ChMove>& mv, bool capsOnly = false
           int cc = c + dc;
           if (cc < 0 || cc > 7) continue;
           int to = nr * 8 + cc;
-          if (p.b[to] * s < 0) chPush(mv, i, to, 1, promoRank ? CP_Q : 0);
+          if (p.b[to] * s < 0) {
+            if (promoRank) chPushPromo(mv, i, to, 1);
+            else chPush(mv, i, to, 1);
+          }
           else if (to == p.ep) chPush(mv, i, to, 3);
         }
       }

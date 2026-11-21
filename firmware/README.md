@@ -110,8 +110,9 @@ USB-C → USB-A OTG çevirici takıp normal kablo bağla. Powerbank'te de USB-A 
 
 ## İlk açılış
 
-1. **Dokunmatik ayarı:** ekrandaki artıların ortasına sırayla dokun (BOOT ile atlanabilir;
-   sonradan Ayarlar → Ekran → *Dokunmatiği ayarla*).
+1. **Dokunmatik ayarı:** 9 artının ortasına sırayla dokun, sonra 2 doğrulama noktasına. Sonuçta
+   ortalama sapma piksel olarak görünür; yüksekse *Yeniden*. Tırnakla dokunmak daha hassastır.
+   BOOT ile atlanabilir; sonradan Ayarlar → Ekran → *Dokunmatiği ayarla*.
 2. **Wi-Fi:** kayıtlı ağ yoksa Ayarlar → Wi-Fi kendiliğinden açılır. Ağı seç, şifreyi ekrandaki
    klavyeyle yaz. Eski yazılımda kaydedilmiş ağ otomatik alınır.
 3. **Bulut hesabı:** Ayarlar → Bulut hesabı. Alanları ekran klavyesiyle doldurabilir ya da
@@ -169,4 +170,10 @@ Bluetooth bağlıyken Wi-Fi gerekmez: plan, tikler, sayaç, saat, bildirimler ve
 - Renkler `ui/theme.h`, simgeler `ui/icons.h` (48'lik ızgarada vektör), logo `tools/make_logo.py`,
   yazı tipleri `tools/make_fonts.py` (Inter, SIL Open Font License 1.1).
 - Müzik yazılımı `src/music/` (ESP32-A2DP ve libhelix), Lua 5.4 `lib/lua/` (MIT).
+- Dokunmatik: `core/touch.h` (XPT2046, eksen başına 5 ölçümün ortancası), `core/calib.h`
+  (9 noktadan en küçük karelerle afin dönüşüm: ölçek, kayma, eksen takası, dönüklük), `os/calibrate.h`.
+- **Testler:** `test/host/run.sh test` gerçek kodu bilgisayarda AddressSanitizer ve
+  UndefinedBehaviorSanitizer ile derler; birim testlerini (satranç perft, hesap makinesi, kalibrasyon,
+  sudoku, Lua, Türkçe metin, çekirdek) ve bütün ekran senaryolarını çalıştırır. GitHub'da her derlemeden
+  önce çalışır; geçmezse sürüm çıkmaz. `run.sh preview` ekran görüntülerini `test/host/out/` klasörüne yazar.
 - Derleme ve sürüm yayınlama `.github/workflows/firmware.yml` ile GitHub'da yapılır.

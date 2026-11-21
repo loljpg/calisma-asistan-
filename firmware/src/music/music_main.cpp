@@ -893,6 +893,7 @@ void setup() {
   cfg.x2 = prefs.getInt("cx2", cfg.x2);
   cfg.y1 = prefs.getInt("cy1", cfg.y1);
   cfg.y2 = prefs.getInt("cy2", cfg.y2);
+  touchLoadCal(prefs);
   cfg.bright = constrain(prefs.getInt("bri", 255), 16, 255);
   prefs.end();
   themeApply();

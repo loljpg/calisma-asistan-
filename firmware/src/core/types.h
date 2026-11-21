@@ -52,7 +52,6 @@ struct Config {
   bool calibrated = false, swapXY = false;
   int x1 = 400, x2 = 3480, y1 = 520, y2 = 3520;
   bool pomodoro = false;
-  int theme = 0;           // eski tema seçimi (DAXEN tek, koyu temadır; yalnızca geriye uyum)
   bool coverTheme = false;  // çalan şarkının kapak rengi vurgu rengi olsun
   int bright = 255;         // ekran parlaklığı (16-255)
   bool nightDim = true;     // 22:00-07:00 arası ekran kısılır

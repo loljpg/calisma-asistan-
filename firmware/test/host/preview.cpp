@@ -1,0 +1,391 @@
+// DAXEN VANE arayüz önizlemesi (bilgisayarda): gerçek arayüz kodunu sahte ekranla derler,
+// her senaryonun ekranını out/ klasörüne yazar. Senaryo adı verilirse yalnız o çalışır.
+#include "host_sys.h"
+
+int main(int argc, char** argv) {
+  setupState();
+  std::string only = argc > 1 ? argv[1] : "";
+  auto want = [&](const char* n) { return only.empty() || only == n; };
+
+  if (want("logo")) {
+    fillBg(0, 0, 320, 240);
+    drawLogo(LOGO_L, LOGO_L_W, LOGO_L_H, (320 - LOGO_L_W) / 2, 78);
+    tft.fillRect(130, 176, 60, 2, C_LINE);
+    tft.fillRect(130, 176, 24, 2, C_ACC);
+    shot("00-acilis");
+  }
+  if (want("icons")) {
+    fillBg(0, 0, 320, 240);
+    for (int i = 1; i < I_COUNT; i++) {
+      int x = ((i - 1) % 11) * 29 + 4, y = ((i - 1) / 11) * 29 + 4;
+      drawIcon(i, x, y, 24, C_TEXT, C_BG);
+    }
+    shot("01-simgeler");
+    fillBg(0, 0, 320, 240);
+    for (int i = 1; i < I_COUNT; i++) {
+      int x = ((i - 1) % 16) * 20 + 2, y = ((i - 1) / 16) * 22 + 4;
+      drawIcon(i, x, y, 16, C_TEXT, C_BG);
+    }
+    shot("01-simgeler16");
+  }
+  if (want("home")) {
+    homeShow();
+    for (int i = 0; i < 30; i++) step(70);
+    shot("10-ana");
+    swItemId = "10:10";
+    swDers = "Kimya";
+    swKonu = "Mol kavramı";
+    swDk = 30;
+    swRunning = true;
+    swStart = g_ms - 754000;
+    homeShow();
+    step(1000);
+    shot("11-ana-kronometre");
+    swRunning = false;
+    swAccMs = 0;
+    swItemId = "";
+    uiNotif(notifs[0]);
+    shot("12-ana-bildirim");
+    bannerUntil = 0;
+    homeShow();
+    toast("Telefonla eşleşti");
+    shot("13-ana-balon");
+    toastUntil = 0;
+  }
+  if (want("launcher")) {
+    launcherShow();
+    shot("20-uygulamalar");
+    launcherSwipe(SW_LEFT);
+    shot("21-uygulamalar-2");
+    lnPage = 0;
+  }
+  if (want("yks")) {
+    yksTab = 0;
+    appOpen(&APP_YKS);
+    shot("30-yks-plan");
+    hold(150, HDR_H + 2 * YKS_ROW_H + 20);
+    shot("31-yks-menu");
+    ov = Overlay();
+    yksSetTab(1);
+    shot("32-yks-sayac");
+    selectForTimer(view.items[2]);
+    timerToggleRun();
+    step(1500);
+    yksDraw(true);
+    shot("33-yks-sayac-calisiyor");
+    timerReset();
+    yksSetTab(2);
+    shot("34-yks-ozet");
+  }
+  if (want("settings")) {
+    appOpen(&APP_SETTINGS);
+    shot("40-ayarlar");
+    setGo(SP_WIFI);
+    shot("41-wifi");
+    tap(100, WIFI_LIST_Y + 2 * WIFI_ROW + 10);
+    shot("42-wifi-sifre");
+    for (const char* k : {"s", "i", "f", "r", "e"}) {
+      (void)k;
+    }
+    kbm.value = "gizli123";
+    kbm.cur = kbm.value.length();
+    kbmDraw();
+    shot("42b-wifi-sifre-yazili");
+    kbmFinish(false);
+    setGo(SP_BT);
+    shot("43-bluetooth");
+    setGo(SP_DISPLAY);
+    shot("44-ekran");
+    setGo(SP_ACCOUNT);
+    shot("45-hesap");
+    setGo(SP_STORAGE);
+    shot("46-depolama");
+    setGo(SP_UPDATE);
+    shot("47-guncelleme");
+    setGo(SP_SYSTEM);
+    shot("48-sistem");
+  }
+  if (want("kb")) {
+    textInput("Not başlığı", "", nullptr);
+    kbm.kb.layer = 1;
+    kbmDraw();
+    shot("49-klavye-123");
+    kbm.kb.layer = 2;
+    kbmDraw();
+    shot("49b-klavye-isaret");
+    kbmFinish(false);
+  }
+  if (want("phone")) {
+    appOpen(&APP_NOTIFS);
+    shot("50-bildirimler");
+    tap(100, HDR_H + 20);
+    shot("51-bildirim");
+    appOpen(&APP_MEDIA);
+    shot("52-medya");
+  }
+  if (want("files")) {
+    appOpen(&APP_FILES);
+    shot("60-dosyalar");
+    hold(100, HDR_H + 20);
+    shot("61-dosya-menu");
+    ov = Overlay();
+    dialog("Klasör silinsin mi?", "notlar ve içindeki her şey silinecek.", {"Vazgeç", "Sil"}, nullptr);
+    shot("62-iletisim");
+    ov = Overlay();
+  }
+  if (want("games")) {
+    appOpen(&APP_GAMES);
+    shot("70-oyunlar");
+    appOpenChild(&APP_BLOKPATLAT);
+    shot("71-blokpatlat");
+  }
+  if (want("s2")) {
+    weather.feels = 7.2f;
+    weather.hum = 81;
+    weather.wind = 12.4f;
+    weather.isDay = true;
+    weather.code = 61;
+    weather.hours = 24;
+    weather.hHour0 = 22;
+    for (int i = 0; i < 24; i++) {
+      weather.hTemp[i] = (int8_t)(9 + 4 * sin((i - 14) / 24.0 * 6.28));
+      weather.hRain[i] = i > 8 && i < 14 ? 60 : 0;
+      weather.hCode[i] = 3;
+    }
+    weather.days = 7;
+    int codes[] = {61, 3, 0, 2, 80, 71, 0};
+    for (int i = 0; i < 7; i++) {
+      weather.dWday[i] = (5 + i) % 7;
+      weather.dMax[i] = 12 - i;
+      weather.dMin[i] = 4 - i / 2;
+      weather.dCode[i] = codes[i];
+      weather.dRain[i] = i == 0 ? 70 : (i == 4 ? 40 : 0);
+    }
+    weatherAt = g_ms - 5 * 60000;
+    appOpen(&APP_WEATHER);
+    shot("80-hava");
+    appOpen(&APP_CALC);
+    for (const char* k : {"sin", "3", "0", ")", "×", "2", "^", "3", "+", "√", "2"}) calcKey(k);
+    calcDraw(false);
+    shot("81-hesap");
+    calcKey("=");
+    shot("82-hesap-sonuc");
+    appOpen(&APP_TODO);
+    todos = {TodoItem("Fizik denemesi çöz", false), TodoItem("Kütüphaneye kitabı götür", true), TodoItem("Matematik türev tekrarı", false)};
+    todoLoaded = true;
+    tdDraw(true);
+    shot("83-yapilacaklar");
+    alarmN = 2;
+    alarms[0].h = 6; alarms[0].m = 45; alarms[0].days = 0x1F;
+    alarms[1].h = 9; alarms[1].m = 30; alarms[1].days = 0x60; alarms[1].on = false;
+    alarmsLoaded = true;
+    clkTab = 0;
+    appOpen(&APP_CLOCK);
+    shot("84-alarm");
+    tap(100, HDR_H + 20);
+    shot("85-alarm-duzenle");
+    clkBack();
+    clkSetTab(1);
+    shot("86-sayac");
+    clkSetTab(2);
+    cwRunning = true; cwStart = g_ms - 83400; cwLaps = {20100, 45500};
+    clkDrawStopwatch();
+    shot("87-kronometre");
+    cwRunning = false;
+    clkSetTab(3);
+    shot("88-dunya");
+    ringStartNow("Alarm 06:45");
+    shot("89-alarm-caliyor");
+    ringOn = false;
+    appOpen(&APP_TRANSFER);
+    shot("90-aktarim");
+    // notlar
+    { sdMkdirs("/daxen/notlar"); sdWrite("/daxen/notlar/Alışveriş.txt", "Alışveriş listesi\nsüt, ekmek, peynir\nfotokopi: fizik notları\n\nYarın 10:00 kütüphane"); }
+    appOpen(&APP_NOTES);
+    shot("91-notlar");
+    edOpen("/tmp-yok.txt");
+    edText = "Türev kuralları\nf(x) = xⁿ ise f'(x) = n·xⁿ⁻¹. Çarpımın türevi: (uv)' = u'v + uv'. Bölümün türevi ise (u/v)' = (u'v − uv')/v² olur. Zincir kuralı en çok karıştırılan kısım.";
+    edCur = edText.length();
+    edKb = true;
+    edDrawAll();
+    shot("92-not-metin");
+    edKb = false;
+    edDrawAll();
+    shot("93-not-metin-klavyesiz");
+    ntsMode = 0;
+    ntsPath = "/daxen/notlar/El.el";
+    hwStrokes.clear(); hwPts.clear();
+    hwOpen("/yok.el");
+    // el yazısı benzeri çizgiler
+    for (int k = 0; k < 3; k++) {
+      shellTouch(true, 30 + k * 60, 80);
+      hwRaw(TE_DOWN, 30 + k * 60, 80);
+      for (int i = 1; i < 30; i++) hwRaw(TE_MOVE, 30 + k * 60 + i * 2, 80 + (int)(12 * sin(i / 3.0)));
+      hwRaw(TE_UP, 0, 0);
+    }
+    shot("94-not-el");
+    ntsMode = 0;
+  }
+  if (want("s4")) {
+    appOpen(&APP_GAMES);
+    shot("a0-oyunlar");
+    appOpenChild(&APP_SNAKE);
+    snDraw(true);
+    for (int i = 0; i < 6; i++) { snPaused = false; snStep(); }
+    snFood = 10 * SN_W + 20; snDrawField(); snDrawScore();
+    shot("a1-yilan");
+    appExit();
+    appOpenChild(&APP_2048);
+    uint8_t b[16] = {1, 2, 3, 0, 4, 5, 6, 0, 7, 8, 9, 1, 10, 11, 2, 1};
+    memcpy(g2b, b, 16); g2Loaded = true; g2Score = 3480; g2Best = 9120;
+    g2Draw(true);
+    shot("a2-2048");
+    appExit();
+    appOpenChild(&APP_MINES);
+    mnNew(); mnOpenAt(5 * MN_W + 6); mnToggleFlag(0);
+    mnDraw(true);
+    shot("a3-mayin");
+    appExit();
+    appOpenChild(&APP_SUDOKU);
+    sdkNew(1); sdkLoaded = true; sdkSel = 40; sdkCur[sdkGiven[0] ? 1 : 0] = 5;
+    sdkDraw(true);
+    shot("a4-sudoku");
+    appExit();
+    appOpenChild(&APP_CHESS);
+    chInit(chP); chLoaded = true; chHuman = 1;
+    ChMove m{52, 36, 0, 0}; chApply(m);
+    ChMove m2{12, 28, 0, 0}; chApply(m2);
+    chSel = 62; chDraw(true);
+    shot("a5-satranc");
+    { uint32_t t0 = clock(); ChMove bm; chNodeLimit = 20000; chBest(chP, 2, 0, bm); printf("satranç orta: %u düğüm, %ld ms (bilgisayarda)\n", chNodes, (clock() - t0) * 1000 / CLOCKS_PER_SEC); }
+    appExit();
+    { std::string t; for (int i = 0; i < 30; i++) t += "1919 senesi Mayısının 19 uncu günü Samsun'a çıktım. Vaziyet ve manzarai umumiye: Osmanlı Devletinin dahil bulunduğu grup, Harbi Umumide mağlup olmuş, Osmanlı ordusu her tarafta zedelenmiş, şeraiti ağır bir mütarekename imzalanmıştı. "; sdMkdirs("/daxen/kitaplar"); sdWrite("/daxen/kitaplar/Nutuk (ilk bölüm).txt", t.c_str()); }
+    appOpen(&APP_READER);
+    shot("b0-okuyucu-liste");
+    tap(100, HDR_H + 15);
+    shot("b1-okuyucu-sayfa");
+    rdBar = true; rdShowPage();
+    shot("b2-okuyucu-menu");
+    rdBar = false;
+    appOpen(&APP_CARDS);
+    shot("b3-kartlar");
+    kdOpenDeck(1); kdCur = 3; kdDraw(true);
+    shot("b4-kart-on");
+    kdFlip = true; kdDrawCard();
+    shot("b5-kart-arka");
+    appOpen(&APP_LIGHT);
+    for (int i = 0; i < 60; i++) { g_ldr = 1800 + 900 * sin(i / 8.0); g_ms += 520; lmTick(); }
+    shot("b6-isik");
+    appOpen(&APP_DRAW);
+    drEdit("/tmp-cizim.cizim");
+    for (int k = 0; k < 4; k++) { drColor = k * 2; drRaw(TE_DOWN, 40 + k * 60, 120); for (int i = 1; i < 25; i++) drRaw(TE_MOVE, 40 + k * 60 + i * 2, 120 + (int)(30 * sin(i / 4.0))); }
+    drPalette = true; drToolbar();
+    shot("b7-cizim");
+    drPalette = false; drEditing = false; drSt.clear(); drPts.clear(); drCol.clear();
+    appOpen(&APP_PHOTOS);
+    shot("b8-foto-liste");
+    phIdx = 0; phShow(); phBar = true; phDrawBar();
+    shot("b9-foto");
+    phIdx = -1;
+    appOpen(&APP_MUSIC);
+    shot("c0-muzik-ana");
+  }
+  if (want("s5")) {
+    sdRemoveTree("/daxen/uygulamalar");
+    launcherShow();
+    lnPage = lnPages() - 1; launcherDraw(true);
+    shot("d0-uygulamalar-lua");
+    for (int i = 0; i < luaAppCount(); i++) printf("lua: %s\n", luaAppLabel(i).c_str());
+    auto byName = [&](const char* n) { for (int i = 0; i < luaAppCount(); i++) if (luaAppLabel(i) == n) return i; return 0; };
+    luaAppOpen(byName("Merhaba"));
+    tap(160, 120); tap(160, 120); tap(160, 120); step(40);
+    shot("d1-lua-merhaba");
+    luaAppOpen(byName("Zar"));
+    tap(160, 120); step(500);
+    shot("d2-lua-zar");
+    luaAppOpen(byName("Sayaç"));
+    tap(250, 190); tap(250, 190); tap(250, 190); tap(60, 190); step(40);
+    shot("d3-lua-sayac");
+    luaAppOpen(byName("Top"));
+    drag(100, 200, 200, 80); step(600);
+    shot("d4-lua-top");
+    printf("lua bellek: %u / %u\n", (unsigned)luaMem, (unsigned)luaMemMax);
+    FILE* f = fopen((g_sdroot + "/daxen/uygulamalar/hatali.lua").c_str(), "w");
+    fputs("-- ad: Hatalı örnek\nfunction ciz()\n  ekran.temizle()\n  local t = nil\n  ekran.yazi(t.ad, 10, 40)\nend\n", f);
+    fclose(f);
+    luaScanned = false;
+    luaAppOpen(byName("Hatalı örnek"));
+    step(40);
+    shot("d5-lua-hata");
+    f = fopen((g_sdroot + "/daxen/uygulamalar/dongu.lua").c_str(), "w");
+    fputs("-- ad: Döngü\nfunction dokun() while true do end end\n", f);
+    fclose(f);
+    luaScanned = false;
+    luaAppOpen(byName("Döngü"));
+    g_ms_hook = true; tap(100, 100); step(40); g_ms_hook = false; step(40);
+    shot("d6-lua-zamanasimi");
+    appExit();
+    luaScanned = false;
+    luaAppOpen(byName("Zamanlayıcı"));
+    step(40); tap(160, 190); step(40);
+    for (int i = 0; i < 3; i++) step(1000);
+    shot("d7-lua-zamanlayici");
+    appExit();
+  }
+  if (want("kal")) {
+    calScreen(CAL_PX[0], CAL_PY[0], "Dokunmatik ayarı", "Artının tam ortasına dokun, kısa bir an tut", 0, 9, "");
+    shot("f0-kalibrasyon-1");
+    calScreen(CAL_PX[4], CAL_PY[4], "Dokunmatik ayarı", "Artının tam ortasına dokun, kısa bir an tut", 4, 9, "Biraz daha uzun ve sabit tut");
+    shot("f1-kalibrasyon-5");
+    calScreen(CAL_PX[8], CAL_PY[8], "Dokunmatik ayarı", "Artının tam ortasına dokun, kısa bir an tut", 8, 9, "");
+    shot("f2-kalibrasyon-9");
+    calScreen(CAL_VX[0], CAL_VY[0], "Doğrulama", "Artının tam ortasına dokun, kısa bir an tut", 0, 2, "");
+    shot("f3-dogrulama");
+    calResult(1.4f, 1.1f, 2.6f, true);
+    shot("f4-sonuc-iyi");
+    calResult(7.9f, 4.2f, 11.5f, false);
+    shot("f5-sonuc-kotu");
+  }
+  if (want("s6")) {
+    // Çekirdek süreç tablosu (önizlemede kesme yok: istatistikler örnek)
+    auto nop = []() {};
+    const char* names[] = {"dokunma", "kabuk", "bluetooth", "saat", "ışık"};
+    uint16_t per[] = {10, 16, 10, 200, 50};
+    uint16_t cpu[] = {21, 64, 12, 3, 4};
+    uint32_t runs[] = {512340, 320112, 512044, 25602, 102411};
+    for (int i = 0; i < 5; i++) {
+      Proc* p = kFind(kService(names[i], per[i], nop));
+      p->cpu10 = cpu[i]; p->runs = runs[i]; p->lastUs = 40 + i * 70; p->maxUs = 1800 + i * 900; p->totalUs = (uint64_t)runs[i] * 120;
+      p->startedMs = 0;
+    }
+    Proc* n = kFind(kAdopt("ağ", nullptr, 1, 0, 16384)); n->startedMs = 0;
+    int lp = kSpawn("lua:zamanlayici", [](Proc*) {}, 14 * 1024, true);
+    Proc* l = kFind(lp); l->done = false; l->cpu10 = 9; l->runs = 3120; l->lastUs = 310; l->maxUs = 5200; l->totalUs = 960000; l->startedMs = g_ms - 754000;
+    kLoad10 = 114;
+    appOpen(&APP_TASKS);
+    shot("e0-gorevler");
+    tap(160, TM_Y + 1 * TM_RH + 10);
+    shot("e1-gorev-servis");
+    tmBack();
+    tmTop = 9; tmDraw(false);
+    { int ix = 0; for (size_t i = 0; i < tmPids.size(); i++) if (tmPids[i] == lp) ix = i; tap(160, TM_Y + (ix - tmTop) * TM_RH + 10); }
+    shot("e2-gorev-lua");
+    tap(160, SCR_H - 24);
+    shot("e3-gorev-sonlandir");
+    ov = Overlay();
+    // satranç motoru süreçte: insan hamlesi → düşünme → yanıt
+    appOpen(&APP_GAMES);
+    appOpenChild(&APP_CHESS);
+    chHuman = 1; chNewGame(); chDraw(true);
+    auto sqXY = [](int sq, int& x, int& y) { int v = chView(sq); x = CH_X + (v % 8) * CH_SQ + 10; y = CH_Y + (v / 8) * CH_SQ + 10; };
+    int x, y;
+    sqXY(52, x, y); tap(x, y);
+    sqXY(36, x, y); tap(x, y);
+    printf("satranç: hamle sonrası meşgul=%d sıra=%d\n", (int)chAiBusy, chP.side);
+    step(100);
+    printf("satranç: yanıt sonrası meşgul=%d sıra=%d geçmiş=%d son=%d-%d\n", (int)chAiBusy, chP.side, (int)chHist.size(), chLastFrom, chLastTo);
+    shot("e4-satranc-yanit");
+  }
+  printf("tamam\n");
+  return 0;
+}

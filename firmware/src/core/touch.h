@@ -1,10 +1,12 @@
 #pragma once
 // Dokunmatik (XPT2046) ve buton. Ana yazılım ile müzik yazılımı ortak kullanır.
 #include <Arduino.h>
+#include <Preferences.h>
 #include "types.h"
+#include "calib.h"
 
-// XPT2046 yazılımsal SPI ile okunur (VSPI SD kartın). Okuma sırası ve ortalama
-// XPT2046_Touchscreen kütüphanesiyle aynıdır; eski kalibrasyon geçerli kalır.
+// XPT2046 yazılımsal SPI ile okunur (VSPI SD kartın). Okuma sırası XPT2046_Touchscreen
+// kütüphanesiyle aynıdır (eski kalibrasyon geçerli kalır); her eksen 5 kez ölçülür, ortancası alınır.
 struct TouchRaw {
   int x = 0, y = 0, z = 0;
 };
@@ -37,12 +39,9 @@ static uint16_t tsXfer16(uint16_t out) {
   return (hi << 8) | tsXfer(out & 0xFF);
 }
 
-static int16_t besttwoavg(int16_t x, int16_t y, int16_t z) {
-  int16_t da = abs(x - y), db = abs(x - z), dc = abs(z - y);
-  if (da <= db && da <= dc) return (x + y) >> 1;
-  if (db <= da && db <= dc) return (x + z) >> 1;
-  return (y + z) >> 1;
-}
+// Basınç eşiği: basış 400, bırakış 75 altı (arada kalan hafif temas önceki durumu korur)
+static const int TS_Z_PRESS = 400, TS_Z_RELEASE = 75;
+static const int TS_N = 5;  // eksen başına ölçüm; ortancası alınır (tek tük sıçramalar elenir)
 
 static TouchRaw tsRead() {
   static bool awake = false;
@@ -56,31 +55,35 @@ static TouchRaw tsRead() {
     return r;
   }
   awake = true;
-  int16_t d[6] = {0, 0, 0, 0, 0, 0};
+  int a[TS_N], b[TS_N];
   digitalWrite(TOUCH_CS, LOW);
   tsXfer(0xB1);
   int16_t z1 = tsXfer16(0xC1) >> 3;
   int z = z1 + 4095;
   int16_t z2 = tsXfer16(0x91) >> 3;
   z -= z2;
-  if (z >= 400) {
-    tsXfer16(0x91);  // ilk ölçüm gürültülü
-    d[0] = tsXfer16(0xD1) >> 3;
-    d[1] = tsXfer16(0x91) >> 3;
-    d[2] = tsXfer16(0xD1) >> 3;
-    d[3] = tsXfer16(0x91) >> 3;
+  bool on = z >= TS_Z_PRESS;
+  if (on) {
+    // XPT2046 ardışık çalışır: her aktarım bir önceki komutun sonucunu getirir.
+    tsXfer16(0x91);  // ilk ölçüm gürültülü, atılır
+    for (int i = 0; i < TS_N - 1; i++) {
+      a[i] = tsXfer16(0xD1) >> 3;
+      b[i] = tsXfer16(0x91) >> 3;
+    }
   }
-  d[4] = tsXfer16(0xD0) >> 3;  // son ölçüm, ardından bekleme kipi (IRQ açık)
-  d[5] = tsXfer16(0) >> 3;
+  int la = tsXfer16(0xD0) >> 3;  // son ölçüm, ardından bekleme kipi (IRQ açık)
+  int lb = tsXfer16(0) >> 3;
   digitalWrite(TOUCH_CS, HIGH);
   lastAt = millis();
-  if (z < 400) {
-    if (z < 75) awake = false;
+  if (!on) {
+    if (z < TS_Z_RELEASE) awake = false;
     last = r;
     return r;
   }
-  r.x = besttwoavg(d[0], d[2], d[4]);
-  r.y = besttwoavg(d[1], d[3], d[5]);
+  a[TS_N - 1] = la;
+  b[TS_N - 1] = lb;
+  r.x = calMedian(a, TS_N);
+  r.y = calMedian(b, TS_N);
   r.z = z;
   last = r;
   return r;
@@ -88,46 +91,86 @@ static TouchRaw tsRead() {
 
 static bool tsTouched() { return tsRead().z > 0; }
 
-static bool getTouch(int& x, int& y) {
-  TouchRaw p = tsRead();
-  if (!p.z) return false;
-  int rx = cfg.swapXY ? p.y : p.x, ry = cfg.swapXY ? p.x : p.y;
-  int dx = cfg.x2 - cfg.x1, dy = cfg.y2 - cfg.y1;
-  if (dx == 0 || dy == 0) return false;
-  x = 20 + (long)(rx - cfg.x1) * 280 / dx;
-  y = 20 + (long)(ry - cfg.y1) * 200 / dy;
-  x = constrain(x, 0, SCREEN_W - 1);
-  y = constrain(y, 0, SCREEN_H - 1);
+// --- Kalibrasyon (core/calib.h): ham → ekran ---
+static TouchCal tcal;
+
+static void touchUseLegacy() { tcal = calFromLegacy(cfg.swapXY, cfg.x1, cfg.x2, cfg.y1, cfg.y2); }
+
+// "cs" ad alanı açıkken çağrılır. Afin kayıt yoksa eski iki eksenli kayıt kullanılır.
+static void touchLoadCal(Preferences& p) {
+  if (p.getBool("caff", false)) {
+    tcal.a = p.getFloat("ca", 0);
+    tcal.b = p.getFloat("cb", 0);
+    tcal.c = p.getFloat("cc", 0);
+    tcal.d = p.getFloat("cd", 0);
+    tcal.e = p.getFloat("ce", 0);
+    tcal.f = p.getFloat("cf", 0);
+    tcal.ok = (tcal.a != 0 || tcal.b != 0) && (tcal.d != 0 || tcal.e != 0);
+    if (tcal.ok) return;
+  }
+  touchUseLegacy();
+}
+
+static void touchStoreCal(Preferences& p) {
+  p.putBool("caff", tcal.ok);
+  p.putFloat("ca", tcal.a);
+  p.putFloat("cb", tcal.b);
+  p.putFloat("cc", tcal.c);
+  p.putFloat("cd", tcal.d);
+  p.putFloat("ce", tcal.e);
+  p.putFloat("cf", tcal.f);
+}
+
+static bool touchMap(int rx, int ry, int& x, int& y) {
+  if (!tcal.ok) touchUseLegacy();
+  if (!tcal.ok) return false;
+  float fx, fy;
+  calApply(tcal, rx, ry, fx, fy);
+  x = constrain((int)lroundf(fx), 0, SCREEN_W - 1);
+  y = constrain((int)lroundf(fy), 0, SCREEN_H - 1);
   return true;
 }
 
-// Dokunuşu bekler; BOOT'a basılırsa ya da 60 sn dokunulmazsa false döner.
-static bool waitTap(int& rx, int& ry) {
-  while (tsTouched()) delay(10);
-  delay(150);
+static bool getTouch(int& x, int& y) {
+  TouchRaw p = tsRead();
+  if (!p.z) return false;
+  return touchMap(p.x, p.y, x, y);
+}
+
+// Kalibrasyon için tek nokta: basışı bekler, oturduktan sonra ~0,6 sn boyunca ölçer, ortancayı
+// verir. 0: tamam, 1: BOOT ile atlandı / zaman aşımı, 2: kısa ya da titrek basış (tekrar).
+static int touchCapture(int& rx, int& ry, int& spread) {
+  while (tsTouched()) delay(5);
+  delay(120);
   uint32_t t0 = millis();
   while (!tsTouched()) {
     if (digitalRead(PIN_BOOT) == LOW || millis() - t0 > 60000) {
       while (digitalRead(PIN_BOOT) == LOW) delay(10);
-      return false;
+      return 1;
     }
-    delay(10);
+    delay(5);
   }
-  long sx = 0, sy = 0;
+  static int xs[64], ys[64];
   int n = 0;
+  delay(60);  // parmak otursun
   t0 = millis();
-  while (millis() - t0 < 1500) {
+  while (millis() - t0 < 600 && n < 64) {
     TouchRaw p = tsRead();
     if (!p.z) break;
-    sx += p.x;
-    sy += p.y;
+    xs[n] = p.x;
+    ys[n] = p.y;
     n++;
-    delay(15);
+    delay(8);
   }
-  while (tsTouched()) delay(10);
-  if (!n) return false;
-  rx = sx / n;
-  ry = sy / n;
-  return true;
+  while (tsTouched()) delay(5);
+  if (n < 8) return 2;
+  rx = calMedian(xs, n);
+  ry = calMedian(ys, n);
+  // yayılım: ortancaya mutlak uzaklıkların ortancası (iki eksenin büyüğü)
+  for (int i = 0; i < n; i++) {
+    xs[i] = abs(xs[i] - rx);
+    ys[i] = abs(ys[i] - ry);
+  }
+  spread = std::max(calMedian(xs, n), calMedian(ys, n));
+  return spread > 40 ? 2 : 0;
 }
-

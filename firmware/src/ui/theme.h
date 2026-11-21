@@ -107,10 +107,6 @@ static int textW(const String& s, const uint8_t* f) {
   return tft.textWidth(s);
 }
 
-static int fontH(const uint8_t* f) {
-  useFont(f);
-  return tft.fontHeight();
-}
 
 // Sığmazsa sonuna "…" koyarak kısaltır.
 static String fit(const String& s, const uint8_t* f, int maxW) {

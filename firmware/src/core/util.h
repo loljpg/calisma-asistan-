@@ -48,7 +48,7 @@ static String fmtMin(int m) {
 }
 
 static String fmtClock(uint32_t sec) {
-  char b[12];
+  char b[20];
   uint32_t h = sec / 3600, m = (sec % 3600) / 60, s = sec % 60;
   if (h) snprintf(b, sizeof b, "%u:%02u:%02u", (unsigned)h, (unsigned)m, (unsigned)s);
   else snprintf(b, sizeof b, "%02u:%02u", (unsigned)m, (unsigned)s);

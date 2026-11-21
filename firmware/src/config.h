@@ -15,7 +15,6 @@
 #endif
 
 #define GITHUB_REPO "loljpg/calisma-asistan-"
-#define SYSTEM_NAME "DAXEN VANE"
 
 // ---------- Hava durumu (Sakarya) ----------
 #define WEATHER_CITY "Sakarya"
@@ -57,7 +56,6 @@
 #define VIEW_EVERY_MS 30000UL
 #define STATUS_EVERY_MS 60000UL
 #define WEATHER_EVERY_MS (15UL * 60UL * 1000UL)
-#define OTA_EVERY_MS (12UL * 60UL * 60UL * 1000UL)
 #define POMODORO_WORK_SEC (25 * 60)
 #define TIMER_POLL_MS 10000UL      // canlı bağlantı yokken ortak kronometre bu aralıkla okunur
 #define VIEW_POLL_LIVE_MS (5UL * 60UL * 1000UL)  // canlı bağlantı varken plan yine de ara sıra okunur

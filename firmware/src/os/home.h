@@ -523,7 +523,6 @@ static void shellTick() {
 // ============================================================================
 // Sistemin çağırdığı kancalar
 // ============================================================================
-static void uiRedraw(bool full) { shellRedraw(full); }
 static void uiToast(const String& msg) {
   if (kbm.active || ringOn) return;
   toast(msg);
@@ -560,7 +559,4 @@ static void uiDataChanged() {
   else if (shScreen == SH_APP && curApp && !curApp->raw && curApp->draw) {
     if (curApp == appTable()[AID_YKS] || curApp == appTable()[AID_SETTINGS] || curApp == appTable()[AID_WEATHER]) curApp->draw(false);
   }
-}
-static void uiWifiChanged() {
-  if (shScreen == SH_HOME && !kbm.active && !ov.kind && !bannerUntil && !toastUntil) homeDrawStatus();
 }

@@ -34,7 +34,6 @@ static bool wifiConnected();
 static String wifiSsid();
 static String wifiIp();
 static int wifiRssi();
-static String wifiMac();
 
 // --- Sistem ---
 static void sysRequestOta();
@@ -64,7 +63,6 @@ static bool webRunning();
 static String webStatus();
 static int webProgress();  // yükleme sürüyorsa yüzde, yoksa -1
 static int webUploadCount();
-static void webTick();
 
 // --- Müzik yazılımı (kulaklıkla SD müzik) ---
 // 0: hazır (SD'de var), 1: SD'de yok, 2: SD kart yok
@@ -74,7 +72,6 @@ static void musicDownload();  // yeniden başlayıp indirir
 static void musicLaunch();    // müzik yazılımını açar (yeniden başlar)
 
 // --- Arayüz kancaları ---
-static void uiRedraw(bool full);
 static void uiToast(const String& msg);
 static void uiNotif(const Notif& n);
 static void uiNotifsChanged();
@@ -85,4 +82,3 @@ static void uiPaletteChanged();
 static void uiOtaProgress();
 static void uiSplash(const String& msg);
 static void uiDataChanged();
-static void uiWifiChanged();

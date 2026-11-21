@@ -26,18 +26,17 @@ enum { IC_END = 0, IC_L, IC_P, IC_Q, IC_R, IC_C, IC_A, IC_D, IC_F, IC_T };
 #define E_ IC_END
 
 enum Icon : uint8_t {
-  I_NONE, I_HOME, I_APPS, I_SETTINGS, I_WIFI, I_WIFI_OFF, I_BT, I_SD, I_CHIP, I_CODE, I_NOTES, I_FOLDER,
-  I_FILE, I_TARGET, I_TIMER, I_HEADPHONES, I_REMOTE, I_BELL, I_CALC, I_CLOCK, I_CLOUD, I_SUN, I_PARTLY,
+  I_NONE, I_APPS, I_SETTINGS, I_WIFI, I_WIFI_OFF, I_BT, I_SD, I_CHIP, I_CODE, I_NOTES, I_FOLDER,
+  I_FILE, I_TARGET, I_HEADPHONES, I_REMOTE, I_BELL, I_CALC, I_CLOCK, I_CLOUD, I_SUN, I_PARTLY,
   I_FOG, I_RAIN, I_SNOW, I_STORM, I_MOON, I_TODO, I_TRANSFER, I_PHOTO, I_BOOK, I_PENCIL, I_CARDS, I_LIGHT,
-  I_GAMEPAD, I_INFO, I_BACK, I_RIGHT, I_UP, I_DOWN, I_CLOSE, I_CHECK, I_PLUS, I_MINUS, I_TRASH, I_PLAY,
+  I_GAMEPAD, I_BACK, I_RIGHT, I_UP, I_DOWN, I_CLOSE, I_CHECK, I_PLUS, I_MINUS, I_TRASH, I_PLAY,
   I_PAUSE, I_NEXT, I_PREV, I_SHUFFLE, I_REPEAT, I_VOLUME, I_REFRESH, I_KEYBOARD, I_ERASER, I_UNDO,
-  I_LOCK, I_SEARCH, I_PHONE, I_FLAME, I_CHART, I_NOTE, I_GLOBE, I_HOURGLASS, I_FLAG, I_MINE, I_SNAKE,
-  I_TILES, I_GRID, I_ROOK, I_BLOCKS, I_EYE, I_TEXT, I_SAVE, I_COPY, I_CUT, I_PASTE, I_POWER, I_UPDATE,
-  I_DISPLAY, I_LIST, I_MORE, I_STOPWATCH, I_ALARM, I_DICE, I_SPEAKER_OFF, I_PULSE,
+  I_LOCK, I_SEARCH, I_PHONE, I_FLAME, I_CHART, I_NOTE, I_GLOBE, I_FLAG, I_MINE, I_SNAKE,
+  I_TILES, I_GRID, I_ROOK, I_BLOCKS, I_EYE, I_TEXT, I_PASTE, I_POWER, I_UPDATE,
+  I_DISPLAY, I_LIST, I_STOPWATCH, I_ALARM, I_DICE, I_SPEAKER_OFF, I_PULSE,
   I_COUNT
 };
 
-static const int8_t ICD_HOME[] = {P_ 3, 6, 22, 24, 8, 42, 22, P_ 4, 11, 18, 11, 40, 37, 40, 37, 18, P_ 4, 20, 40, 20, 29, 28, 29, 28, 40, E_};
 static const int8_t ICD_APPS[] = {R_ 8, 8, 13, 13, R_ 27, 8, 13, 13, R_ 8, 27, 13, 13, R_ 27, 27, 13, 13, E_};
 static const int8_t ICD_SETTINGS[] = {C_ 24, 24, 11, C_ 24, 24, 4, L_ 37, 24, 42, 24, L_ 33, 33, 36, 36, L_ 24, 37, 24, 42, L_ 15, 33, 12, 36,
                                       L_ 11, 24, 6, 24, L_ 15, 15, 12, 12, L_ 24, 11, 24, 6, L_ 33, 15, 36, 12, E_};
@@ -53,7 +52,6 @@ static const int8_t ICD_NOTES[] = {Q_ 5, 11, 6, 29, 6, 37, 14, 37, 42, 11, 42, P
 static const int8_t ICD_FOLDER[] = {Q_ 6, 5, 11, 18, 11, 22, 15, 43, 15, 43, 38, 5, 38, L_ 5, 20, 43, 20, E_};
 static const int8_t ICD_FILE[] = {Q_ 5, 11, 6, 29, 6, 37, 14, 37, 42, 11, 42, P_ 3, 29, 6, 29, 14, 37, 14, E_};
 static const int8_t ICD_TARGET[] = {C_ 24, 24, 15, C_ 24, 24, 6, L_ 24, 3, 24, 13, L_ 24, 35, 24, 45, L_ 3, 24, 13, 24, L_ 35, 24, 45, 24, E_};
-static const int8_t ICD_TIMER[] = {C_ 24, 27, 15, L_ 24, 27, 24, 18, L_ 19, 5, 29, 5, L_ 24, 5, 24, 12, L_ 35, 14, 39, 10, E_};
 static const int8_t ICD_HEADPHONES[] = {A_ 24, 26, 15, 18, 54, R_ 6, 26, 8, 13, R_ 34, 26, 8, 13, E_};
 static const int8_t ICD_REMOTE[] = {R_ 14, 5, 20, 38, T_ 21, 18, 21, 30, 30, 24, L_ 21, 37, 27, 37, E_};
 static const int8_t ICD_BELL[] = {A_ 24, 22, 10, 18, 54, L_ 14, 22, 14, 32, L_ 34, 22, 34, 32, L_ 9, 33, 39, 33, L_ 21, 39, 27, 39, L_ 24, 8, 24, 12, E_};
@@ -81,7 +79,6 @@ static const int8_t ICD_CARDS[] = {R_ 16, 13, 24, 30, P_ 3, 10, 36, 10, 7, 33, 7
 static const int8_t ICD_LIGHT[] = {C_ 24, 24, 7, L_ 24, 4, 24, 11, L_ 24, 37, 24, 44, L_ 4, 24, 11, 24, L_ 37, 24, 44, 24,
                                    L_ 10, 10, 15, 15, L_ 33, 33, 38, 38, L_ 10, 38, 15, 33, L_ 33, 15, 38, 10, E_};
 static const int8_t ICD_GAMEPAD[] = {R_ 5, 14, 38, 22, L_ 11, 25, 21, 25, L_ 16, 20, 16, 30, D_ 30, 22, 2, D_ 36, 28, 2, E_};
-static const int8_t ICD_INFO[] = {C_ 24, 24, 17, D_ 24, 15, 2, L_ 24, 21, 24, 33, E_};
 static const int8_t ICD_BACK[] = {P_ 3, 29, 11, 16, 24, 29, 37, E_};
 static const int8_t ICD_RIGHT[] = {P_ 3, 19, 11, 32, 24, 19, 37, E_};
 static const int8_t ICD_UP[] = {P_ 3, 11, 30, 24, 17, 37, 30, E_};
@@ -114,7 +111,6 @@ static const int8_t ICD_FLAME[] = {P_ 13, 24, 4, 29, 14, 35, 21, 37, 29, 34, 37,
 static const int8_t ICD_CHART[] = {L_ 6, 42, 42, 42, L_ 13, 37, 13, 28, L_ 21, 37, 21, 17, L_ 29, 37, 29, 24, L_ 37, 37, 37, 10, E_};
 static const int8_t ICD_NOTE[] = {C_ 16, 34, 6, L_ 22, 34, 22, 8, L_ 22, 8, 35, 13, L_ 22, 16, 35, 21, L_ 35, 13, 35, 21, E_};
 static const int8_t ICD_GLOBE[] = {C_ 24, 24, 17, L_ 7, 24, 41, 24, A_ 38, 24, 22, 8, 28, A_ 10, 24, 22, 44, 64, E_};
-static const int8_t ICD_HOURGLASS[] = {L_ 12, 6, 36, 6, L_ 12, 42, 36, 42, Q_ 3, 15, 6, 33, 6, 24, 24, Q_ 3, 24, 24, 33, 42, 15, 42, E_};
 static const int8_t ICD_FLAG[] = {L_ 15, 7, 15, 42, Q_ 3, 15, 8, 35, 15, 15, 22, L_ 10, 42, 22, 42, E_};
 static const int8_t ICD_MINE[] = {D_ 24, 24, 8, L_ 24, 7, 24, 13, L_ 24, 35, 24, 41, L_ 7, 24, 13, 24, L_ 35, 24, 41, 24,
                                   L_ 12, 12, 16, 16, L_ 32, 32, 36, 36, L_ 12, 36, 16, 32, L_ 32, 16, 36, 12, E_};
@@ -126,15 +122,11 @@ static const int8_t ICD_ROOK[] = {P_ 12, 15, 17, 15, 8, 20, 8, 20, 12, 22, 12, 2
 static const int8_t ICD_BLOCKS[] = {R_ 7, 7, 15, 15, R_ 7, 26, 15, 15, R_ 26, 26, 15, 15, F_ 30, 11, 7, 7, E_};
 static const int8_t ICD_EYE[] = {A_ 24, 46, 28, 28, 44, A_ 24, 2, 28, 64, 72, A_ 24, 2, 28, 0, 8, C_ 24, 24, 5, E_};
 static const int8_t ICD_TEXT[] = {L_ 11, 10, 37, 10, L_ 24, 10, 24, 40, L_ 18, 40, 30, 40, E_};
-static const int8_t ICD_SAVE[] = {Q_ 5, 7, 7, 34, 7, 41, 14, 41, 41, 7, 41, R_ 15, 7, 15, 10, R_ 14, 27, 20, 14, E_};
-static const int8_t ICD_COPY[] = {R_ 16, 15, 23, 27, P_ 3, 9, 34, 9, 7, 30, 7, E_};
-static const int8_t ICD_CUT[] = {C_ 14, 35, 6, C_ 34, 35, 6, L_ 18, 30, 33, 7, L_ 30, 30, 15, 7, E_};
 static const int8_t ICD_PASTE[] = {R_ 10, 9, 28, 33, R_ 18, 5, 12, 8, L_ 17, 24, 31, 24, L_ 17, 31, 27, 31, E_};
 static const int8_t ICD_POWER[] = {A_ 24, 26, 15, 42, 72, A_ 24, 26, 15, 0, 30, L_ 24, 5, 24, 24, E_};
 static const int8_t ICD_UPDATE[] = {L_ 24, 7, 24, 30, P_ 3, 15, 21, 24, 30, 33, 21, P_ 4, 7, 30, 7, 41, 41, 41, 41, 30, E_};
 static const int8_t ICD_DISPLAY[] = {R_ 5, 8, 38, 26, L_ 17, 41, 31, 41, L_ 24, 34, 24, 41, E_};
 static const int8_t ICD_LIST[] = {L_ 17, 13, 41, 13, L_ 17, 24, 41, 24, L_ 17, 35, 41, 35, D_ 9, 13, 2, D_ 9, 24, 2, D_ 9, 35, 2, E_};
-static const int8_t ICD_MORE[] = {D_ 11, 24, 3, D_ 24, 24, 3, D_ 37, 24, 3, E_};
 static const int8_t ICD_STOPWATCH[] = {C_ 24, 27, 15, L_ 24, 27, 30, 21, L_ 19, 5, 29, 5, L_ 24, 5, 24, 12, E_};
 static const int8_t ICD_ALARM[] = {C_ 24, 26, 15, L_ 24, 26, 24, 17, L_ 24, 26, 30, 30, L_ 7, 12, 13, 6, L_ 41, 12, 35, 6, L_ 13, 43, 16, 39, L_ 35, 43, 32, 39, E_};
 static const int8_t ICD_DICE[] = {R_ 8, 8, 32, 32, D_ 16, 16, 3, D_ 32, 32, 3, D_ 24, 24, 3, D_ 32, 16, 3, D_ 16, 32, 3, E_};
@@ -142,14 +134,14 @@ static const int8_t ICD_DICE[] = {R_ 8, 8, 32, 32, D_ 16, 16, 3, D_ 32, 32, 3, D
 static const int8_t ICD_PULSE[] = {R_ 5, 7, 38, 34, P_ 7, 9, 26, 16, 26, 20, 15, 26, 35, 31, 21, 34, 26, 39, 26, E_};
 
 static const int8_t* const ICON_DEFS[I_COUNT] = {
-    nullptr, ICD_HOME, ICD_APPS, ICD_SETTINGS, ICD_WIFI, ICD_WIFI_OFF, ICD_BT, ICD_SD, ICD_CHIP, ICD_CODE, ICD_NOTES, ICD_FOLDER,
-    ICD_FILE, ICD_TARGET, ICD_TIMER, ICD_HEADPHONES, ICD_REMOTE, ICD_BELL, ICD_CALC, ICD_CLOCK, ICD_CLOUD, ICD_SUN, ICD_PARTLY,
+    nullptr, ICD_APPS, ICD_SETTINGS, ICD_WIFI, ICD_WIFI_OFF, ICD_BT, ICD_SD, ICD_CHIP, ICD_CODE, ICD_NOTES, ICD_FOLDER,
+    ICD_FILE, ICD_TARGET, ICD_HEADPHONES, ICD_REMOTE, ICD_BELL, ICD_CALC, ICD_CLOCK, ICD_CLOUD, ICD_SUN, ICD_PARTLY,
     ICD_FOG, ICD_RAIN, ICD_SNOW, ICD_STORM, ICD_MOON, ICD_TODO, ICD_TRANSFER, ICD_PHOTO, ICD_BOOK, ICD_PENCIL, ICD_CARDS, ICD_LIGHT,
-    ICD_GAMEPAD, ICD_INFO, ICD_BACK, ICD_RIGHT, ICD_UP, ICD_DOWN, ICD_CLOSE, ICD_CHECK, ICD_PLUS, ICD_MINUS, ICD_TRASH, ICD_PLAY,
+    ICD_GAMEPAD, ICD_BACK, ICD_RIGHT, ICD_UP, ICD_DOWN, ICD_CLOSE, ICD_CHECK, ICD_PLUS, ICD_MINUS, ICD_TRASH, ICD_PLAY,
     ICD_PAUSE, ICD_NEXT, ICD_PREV, ICD_SHUFFLE, ICD_REPEAT, ICD_VOLUME, ICD_REFRESH, ICD_KEYBOARD, ICD_ERASER, ICD_UNDO,
-    ICD_LOCK, ICD_SEARCH, ICD_PHONE, ICD_FLAME, ICD_CHART, ICD_NOTE, ICD_GLOBE, ICD_HOURGLASS, ICD_FLAG, ICD_MINE, ICD_SNAKE,
-    ICD_TILES, ICD_GRID, ICD_ROOK, ICD_BLOCKS, ICD_EYE, ICD_TEXT, ICD_SAVE, ICD_COPY, ICD_CUT, ICD_PASTE, ICD_POWER, ICD_UPDATE,
-    ICD_DISPLAY, ICD_LIST, ICD_MORE, ICD_STOPWATCH, ICD_ALARM, ICD_DICE, ICD_SPEAKER_OFF, ICD_PULSE,
+    ICD_LOCK, ICD_SEARCH, ICD_PHONE, ICD_FLAME, ICD_CHART, ICD_NOTE, ICD_GLOBE, ICD_FLAG, ICD_MINE, ICD_SNAKE,
+    ICD_TILES, ICD_GRID, ICD_ROOK, ICD_BLOCKS, ICD_EYE, ICD_TEXT, ICD_PASTE, ICD_POWER, ICD_UPDATE,
+    ICD_DISPLAY, ICD_LIST, ICD_STOPWATCH, ICD_ALARM, ICD_DICE, ICD_SPEAKER_OFF, ICD_PULSE,
 };
 
 #undef L_

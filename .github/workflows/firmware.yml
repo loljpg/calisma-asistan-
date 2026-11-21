@@ -12,7 +12,16 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    name: Testler (bilgisayarda, ASan/UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Birim testleri ve bütün ekran senaryoları
+        run: firmware/test/host/run.sh test
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,6 +80,6 @@ jobs:
             Sonraki sürümler kart Wi-Fi'ye bağlıyken kendiliğinden yüklenir
             (`firmware-*.bin` dosyaları bunun içindir, elle yüklemene gerek yok).
 
-            `muzik-*.bin`: kulaklıkla SD müzik modülü. Müzik uygulaması gerekince kendisi indirir;
+            `muzik-*.bin`: SD karttan müzik modülü (Bluetooth kulaklık ya da kartın hoparlörü). Müzik uygulaması gerekince kendisi indirir;
             istersen SD kartın köküne de kopyalayabilirsin.
           files: dist/*.bin

@@ -19,7 +19,6 @@ static bool cloudOk = false;
 static String otaMsg;
 
 static volatile bool dataDirty = true;
-static volatile bool portalActive = false;  // ağ görevi beklesin (Wi-Fi ayarlanırken)
 static volatile bool netBusy = false;
 static volatile bool wantView = false;
 static volatile bool credsChanged = false;

@@ -32,6 +32,7 @@
 #include "config.h"
 #include "lua.hpp"  // lib/lua (PlatformIO kitaplık bulucu için burada da)
 #include "daxen.h"
+#include "core/touch.h"
 
 #define STR_(x) #x
 #define STR(x) STR_(x)
@@ -55,8 +56,8 @@ static void loadConfig() {
   cfg.x2 = prefs.getInt("cx2", cfg.x2);
   cfg.y1 = prefs.getInt("cy1", cfg.y1);
   cfg.y2 = prefs.getInt("cy2", cfg.y2);
+  touchLoadCal(prefs);
   cfg.pomodoro = prefs.getBool("pomo", false);
-  cfg.theme = constrain(prefs.getInt("theme", 0), 0, 2);
   cfg.coverTheme = prefs.getBool("cover2", false);
   cfg.bright = constrain(prefs.getInt("bri", 255), 16, 255);
   cfg.nightDim = prefs.getBool("ndim", true);
@@ -102,8 +103,8 @@ static void saveConfig() {
   prefs.putInt("cx2", cfg.x2);
   prefs.putInt("cy1", cfg.y1);
   prefs.putInt("cy2", cfg.y2);
+  touchStoreCal(prefs);
   prefs.putBool("pomo", cfg.pomodoro);
-  prefs.putInt("theme", cfg.theme);
   prefs.putBool("cover2", cfg.coverTheme);
   prefs.putInt("bri", cfg.bright);
   prefs.putBool("ndim", cfg.nightDim);
@@ -1321,10 +1322,6 @@ static void netTask(void*) {
       wasConn = conn;
       dataDirty = true;
     }
-    if (portalActive) {
-      liveClose();
-      continue;
-    }
     netBusy = true;
     if (WiFi.status() != WL_CONNECTED) {
       liveClose();
@@ -2215,40 +2212,8 @@ static void bleMediaKey(const char* cmd) {
   bleSendJson('K', d);
 }
 
-#include "core/touch.h"
 
-static void runCalibration() {
-  const int px[3] = {20, 300, 20}, py[3] = {20, 20, 220};
-  int rx[3], ry[3];
-  for (int i = 0; i < 3; i++) {
-    fillBg(0, 0, SCR_W, SCR_H);
-    text("Dokunmatik ayarı", 160, 92, F_MD, C_TEXT, C_BG, MC_DATUM);
-    text("Artının ortasına dokun (" + String(i + 1) + "/3)", 160, 120, F_SM, C_TEXT2, C_BG, MC_DATUM);
-    text("Atlamak için BOOT tuşuna bas", 160, 144, F_XS, C_TEXT3, C_BG, MC_DATUM);
-    tft.drawFastHLine(px[i] - 12, py[i], 25, C_ACC);
-    tft.drawFastVLine(px[i], py[i] - 12, 25, C_ACC);
-    tft.drawCircle(px[i], py[i], 8, C_TEXT2);
-    if (!waitTap(rx[i], ry[i])) {
-      Lock l;
-      cfg.calibrated = true;  // varsayılan değerlerle devam
-      saveConfig();
-      return;
-    }
-  }
-  bool swap = abs(ry[1] - ry[0]) > abs(rx[1] - rx[0]);
-  int x1 = swap ? ry[0] : rx[0], x2 = swap ? ry[1] : rx[1];
-  int y1 = swap ? rx[0] : ry[0], y2 = swap ? rx[2] : ry[2];
-  if (abs(x2 - x1) > 300 && abs(y2 - y1) > 300) {
-    Lock l;
-    cfg.swapXY = swap;
-    cfg.x1 = x1;
-    cfg.x2 = x2;
-    cfg.y1 = y1;
-    cfg.y2 = y2;
-    cfg.calibrated = true;
-  }
-  saveConfig();
-}
+#include "os/calibrate.h"  // dokunmatik ayarı (9 nokta, doğrulama)
 
 // ============================================================================
 // Web sunucusu: telefondan tarayıcıyla SD karta dosya gönderme ve hesap bilgileri
@@ -2596,8 +2561,6 @@ static String webStatus() {
   }
   return webMsg;
 }
-
-static void webTick() {}  // sunucu artık kendi sürecinde (webProc)
 
 static int webProgress() {
   {
@@ -3128,7 +3091,6 @@ static bool wifiConnected() { return WiFi.status() == WL_CONNECTED; }
 static String wifiSsid() { return WiFi.SSID(); }
 static String wifiIp() { return WiFi.localIP().toString(); }
 static int wifiRssi() { return WiFi.RSSI(); }
-static String wifiMac() { return WiFi.macAddress(); }
 
 static void sysRequestOta() {
   {
