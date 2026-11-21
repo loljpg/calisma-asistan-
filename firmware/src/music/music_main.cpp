@@ -547,6 +547,17 @@ static bool onBtFound(const char* ssid, esp_bd_addr_t, int rssi) {
 
 static void onBtState(esp_a2d_connection_state_t, void*) { btConnChanged = true; }
 
+// Listede en güçlü sinyaller (yakındaki kulaklık) önce; seçili kulaklık her zaman görünür
+static std::vector<BtDev> btSorted() {
+  std::vector<BtDev> list = btSorted();
+  std::sort(list.begin(), list.end(), [](const BtDev& a, const BtDev& b) {
+    bool sa = a.name == btTarget, sb = b.name == btTarget;
+    if (sa != sb) return sa;
+    return a.rssi > b.rssi;
+  });
+  return list;
+}
+
 static volatile uint8_t avrcKey = 0;
 static void onAvrc(uint8_t key, bool released) {
   if (!released) avrcKey = key;
@@ -746,13 +757,10 @@ static void drawBt(bool full) {
   drawIcon(I_HEADPHONES, 12, HDR_H + 54, 24, c ? C_ACC : C_TEXT3, C_BG);
   text(fit(c ? (btTarget.length() ? btTarget : String("Bağlı")) : (btTarget.length() ? "Bağlanıyor: " + btTarget : String("Bağlı değil")), F_MD, 262), 46,
        HDR_H + 50, F_MD, C_TEXT, C_BG);
-  text(c ? "Bağlı · ses buradan gidiyor" : "Kulaklığı eşleşme kipine al, listeden seç", 46, HDR_H + 72, F_XS, C_TEXT2, C_BG);
+  text(c ? "Bağlı · ses buradan gidiyor" : "Telefondan ayır, eşleşme kipine al, listeden seç", 46, HDR_H + 72, F_XS, C_TEXT2, C_BG);
   sectionLabel(HDR_H + 86, "Bulunan cihazlar");
   if (btTarget.length()) text("Unut", 308, HDR_H + 86, F_XS, C_ACC, C_BG, TR_DATUM);
-  std::vector<BtDev> list;
-  xSemaphoreTake(btMtx, portMAX_DELAY);
-  list = btFound;
-  xSemaphoreGive(btMtx);
+  std::vector<BtDev> list = btSorted();
   for (int i = 0; i < (int)list.size() && i < BT_ROWS; i++) {
     int y = BT_LIST_Y + i * BT_ROW;
     bool on = list[i].name == btTarget;
