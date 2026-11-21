@@ -264,6 +264,92 @@ static void cBtInfo(const std::vector<String>& a, CmdOut& o) {
   bleDetail(d, millis(), o.lines);
 }
 
+// --- Lua uygulamaları ---
+static int tlLuaFind(const String& w) {
+  String want = trLower(w);
+  for (int i = 0; i < luaAppCount(); i++) {
+    String stem = baseName(luaApps[i].path);
+    stem = stem.substring(0, stem.lastIndexOf('.'));
+    if (trLower(luaApps[i].name) == want || trLower(stem) == want) return i;
+  }
+  return -1;
+}
+
+// Günlüğün son n satırı (dosyanın son 2 KB'ı okunur)
+static void tlLogTail(const String& path, int n, std::vector<String>& out) {
+  File f = SD.open(path);
+  String t;
+  size_t from = 0;
+  if (f) {
+    size_t sz = f.size();
+    from = sz > 2048 ? sz - 2048 : 0;
+    f.seek(from);
+    t = f.readString();
+    f.close();
+  }
+  if (from) t = t.substring(t.indexOf('\n') + 1);
+  std::vector<String> l;
+  int a = 0;
+  for (int c = t.indexOf('\n'); c >= 0; a = c + 1, c = t.indexOf('\n', a)) l.push_back(t.substring(a, c));
+  if (l.empty()) out.push_back("  (günlük boş)");
+  for (size_t k = l.size() > (size_t)n ? l.size() - n : 0; k < l.size(); k++) out.push_back("  " + l[k]);
+}
+
+static int tlLuaArg(const std::vector<String>& a, CmdOut& o) {
+  luaScanned = false;
+  int i = tlLuaFind(a[0]);
+  if (i < 0) o.add("Böyle bir Lua uygulaması yok (liste: lua list)");
+  return i;
+}
+
+static void cLuaList(const std::vector<String>&, CmdOut& o) {
+  luaScanned = false;
+  int n = luaAppCount();
+  if (!n) o.add(sdOk ? "Lua uygulaması yok" : "SD kart takılı değil");
+  for (int i = 0; i < n; i++) {
+    const LuaAppInfo& x = luaApps[i];
+    blePush(o.lines, "%s%s%s · %s · %s", x.name.c_str(), x.ver.length() ? " " : "", x.ver.c_str(), luaPermText(x.perm).c_str(),
+            luaApproval(x.path) == luaWant(x) ? "onaylı" : "onay bekliyor");
+  }
+}
+
+static void cLuaInfo(const std::vector<String>& a, CmdOut& o) {
+  int i = tlLuaArg(a, o);
+  if (i < 0) return;
+  const LuaAppInfo& x = luaApps[i];
+  uint64_t have = luaApproval(x.path), want = luaWant(x);
+  o.kv("Ad", x.name);
+  o.kv("Dosya", x.path);
+  o.kv("Sürüm", x.ver.length() ? x.ver : String("yazılmamış"));
+  o.kv("İzinler", luaPermText(x.perm) + (x.manifest ? "" : " (izin satırı yok, eski uygulama)"));
+  o.kv("Onay", have == want ? "verildi" : have ? "dosya değişmiş, açılışta yeniden sorulur" : "ilk açılışta sorulur");
+  o.kv("Arka plan", x.bg ? "evet" : "hayır");
+  o.kv("Durum", kAlive(luaPid) && luaRunPath == x.path ? "çalışıyor" : "kapalı");
+  o.add("Günlük, son satırlar:");
+  tlLogTail(luaDataDirOf(x.path) + "/gunluk.txt", 8, o.lines);
+}
+
+static void cLuaLog(const std::vector<String>& a, CmdOut& o) {
+  int i = tlLuaArg(a, o);
+  if (i >= 0) tlLogTail(luaDataDirOf(luaApps[i].path) + "/gunluk.txt", a.size() > 1 ? constrain(a[1].toInt(), 1, 60) : 20, o.lines);
+}
+
+static void cLuaRemove(const std::vector<String>& a, CmdOut& o) {
+  int i = tlLuaArg(a, o);
+  if (i < 0) return;
+  o.add("Onay penceresi ekranda");
+  luaRemoveAsk(i);
+}
+
+static void cLuaStop(const std::vector<String>&, CmdOut& o) {
+  if (!kAlive(luaPid)) {
+    o.add("Çalışan Lua uygulaması yok");
+    return;
+  }
+  String n = luaRunName;
+  o.add(luaStopProc() ? "Durduruldu: " + n : String("Durdurulamadı"));
+}
+
 static const Cmd TL_CMDS[] = {
     {"help", nullptr, CL_USER, 0, 0, cHelp, "", "komutları listeler"},
     {"clear", nullptr, CL_USER, 0, 0, cClear, "", "ekranı temizler"},
@@ -291,6 +377,11 @@ static const Cmd TL_CMDS[] = {
     {"bluetooth", "scan", CL_USER, 0, 1, cBtScan, "[sn]", "yakındaki BLE cihazları"},
     {"bluetooth", "devices", CL_USER, 0, 0, cBtDevices, "", "son taramanın listesi"},
     {"bluetooth", "info", CL_USER, 1, 1, cBtInfo, "<no>", "cihazın ayrıntıları"},
+    {"lua", "list", CL_USER, 0, 0, cLuaList, "", "Lua uygulamaları, sürüm, izinler"},
+    {"lua", "info", CL_USER, 1, 1, cLuaInfo, "<ad>", "izinler, onay, günlük"},
+    {"lua", "log", CL_USER, 1, 2, cLuaLog, "<ad> [satır]", "uygulamanın günlüğü"},
+    {"lua", "remove", CL_DEV, 1, 1, cLuaRemove, "<ad>", "uygulamayı kaldırır (onaylı)"},
+    {"lua", "stop", CL_DEV, 0, 0, cLuaStop, "", "çalışan Lua uygulamasını durdurur"},
     {"reboot", nullptr, CL_USER, 0, 0, cReboot, "", "yeniden başlatır (onaylı)"},
 };
 static const Cmd* tlTable(size_t& n) {

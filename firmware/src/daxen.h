@@ -9,6 +9,8 @@
 #include "core/log.h"
 #include "core/netcalc.h"
 #include "core/blecalc.h"
+#include "core/lzss.h"
+#include "core/miniscan.h"
 #include "ui/theme.h"
 #include "ui/icons.h"
 #include "ui/widgets.h"

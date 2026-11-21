@@ -16,6 +16,14 @@ static void openFileWith(const String& path) {
   if (e == "jpg" || e == "jpeg" || e == "bmp" || e == "cizim") {
     phOpenPath = path;
     appOpenChild(&APP_PHOTOS);
+  } else if (e == "lua" && !path.startsWith(LUA_APPS_DIR "/")) {  // başka klasördeki Lua dosyası: oku ya da yükle
+    menu(baseName(path), {"Oku", "Uygulama olarak yükle"}, [path](int c) {
+      if (c == 1) luaInstall(path);
+      else if (c == 0) {
+        rdOpenPath = path;
+        appOpenChild(&APP_READER);
+      }
+    });
   } else if (e == "txt" || e == "md" || e == "csv" || e == "log" || e == "json" || e == "ini" || e == "lua") {
     if (path.startsWith(NOTES_DIR "/") && e == "txt") {
       appOpenChild(&APP_NOTES);

@@ -39,6 +39,11 @@ USB seri porttan: 115200 baud, her komut bir satır (`\n`). Çıktı aynı porta
 | `bluetooth scan [sn]` | Yakındaki BLE cihazları (3–30 sn, varsayılan 10). Bitince liste yazılır |
 | `bluetooth devices` | Son taramanın listesi: sinyal, adres, ad, üretici (en güçlü sinyal önce) |
 | `bluetooth info <no>` | Listedeki bir cihazın reklamdaki her şeyi: adres türü, sinyal, üretici, servisler, yayın gücü, bağlanabilirlik, paket sayısı |
+| `lua list` | Lua uygulamaları: sürüm, izinler, onay durumu |
+| `lua info <ad>` | Dosya, sürüm, izinler, onay, arka plan, çalışıyor mu, günlüğün son satırları |
+| `lua log <ad> [satır]` | Uygulamanın günlüğü (varsayılan 20 satır) |
+| `lua remove <ad>` | Geliştirici: uygulamayı kaldırır (kartta onay; veri klasörü kalır) |
+| `lua stop` | Geliştirici: çalışan (arka plandaki) Lua uygulamasını durdurur |
 | `reboot` | Kartta onay penceresi açar, onaylanırsa yeniden başlatır |
 
 Sınırlar: satır en fazla 96 karakter, en fazla 6 argüman, çift tırnak içi tek argüman. Çıktı ve

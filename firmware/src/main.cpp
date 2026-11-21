@@ -44,6 +44,7 @@
 static const char FW_MARKER[] = "CSFW:" FW_VARIANT ":" STR(FW_BUILD) ";";
 
 // --- Sistem katmanı (sırası önemlidir) ---
+#include "sys/libtrim.h"  // kullanılmayan kütüphane parçalarının yerine küçük karşılıklar
 #include "sys/store.h"
 #include "sys/sdlog.h"
 #include "sys/diag.h"

@@ -1,0 +1,78 @@
+DAXEN VANE · Kendi uygulamanı yaz (Lua)
+=========================================
+
+Bu klasördeki her .lua dosyası Uygulamalar ekranında bir uygulama olarak görünür.
+Dosyanın ilk satırları uygulamanın adını ve simgesini söyler:
+
+  -- ad: Benim Uygulamam
+  -- simge: oyun
+  -- surum: 1.0
+  -- izin: ekran, dosya
+  -- arkaplan: evet      (isteğe bağlı: çıkınca kapanmaz, arka planda sürer)
+
+İzinler: ekran (çizim), dosya (yalnız kendi klasörü, ayar dahil), led, bildirim,
+wifi ve bluetooth (yalnız okuma). İlk açılışta izinler sorulur; dosya değişirse yeniden.
+"-- izin:" satırı olmayan eski uygulamalar ekran, dosya, led ve bildirimi tek onayla alır.
+İzni olmayan işlev "izin yok: led" hatası verir. Hatalar uygulamanın günlüğüne yazılır
+(uygulamalar/veri/<dosya adı>/gunluk.txt). Uygulamaya uzun basınca: bilgi, günlük, kaldır.
+
+Her uygulama ayrı bir süreç olarak çalışır: uzun bir hesap yapsa da saat, dokunma ve alarmlar
+donmaz. Çalışan süreçleri Görevler uygulamasında görür, istersen sonlandırırsın. Arka planda
+süren uygulama ekrana çizemez ama adim() ve sistem.bildir() çalışır; tekrar açınca ciz() gelir.
+
+Simgeler: kod oyun zar saat alarm not liste hesap grafik muzik kalem kitap isik hedef
+kronometre dunya bulut gunes ates bayrak kart yilan foto klavye cip
+
+Uygulama, tanımladığın işlevlerle çalışır (hepsi isteğe bağlı):
+  baslat()          açılınca bir kez
+  ciz()             ekran baştan çizilecekken
+  dokun(x, y)       ekrana dokunup bırakınca
+  kaydir(yon)       "sol", "sag", "yukari", "asagi"
+  bas(x, y), surukle(x, y), birak(x, y)
+                    parmağı izlemek için (tanımlarsan dokun/kaydir gelmez)
+  adim(dt)          saniyede ~30 kez; dt: geçen milisaniye (animasyon için)
+  kapat()           çıkarken
+
+Ekran 320 x 240. Üstteki 30 piksel başlık çubuğudur (ekran.ust); sol üst köşe geri tuşudur.
+  ekran.temizle([renk])
+  ekran.dikdortgen(x, y, en, boy, renk, [dolu=true])
+  ekran.cizgi(x1, y1, x2, y2, renk, [kalınlık=1])
+  ekran.daire(x, y, r, renk, [dolu=true])
+  ekran.piksel(x, y, renk)
+  ekran.yazi(metin, x, y, [renk], [boyut 1-5], ["sol"|"orta"|"sag"], [arka renk])
+      boyut 1: küçük, 2: normal, 3: büyük, 4 ve 5: yalnızca rakamlar (çok büyük)
+  ekran.genislik(metin, [boyut])
+  ekran.renk(k, y, m)              0-255 değerlerden renk
+  ekran.simge(ad, x, y, [boyut], [renk])
+  ekran.en, ekran.boy, ekran.ust
+
+Renkler: renk.zemin yuzey yuzey2 gumus gri soluk cizgi vurgu siyah beyaz
+         kirmizi turuncu sari yesil mavi mor
+
+  zaman.ms()                 açılıştan beri milisaniye
+  zaman.saat()               saat, dakika, saniye
+  zaman.tarih()              yıl, ay, gün, haftanın günü (0 = pazar)
+
+Dosyalar yalnızca uygulamanın kendi klasöründedir (uygulamalar/veri/<dosya adı>/):
+  dosya.oku(ad)   dosya.yaz(ad, metin)   dosya.ekle(ad, metin)
+  dosya.var(ad)   dosya.sil(ad)          dosya.liste()
+  ayar.al(ad, varsayılan)    ayar.kaydet(ad, değer)
+
+  sistem.bildir(metin)       alttaki balon
+  sistem.cikis()             uygulamayı kapatır
+  sistem.isik()              ortam ışığı (%)
+  sistem.led(k, y, m)        kartın RGB ışığı, kısa süre
+  sistem.bellek()            uygulamanın kalan belleği (bayt)
+  sistem.gunluk(metin)       uygulamanın günlüğüne bir satır
+
+  wifi.durum()               { bagli, ag, sinyal, ip }                      (izin: wifi)
+  bluetooth.tara([sn])       yakındaki cihazları tara, 3-30 sn             (izin: bluetooth)
+  bluetooth.suruyor()        tarama sürüyor mu
+  bluetooth.cihazlar()       { {ad, adres, sinyal, enguclu, uretici}, ... } en güçlü önce
+                             yalnız yayınlar okunur; uzaklık verilmez
+
+Lua'nın string, table, math, utf8 ve coroutine kitaplıkları vardır (io ve os yok).
+load() yalnızca metin kabul eder (derlenmiş Lua kodu yüklenmez).
+Takılan bir uygulamadan geri tuşuyla çıkabilirsin; süreç sonlandırılır.
+Hata olursa ekranda satır numarasıyla görünür.
+Örnekler: merhaba.lua, zar.lua, sayac.lua, top.lua, zamanlayici.lua (arka planda sayar). Değiştirip dene!

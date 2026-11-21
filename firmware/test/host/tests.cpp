@@ -311,6 +311,9 @@ static void testLua() {
   CHECK(idx >= 0);
   if (idx >= 0) {
     luaAppOpen(idx);
+    CHECK(ov.kind == OV_DIALOG && ov.msg.indexOf("eski uygulama") >= 0);  // ilk açılışta izin sorulur
+    ov.cb(1);
+    ov = Overlay();
     shellTick();
     CHECK(!luaHasError());
     if (luaHasError()) printf("    Lua hatası: %s\n", luaErr.c_str());
@@ -323,13 +326,153 @@ static void testLua() {
   luaScanned = false;
   for (int i = 0; i < luaAppCount(); i++)
     if (luaAppLabel(i) == "Hata") idx = i;
-  luaAppOpen(idx);
+  luaOpenOk(idx);
   shellTick();
   CHECK(luaHasError());
   CHECK(luaErr.indexOf("test_hata.lua:") >= 0);
   appExit();
-  remove((g_sdroot + "/daxen/uygulamalar/test_api.lua").c_str());
   remove((g_sdroot + "/daxen/uygulamalar/test_hata.lua").c_str());
+
+  group("Lua manifesti ve izinler");
+  CHECK(luaParsePerms("ekran, Dosya ,bluetooth,uçak") == (LP_EKRAN | LP_DOSYA | LP_BT) && luaParsePerms("") == 0);
+  CHECK(luaPermText(LP_EKRAN | LP_LED | LP_WIFI) == "ekran, led, wifi" && luaPermText(0) == "hiçbiri");
+  LuaAppInfo m;
+  for (const char* l : {"-- ad: Radar", "-- surum: 2.0.1", "-- izin: ekran, bluetooth", "-- arkaplan: hayır", "-- bir not: yok"}) luaParseHeader(m, l);
+  CHECK(m.name == "Radar" && m.ver == "2.0.1" && m.perm == (LP_EKRAN | LP_BT) && m.manifest && !m.bg);
+  CHECK(LuaAppInfo().perm == LP_ESKI && !LuaAppInfo().manifest);
+  // yalnız ekran izni olan uygulama: led ve dosya hata verir, günlüğe yazılır; load yalnız metin
+  auto writeApp = [](const char* name, const char* body) {
+    FILE* w = fopen((g_sdroot + "/daxen/uygulamalar/" + name).c_str(), "w");
+    fputs(body, w);
+    fclose(w);
+  };
+  writeApp("test_izin.lua",
+           "-- ad: İzin\n-- izin: ekran\n"
+           "function baslat()\n"
+           "  local ok, e = pcall(sistem.led, 1, 2, 3)\n"
+           "  assert(not ok and e:find('izin yok: led'))\n"
+           "  ok, e = pcall(dosya.yaz, 'a.txt', 'x')\n"
+           "  assert(not ok and e:find('izin yok: dosya'))\n"
+           "  assert(not pcall(wifi.durum) and not pcall(bluetooth.tara))\n"
+           "  assert(load('return 1 + 1')() == 2)\n"
+           "  local f, err = load(string.dump(function() return 1 end))\n"
+           "  assert(f == nil and err:find('binary'))\n"
+           "  sistem.gunluk('merhaba günlük')\n"
+           "  sistem.led(0, 0, 0)\n"
+           "end\n");
+  luaScanned = false;
+  int ti = -1;
+  for (int i = 0; i < luaAppCount(); i++)
+    if (luaAppLabel(i) == "İzin") ti = i;
+  CHECK(ti >= 0);
+  luaAppOpen(ti);
+  CHECK(ov.kind == OV_DIALOG && ov.msg.indexOf("ekran") >= 0 && ov.msg.indexOf("eski") < 0);
+  ov = Overlay();  // vazgeçildi: uygulama açılmaz, onay kaydedilmez
+  CHECK(curApp != &APP_LUA && luaApproval(luaApps[ti].path) == 0);
+  luaOpenOk(ti);
+  shellTick();
+  CHECK(luaHasError() && luaErr.indexOf("izin yok: led") >= 0);
+  appExit();
+  std::vector<String> lg;
+  tlLogTail(luaDataDirOf(luaApps[ti].path) + "/gunluk.txt", 5, lg);
+  CHECK(lg.size() == 2 && lg[0].indexOf("uygulama: merhaba günlük") >= 0 && lg[1].indexOf("hata: ") >= 0 && lg[1].indexOf("izin yok: led") >= 0);
+  luaAppOpen(ti);  // onaylı ve değişmedi: pencere yok
+  CHECK(ov.kind == OV_NONE && curApp == &APP_LUA);
+  appExit();
+  writeApp("test_izin.lua", "-- ad: İzin\n-- izin: ekran, led\nfunction baslat() sistem.led(0, 0, 0) end\n");
+  luaScanned = false;
+  luaAppCount();
+  luaAppOpen(ti);  // dosya değişti: yeniden sorulur
+  CHECK(ov.kind == OV_DIALOG && ov.msg.startsWith("Uygulama değişmiş"));
+  ov.cb(1);
+  ov = Overlay();
+  shellTick();
+  CHECK(!luaHasError());
+  appExit();
+  // wifi ve bluetooth okuma
+  writeApp("test_radar.lua",
+           "-- ad: Radar\n-- izin: ekran, wifi, bluetooth\n"
+           "function baslat()\n"
+           "  local w = wifi.durum()\n"
+           "  assert(w.bagli and w.ag == 'EvAgi' and w.sinyal < 0)\n"
+           "  assert(bluetooth.tara(5))\n"
+           "  local c = bluetooth.cihazlar()\n"
+           "  assert(#c == 4 and c[1].ad == 'Mi Band 7' and c[1].uretici == 'Huami' and c[1].sinyal == -58)\n"
+           "  assert(c[2].ad == '' and c[2].uretici == 'Apple' and c[4].adres == 'D1:22:33:44:55:66')\n"
+           "end\n");
+  luaScanned = false;
+  for (int i = 0; i < luaAppCount(); i++)
+    if (luaAppLabel(i) == "Radar") ti = i;
+  luaOpenOk(ti);
+  shellTick();
+  CHECK(!luaHasError());
+  if (luaHasError()) printf("    Lua hatası: %s\n", luaErr.c_str());
+  appExit();
+  CHECK(bsCount() == 0);  // uygulama kapanınca liste bırakıldı
+
+  group("Lua yönetimi (terminal)");
+  CmdOut lo = termExec("lua list");
+  bool seen = false;
+  for (auto& l : lo.lines) seen |= l == "Radar · ekran, wifi, bluetooth · onaylı";
+  CHECK(seen);
+  lo = termExec("lua info radar");
+  CHECK(lo.lines[0] == "Ad: Radar" && lo.lines[3] == "İzinler: ekran, wifi, bluetooth" && lo.lines[4] == "Onay: verildi");
+  CHECK(termExec("lua info yok").lines[0].startsWith("Böyle bir Lua"));
+  CHECK(termExec("lua log izin 1").lines.size() == 1);
+  CHECK(termExec("lua remove radar").lines[0] == "Bu komut geliştirici yetkisi ister");
+  // kaldırma: onay penceresi, dosya silinir, veri klasörü kalır
+  luaScanned = false;
+  luaAppCount();
+  for (int i = 0; i < luaAppCount(); i++)
+    if (luaAppLabel(i) == "İzin") ti = i;
+  String ip = luaApps[ti].path;
+  luaRemoveAsk(ti);
+  CHECK(ov.kind == OV_DIALOG);
+  ov.cb(1);
+  ov = Overlay();
+  CHECK(!SD.exists(ip) && SD.exists(luaDataDirOf(ip) + "/gunluk.txt") && luaApproval(ip) == 0);
+  // başka klasördeki .lua dosyası yüklenir
+  FILE* w = fopen((g_sdroot + "/indirilen.lua").c_str(), "w");
+  fputs("-- ad: İndirilen\n", w);
+  fclose(w);
+  openFileWith("/indirilen.lua");
+  CHECK(ov.kind == OV_MENU && ov.opts.size() == 2);
+  ov.cb(1);
+  ov = Overlay();
+  CHECK(SD.exists(LUA_APPS_DIR "/indirilen.lua"));
+  remove((g_sdroot + "/indirilen.lua").c_str());
+  remove((g_sdroot + "/daxen/uygulamalar/indirilen.lua").c_str());
+  remove((g_sdroot + "/daxen/uygulamalar/test_radar.lua").c_str());
+  remove((g_sdroot + "/daxen/uygulamalar/test_api.lua").c_str());
+
+  group("küçük sscanf (kütüphane yerine)");
+  unsigned ma = 9, mi = 9, pa = 9;
+  CHECK(miniScan("1.2.0", "%u.%u.%u", &ma, &mi, &pa) == 3 && ma == 1 && mi == 2 && pa == 0);  // eş yaşam sürümü
+  CHECK(miniScan("v12.30.7x", "v%u.%u.%u", &ma, &mi, &pa) == 3 && ma == 12 && mi == 30 && pa == 7);
+  CHECK(miniScan("1.x.0", "%u.%u.%u", &ma, &mi, &pa) == 1);
+  uint8_t hb[3] = {0};
+  CHECK(miniScan("a1:0B:ff", "%2hhx:%2hhx:%2hhx", &hb[0], &hb[1], &hb[2]) == 3 && hb[0] == 0xa1 && hb[1] == 0x0b && hb[2] == 0xff);
+  int sd = 0;
+  unsigned short hs = 0;
+  CHECK(miniScan("  -42 ve 65535", "%d ve %hu", &sd, &hs) == 2 && sd == -42 && hs == 65535);
+  CHECK(miniScan("", "%u", &ma) == 0 && miniScan("12345", "%3u", &ma) == 1 && ma == 123);
+
+  group("sıkıştırılmış dosyalar");
+  CHECK(crc32Upd(0, (const uint8_t*)"123456789", 9) == 0xCBF43926u);
+  CHECK(crc32Upd(crc32Upd(0, (const uint8_t*)"1234", 4), (const uint8_t*)"56789", 5) == 0xCBF43926u);
+  bool allOk = true;
+  for (auto& p : LUA_PACK) {
+    std::vector<uint8_t> b(p.len);
+    allOk &= lzUnpack(p.data, p.plen, b.data(), p.len) == p.len && b[0] != 0;
+    allOk &= lzUnpack(p.data, p.plen, b.data(), p.len - 1) == 0;  // tampon küçükse 0
+  }
+  CHECK(allOk && sizeof(LUA_PACK) / sizeof(LUA_PACK[0]) >= 6);
+  const uint8_t bad[] = {0x00, 0xff, 0xff};  // ilk öğe olmayan geçmişe başvuruyor
+  uint8_t ob[8];
+  CHECK(lzUnpack(bad, 3, ob, 8) == 0);
+  // örnekler SD'de, rehber yeni sürüm
+  File g = SD.open(LUA_APPS_DIR "/REHBER.txt");
+  CHECK(g && g.readString().indexOf("-- izin:") >= 0);
 }
 
 // ---------------------------------------------------------------------------

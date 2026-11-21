@@ -12,6 +12,7 @@ klasörün kendisi silinirse örnekler bir sonraki açılışta yeniden yazılı
 Dil Lua 5.4'tür; tam sayılar ve ondalıklı sayılar 32 bittir. `string`, `table`, `math`,
 `utf8` ve `coroutine` kitaplıkları açıktır. `io`, `os`, `require`, `dofile`, `loadfile`
 kapalıdır; dosyalara yalnızca aşağıdaki `dosya` arabirimiyle erişilir. `print` seri porta yazar.
+`load` yalnızca metin kabul eder; derlenmiş Lua kodu (ne uygulama dosyası ne `load` ile) yüklenmez.
 
 ## Süreç olarak çalışma
 
@@ -26,10 +27,45 @@ sırayla çağrılır. Geri tuşu süreci önce `kapat()` ile kibarca, olmazsa z
 ```lua
 -- ad: Benim Uygulamam
 -- simge: oyun
+-- surum: 1.0
+-- izin: ekran, dosya
 -- arkaplan: evet
 ```
 
-İlk altı satırdaki `-- ad:`, `-- simge:` ve `-- arkaplan:` satırları okunur. `ad` yoksa dosya adı kullanılır.
+İlk on yorum satırındaki `-- ad:`, `-- simge:`, `-- surum:`, `-- izin:` ve `-- arkaplan:` satırları
+okunur. `ad` yoksa dosya adı kullanılır.
+
+## İzinler
+
+| İzin | Neleri açar |
+| --- | --- |
+| `ekran` | `ekran.*` çizim işlevleri (`genislik` ve `renk` herkese açık) |
+| `dosya` | `dosya.*` ve `ayar.*` (yalnız uygulamanın kendi klasörü) |
+| `led` | `sistem.led` |
+| `bildirim` | `sistem.bildir` |
+| `wifi` | `wifi.durum` (yalnız okuma) |
+| `bluetooth` | `bluetooth.tara`, `suruyor`, `cihazlar` (yalnız yayınlar okunur) |
+
+`zaman.*`, `sistem.cikis`, `sistem.isik`, `sistem.bellek` ve `sistem.gunluk` izin istemez.
+
+Uygulama ilk kez açılırken izinler ekranda sorulur. Onay, NVS'de dosya yolunun özetiyle birlikte
+dosyanın CRC32'si ve izinlerle saklanır; dosya ya da izin satırı değişirse yeniden sorulur.
+`-- izin:` satırı olmayan eski uygulamalar bugünkü arabirimin hepsini (ekran, dosya, led,
+bildirim) tek onayla alır, yani eskiden çalışan uygulamalar çalışmaya devam eder.
+
+İzni olmayan işlev `izin yok: led` hatası verir. Bütün hatalar ve `sistem.gunluk()` satırları
+uygulamanın günlüğüne yazılır: `uygulamalar/veri/<dosya adı>/gunluk.txt`. Dosya 8 KB'ı geçince
+`gunluk.eski.txt` olur.
+
+## Yükleme ve kaldırma
+
+- **Yükleme:** `.lua` dosyasını Aktarım ile `daxen/uygulamalar` klasörüne gönder ya da başka bir
+  klasördeki dosyaya Dosyalar'da dokunup **Uygulama olarak yükle**'yi seç. Aynı adlı uygulama
+  varsa üzerine yazmadan önce sorulur. İlk açılışta izinler sorulur.
+- **Uygulamalar ekranında uzun basış:** Aç, Bilgi ve günlük (Terminal'de), Kaldır. Kaldırınca
+  dosya ve onay silinir; uygulamanın veri klasörü kalır.
+- **Terminal:** `lua list`, `lua info <ad>`, `lua log <ad> [satır]`; geliştirici yetkisiyle
+  `lua remove <ad>` ve `lua stop`.
 
 `arkaplan: evet` olan uygulama çıkınca kapanmaz, arka planda sürer: `adim()` çağrılmaya devam
 eder, `sistem.bildir()` balonları her ekranda görünür, ama ekrana çizim yapılmaz. Uygulamayı
@@ -109,6 +145,19 @@ Her uygulamanın kendi klasörü vardır: `/daxen/uygulamalar/veri/<dosya adı>/
 | `sistem.isik()` | Ortam ışığı, yüzde |
 | `sistem.led(k, y, m)` | Kartın RGB ışığı (kısa süre) |
 | `sistem.bellek()` | Uygulamanın kalan belleği, bayt |
+| `sistem.gunluk(metin)` | Uygulamanın günlüğüne bir satır |
+
+## Wi-Fi ve Bluetooth (yalnız okuma)
+
+| İşlev | Açıklama |
+| --- | --- |
+| `wifi.durum()` | `{ bagli, ag, sinyal, ip }` (bağlı değilse yalnız `bagli = false`) |
+| `bluetooth.tara([sn])` | Yakındaki BLE cihazlarını tarar (3–30 sn, varsayılan 10). Başlamazsa `nil, hata` |
+| `bluetooth.suruyor()` | Tarama sürüyor mu |
+| `bluetooth.cihazlar()` | `{ {ad, adres, sinyal, enguclu, uretici}, … }`, en güçlü sinyal önce, en fazla 30 |
+
+Yalnızca cihazların herkese açık reklam paketleri okunur; hiçbir cihaza bağlanılmaz. Uzaklık
+verilmez (sinyal gücünden güvenilir uzaklık çıkmaz). Uygulama kapanınca tarama ve liste bırakılır.
 
 ## Sınırlar
 

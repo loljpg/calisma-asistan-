@@ -211,6 +211,23 @@ static void launcherTap(int x, int y) {
   else luaAppOpen(idx - appTableCount());
 }
 
+// Lua uygulamasına uzun basış: aç, bilgi ve günlük (Terminal'de), kaldır
+static bool launcherHold(int x, int y) {
+  if (y < HDR_H) return false;
+  int k = constrain(x / LN_CW, 0, LN_COLS - 1) + constrain((y - HDR_H) / LN_CH, 0, LN_ROWS - 1) * LN_COLS;
+  int i = lnPage * LN_PER + k - appTableCount();
+  if (i < 0 || i >= luaAppCount()) return false;
+  String name = luaAppLabel(i);
+  menu(name, {"Aç", "Bilgi ve günlük", "Kaldır"}, [i, name](int c) {
+    if (c == 0) luaAppOpen(i);
+    else if (c == 1) {
+      appOpen(&APP_TERMINAL);
+      tlRun("lua info \"" + name + "\"");
+    } else if (c == 2) luaRemoveAsk(i);
+  });
+  return true;
+}
+
 static void launcherSwipe(int dir) {
   int n = lnPages();
   if (dir == SW_LEFT && lnPage < n - 1) lnPage++;
@@ -438,6 +455,7 @@ static void shellTouch(bool t, int x, int y) {
         abs(gs.ly - gs.sy) < 14) {
       gs.holdTried = true;  // uzun basış kullanılırsa bırakınca ayrıca dokunuş sayılmaz
       if (shScreen == SH_APP && curApp && curApp->hold && !(gs.sy < HDR_H && gs.sx < 36)) gs.held = curApp->hold(gs.sx, gs.sy);
+      else if (shScreen == SH_LAUNCHER) gs.held = launcherHold(gs.sx, gs.sy);
     }
     return;
   }

@@ -43,7 +43,7 @@ ve başlıktaki sol ok her uygulamada geri gider.
 | **Sistem** | Sürüm, çip, çalışma süresi, son açılış sebebi (önceki çökme kaydı varsa belirtilir), bellek (boş, en az, en büyük blok), Wi-Fi adresi ve sinyali |
 | **Görevler** | Çekirdeğin süreçleri: servisler ve görevler, işlemci payı, yığın, bellek; görevleri sonlandırma. Wi-Fi, TCP/IP ve Bluetooth sistem görevleri de görünür (yığın ve durum; işlemci payı ölçülemez, "—") |
 | **Ağ** | Bağlı Wi-Fi'nin ayrıntıları (sinyal, BSSID, kanal, adres, ağ geçidi, DNS) ve bağlantı testi (ağ geçidi, DNS, internet); çevredeki erişim noktalarının taranması (her BSSID ayrı, kanal, güvenlik); yakındaki Bluetooth cihazları (yalnız reklam paketleri: ad, adres türü, sinyal, üretici, servisler; dokununca ayrıntı) |
-| **Terminal** | Kendi komut yorumlayıcısı (Linux değil): `help`, `sysinfo`, `memory`, `tasks`, `logs`, `storage`, `apps`, `app launch`, `wifi status/ip/saved/scan/ping/dns/tcp/traceroute/test`, `stop`, `bluetooth status/scan/devices/info`, `version`, `uptime`, `history`, `clear`, `reboot`. USB seri porttan da (115200) çalışır. Ayrıntılar: [docs/terminal.md](../docs/terminal.md) |
+| **Terminal** | Kendi komut yorumlayıcısı (Linux değil): `help`, `sysinfo`, `memory`, `tasks`, `logs`, `storage`, `apps`, `app launch`, `wifi status/ip/saved/scan/ping/dns/tcp/traceroute/test`, `stop`, `bluetooth status/scan/devices/info`, `lua list/info/log/remove/stop`, `version`, `uptime`, `history`, `clear`, `reboot`. USB seri porttan da (115200) çalışır. Ayrıntılar: [docs/terminal.md](../docs/terminal.md) |
 
 **Kendi uygulamaların:** SD karttaki `/daxen/uygulamalar/*.lua` dosyaları Uygulamalar ekranında
 görünür. Her biri ayrı bir süreç olarak çalışır; `-- arkaplan: evet` diyen uygulama çıkınca da sürer.
@@ -147,7 +147,7 @@ Takılı değilse sistem yine çalışır (notlar, fotoğraf ve Lua uygulamalar�
 | `/daxen/foto/` | Fotoğraflar |
 | `/daxen/cizim/` | Çizimler |
 | `/daxen/kartlar/` | Kendi bilgi kartı destelerin |
-| `/daxen/uygulamalar/` | Lua uygulamaları ve verileri |
+| `/daxen/uygulamalar/` | Lua uygulamaları ve verileri (her uygulamanın günlüğü `veri/<ad>/gunluk.txt`); izinler ilk açılışta sorulur ([docs/lua.md](../docs/lua.md)) |
 | `/daxen/sys/` | Sistem dosyaları; `gunluk.txt` sistem günlüğü (32 KB'ta `gunluk.1.txt`'ye döner) |
 
 ## Telefonla eşleşme

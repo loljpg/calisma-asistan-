@@ -423,3 +423,12 @@ static void setupState() {
   wifiKnown.push_back({"EvAgi", "x"});
 }
 
+// Lua uygulamasını açar; izin penceresi çıkarsa "İzin ver"e basılmış sayılır
+static void luaOpenOk(int i) {
+  luaAppOpen(i);
+  if (ov.kind == OV_DIALOG && ov.cb) {
+    auto cb = ov.cb;
+    ov = Overlay();
+    cb(1);
+  }
+}

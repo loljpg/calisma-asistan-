@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Sıkıştırılmış Lua dosyaları (src/apps/luapack.h) firmware/lua/ ile aynı mı
+        run: python3 firmware/tools/pack_lua.py --check
       - name: Birim testleri ve bütün ekran senaryoları
         run: firmware/test/host/run.sh test
 

@@ -12,14 +12,60 @@
 #include <SD.h>
 #include <deque>
 #include "lua.hpp"
+#include "luapack.h"
 
 #define LUA_APPS_DIR "/daxen/uygulamalar"
 
+// İzinler ("-- izin: ekran, dosya"); satırı olmayan eski uygulamalar bugünkü API'lerin hepsini alır
+enum : uint8_t { LP_EKRAN = 1, LP_DOSYA = 2, LP_LED = 4, LP_BILDIRIM = 8, LP_WIFI = 16, LP_BT = 32, LP_ESKI = 15 };
+static const char* const LUA_PERMS[] = {"ekran", "dosya", "led", "bildirim", "wifi", "bluetooth"};
+
 struct LuaAppInfo {
-  String path, name;
+  String path, name, ver;
   uint8_t icon = I_CODE;
-  bool bg = false;  // "-- arkaplan: evet": çıkınca kapanmaz, arka planda sürer
+  uint8_t perm = LP_ESKI;
+  bool bg = false;        // "-- arkaplan: evet": çıkınca kapanmaz, arka planda sürer
+  bool manifest = false;  // "-- izin:" satırı var
 };
+
+static uint8_t luaIconByName(const String& n);
+static uint8_t luaParsePerms(const String& v) {
+  uint8_t m = 0;
+  String w = trLower(v) + ",";
+  int a = 0;
+  for (int c = w.indexOf(','); c >= 0; a = c + 1, c = w.indexOf(',', a)) {
+    String t = w.substring(a, c);
+    t.trim();
+    for (int i = 0; i < 6; i++)
+      if (t == LUA_PERMS[i]) m |= 1 << i;
+  }
+  return m;
+}
+
+static String luaPermText(uint8_t m) {
+  String s;
+  for (int i = 0; i < 6; i++)
+    if (m & (1 << i)) s += (s.length() ? ", " : "") + String(LUA_PERMS[i]);
+  return s.length() ? s : String("hiçbiri");
+}
+
+// Başlıktaki "-- anahtar: değer" satırı
+static void luaParseHeader(LuaAppInfo& a, const String& line) {
+  String body = line.substring(2);
+  body.trim();
+  int c = body.indexOf(':');
+  if (c < 0) return;
+  String key = body.substring(0, c), v = body.substring(c + 1);
+  v.trim();
+  if (key == "ad" && v.length()) a.name = v;
+  else if (key == "simge") a.icon = luaIconByName(trLower(v));
+  else if (key == "arkaplan") a.bg = trLower(v) == "evet";
+  else if (key == "surum") a.ver = v.substring(0, 12);
+  else if (key == "izin") {
+    a.perm = luaParsePerms(v);
+    a.manifest = true;
+  }
+}
 static std::vector<LuaAppInfo> luaApps;
 static bool luaScanned = false;
 static int luaCur = -1;
@@ -94,19 +140,11 @@ static void luaScan() {
       LuaAppInfo a;
       a.path = joinPath(LUA_APPS_DIR, n);
       a.name = n.substring(0, n.lastIndexOf('.'));
-      for (int li = 0; li < 6 && f.available(); li++) {  // ilk satırlardaki "-- ad:" ve "-- simge:"
+      for (int li = 0; li < 10 && f.available(); li++) {  // ilk yorum satırları: ad, simge, sürüm, izin…
         String ln = f.readStringUntil('\n');
         ln.trim();
         if (!ln.startsWith("--")) break;
-        String body = ln.substring(2);
-        body.trim();
-        int c = body.indexOf(':');
-        if (c < 0) continue;
-        String key = body.substring(0, c), v = body.substring(c + 1);
-        v.trim();
-        if (key == "ad" && v.length()) a.name = v;
-        else if (key == "simge") a.icon = luaIconByName(trLower(v));
-        else if (key == "arkaplan") a.bg = trLower(v) == "evet";
+        luaParseHeader(a, ln);
       }
       luaApps.push_back(a);
     }
@@ -155,21 +193,48 @@ static void luaHook(lua_State* L, lua_Debug* ar) {
 #endif
 }
 
-static String luaDataDir() {
-  String stem = baseName(luaRunPath);
+static String luaDataDirOf(const String& path) {
+  String stem = baseName(path);
   stem = stem.substring(0, stem.lastIndexOf('.'));
   return String(LUA_APPS_DIR "/veri/") + safeName(stem);
 }
+static String luaDataDir() { return luaDataDirOf(luaRunPath); }
 
-static String luaSafeFile(lua_State* L, int idx) {
-  String n = luaL_checkstring(L, idx);
-  if (n.indexOf('/') >= 0 || n.indexOf('\\') >= 0 || n.indexOf("..") >= 0 || !n.length()) luaL_error(L, "geçersiz dosya adı: %s", n.c_str());
+static String luaEnsureDir() {
   String dir = luaDataDir();
   if (!SD.exists(dir)) {
     if (!SD.exists(LUA_APPS_DIR "/veri")) SD.mkdir(LUA_APPS_DIR "/veri");
     SD.mkdir(dir);
   }
-  return joinPath(dir, n);
+  return dir;
+}
+
+static String luaSafeFile(lua_State* L, int idx) {
+  String n = luaL_checkstring(L, idx);
+  if (n.indexOf('/') >= 0 || n.indexOf('\\') >= 0 || n.indexOf("..") >= 0 || !n.length()) luaL_error(L, "geçersiz dosya adı: %s", n.c_str());
+  return joinPath(luaEnsureDir(), n);
+}
+
+// Uygulamanın günlüğü: veri/<ad>/gunluk.txt; 8 KB'ı geçince gunluk.eski.txt olur (son 8–16 KB kalır)
+static void luaLog(const String& m) {
+  if (!sdOk || !luaRunPath.length()) return;
+  String dir = luaEnsureDir(), p = dir + "/gunluk.txt";
+  File f = SD.open(p, FILE_APPEND);
+  if (f && f.size() > 8192) {
+    f.close();
+    String old = dir + "/gunluk.eski.txt";
+    SD.remove(old);
+    SD.rename(p, old);
+    f = SD.open(p, FILE_APPEND);
+  }
+  if (!f) return;
+  char t[24];
+  struct tm tm;
+  if (localNow(tm)) strftime(t, sizeof t, "%d.%m %H:%M:%S ", &tm);
+  else snprintf(t, sizeof t, "%lus ", (unsigned long)(millis() / 1000));
+  f.print(t);
+  f.println(m);
+  f.close();
 }
 
 static const uint8_t* luaFont(int s) {
@@ -444,12 +509,116 @@ static void luaSetField(lua_State* L, const char* k, lua_Integer v) {
   lua_pushinteger(L, v);
   lua_setfield(L, -2, k);
 }
+static void luaSetStr(lua_State* L, const char* k, const char* v) {
+  lua_pushstring(L, v);
+  lua_setfield(L, -2, k);
+}
+
+static int l_gunluk(lua_State* L) {
+  luaLog(String("uygulama: ") + luaL_checkstring(L, 1));
+  return 0;
+}
+
+static int l_noperm(lua_State* L) { return luaL_error(L, "izin yok: %s", lua_tostring(L, lua_upvalueindex(1))); }
+
+// load yalnız metin (derlenmiş kod VM'i bozabilir); dizgi parçası, ad, kip (yok sayılır), ortam
+static int l_load(lua_State* L) {
+  size_t n;
+  const char* src = luaL_checklstring(L, 1, &n);
+  const char* name = luaL_optstring(L, 2, "=(load)");
+  int env = lua_isnone(L, 4) ? 0 : 4;
+  if (luaL_loadbufferx(L, src, n, name, "t") == LUA_OK) {
+    if (env) {
+      lua_pushvalue(L, env);
+      if (!lua_setupvalue(L, -2, 1)) lua_pop(L, 1);
+    }
+    return 1;
+  }
+  luaL_pushfail(L);
+  lua_insert(L, -2);
+  return 2;
+}
+
+// --- wifi ve bluetooth (yalnız okuma) ---
+static bool luaBtUsed = false;
+static int l_wifi_durum(lua_State* L) {
+  bool c = wifiConnected();
+  lua_createtable(L, 0, 4);
+  lua_pushboolean(L, c);
+  lua_setfield(L, -2, "bagli");
+  if (c) {
+    luaSetStr(L, "ag", wifiSsid().c_str());
+    luaSetField(L, "sinyal", wifiRssi());
+    luaSetStr(L, "ip", wifiIp().c_str());
+  }
+  return 1;
+}
+static int l_bt_tara(lua_State* L) {
+  int sn = lclamp(lopt(L, 1, 10), 3, 30);
+  luaBtUsed = true;
+  if (bsBusy() || bsStart(sn * 1000UL, false)) {
+    lua_pushboolean(L, 1);
+    return 1;
+  }
+  luaL_pushfail(L);
+  lua_pushstring(L, bsError().c_str());
+  return 2;
+}
+static int l_bt_suruyor(lua_State* L) {
+  lua_pushboolean(L, bsBusy());
+  return 1;
+}
+static int l_bt_cihazlar(lua_State* L) {
+  luaBtUsed = true;
+  int n = bsCount();
+  lua_createtable(L, n, 0);
+  BleDev d[4];
+  for (int i = 0; i < n; i += 4) {
+    int got = bsGet(i, d, 4);
+    for (int k = 0; k < got; k++) {
+      lua_createtable(L, 0, 5);
+      luaSetStr(L, "ad", d[k].name);
+      luaSetStr(L, "adres", macText(d[k].addr).c_str());
+      luaSetField(L, "sinyal", d[k].rssi);
+      luaSetField(L, "enguclu", d[k].rssiMax);
+      const char* c = bleCompany(d[k].mfr);
+      luaSetStr(L, "uretici", c ? c : "");
+      lua_rawseti(L, -2, i + k + 1);
+    }
+  }
+  return 1;
+}
+
+// Kütüphane tablosu: izni olmayan işlevin yerine "izin yok: …" hatası veren işlev konur
+static uint8_t luaRunPerm = LP_ESKI;
+struct LuaFn {
+  const char* n;
+  lua_CFunction f;
+  uint8_t p;  // gereken izin (0: herkese açık)
+};
+static void luaLib(lua_State* L, const LuaFn* fs, size_t n, const char* global) {
+  lua_createtable(L, 0, n);
+  for (size_t i = 0; i < n; i++) {
+    uint8_t p = fs[i].p;
+    if (!p || (luaRunPerm & p)) {
+      lua_pushcfunction(L, fs[i].f);
+    } else {
+      int b = 0;
+      while (!((p >> b) & 1)) b++;
+      lua_pushstring(L, LUA_PERMS[b]);
+      lua_pushcclosure(L, l_noperm, 1);
+    }
+    lua_setfield(L, -2, fs[i].n);
+  }
+  if (global) lua_setglobal(L, global);
+}
+#define LUA_LIB(L, a, g) luaLib(L, a, sizeof(a) / sizeof(a[0]), g)
 
 static void luaOpenApi(lua_State* L) {
-  const luaL_Reg ekran[] = {{"temizle", l_temizle}, {"dikdortgen", l_dikdortgen}, {"cizgi", l_cizgi}, {"daire", l_daire},
-                            {"piksel", l_piksel},   {"yazi", l_yazi},             {"genislik", l_genislik}, {"renk", l_renk},
-                            {"simge", l_simge},     {nullptr, nullptr}};
-  luaL_newlib(L, ekran);
+  static const LuaFn ekran[] = {{"temizle", l_temizle, LP_EKRAN}, {"dikdortgen", l_dikdortgen, LP_EKRAN}, {"cizgi", l_cizgi, LP_EKRAN},
+                                {"daire", l_daire, LP_EKRAN},     {"piksel", l_piksel, LP_EKRAN},         {"yazi", l_yazi, LP_EKRAN},
+                                {"genislik", l_genislik, 0},      {"renk", l_renk, 0},                    {"simge", l_simge, LP_EKRAN}};
+  LUA_LIB(L, ekran, nullptr);
   luaSetField(L, "en", SCR_W);
   luaSetField(L, "boy", SCR_H);
   luaSetField(L, "ust", HDR_H);
@@ -474,24 +643,25 @@ static void luaOpenApi(lua_State* L) {
   luaSetField(L, "mor", rgbn(160, 110, 200));
   lua_setglobal(L, "renk");
 
-  const luaL_Reg zaman[] = {{"ms", l_ms}, {"saat", l_saat}, {"tarih", l_tarih}, {nullptr, nullptr}};
-  luaL_newlib(L, zaman);
-  lua_setglobal(L, "zaman");
-
-  const luaL_Reg dosya[] = {{"oku", l_oku}, {"yaz", l_yaz}, {"ekle", l_ekle}, {"var", l_var}, {"sil", l_dsil}, {"liste", l_liste}, {nullptr, nullptr}};
-  luaL_newlib(L, dosya);
-  lua_setglobal(L, "dosya");
-
-  const luaL_Reg ayar[] = {{"al", l_ayar_al}, {"kaydet", l_ayar_kaydet}, {nullptr, nullptr}};
-  luaL_newlib(L, ayar);
-  lua_setglobal(L, "ayar");
-
-  const luaL_Reg sistem[] = {{"bildir", l_bildir}, {"cikis", l_cikis}, {"isik", l_isik}, {"led", l_led}, {"bellek", l_bellek}, {nullptr, nullptr}};
-  luaL_newlib(L, sistem);
-  lua_setglobal(L, "sistem");
+  static const LuaFn zaman[] = {{"ms", l_ms, 0}, {"saat", l_saat, 0}, {"tarih", l_tarih, 0}};
+  LUA_LIB(L, zaman, "zaman");
+  static const LuaFn dosya[] = {{"oku", l_oku, LP_DOSYA}, {"yaz", l_yaz, LP_DOSYA}, {"ekle", l_ekle, LP_DOSYA},
+                                {"var", l_var, LP_DOSYA}, {"sil", l_dsil, LP_DOSYA}, {"liste", l_liste, LP_DOSYA}};
+  LUA_LIB(L, dosya, "dosya");
+  static const LuaFn ayar[] = {{"al", l_ayar_al, LP_DOSYA}, {"kaydet", l_ayar_kaydet, LP_DOSYA}};
+  LUA_LIB(L, ayar, "ayar");
+  static const LuaFn sistem[] = {{"bildir", l_bildir, LP_BILDIRIM}, {"cikis", l_cikis, 0}, {"isik", l_isik, 0},
+                                 {"led", l_led, LP_LED},            {"bellek", l_bellek, 0}, {"gunluk", l_gunluk, 0}};
+  LUA_LIB(L, sistem, "sistem");
+  static const LuaFn wifi[] = {{"durum", l_wifi_durum, LP_WIFI}};
+  LUA_LIB(L, wifi, "wifi");
+  static const LuaFn bt[] = {{"tara", l_bt_tara, LP_BT}, {"suruyor", l_bt_suruyor, LP_BT}, {"cihazlar", l_bt_cihazlar, LP_BT}};
+  LUA_LIB(L, bt, "bluetooth");
 
   lua_pushcfunction(L, l_yaz_seri);
   lua_setglobal(L, "print");
+  lua_pushcfunction(L, l_load);
+  lua_setglobal(L, "load");
   // dosya sistemine doğrudan erişen temel işlevler kapatılır
   lua_pushnil(L);
   lua_setglobal(L, "dofile");
@@ -516,6 +686,7 @@ static void luaShutdown() {
 static void luaSetError(const String& e) {
   String m = e;
   m.replace(LUA_APPS_DIR "/", "");
+  luaLog("hata: " + m);
   {
     Lock l;
     luaErr = m;
@@ -585,7 +756,7 @@ static void luaProcInit() {
   String chunk = "@" + baseName(path);
   luaCallStart = luaSlice = millis();
   uint32_t t0 = micros();
-  int r = luaL_loadbuffer(LS, src.c_str(), src.length(), chunk.c_str());
+  int r = luaL_loadbufferx(LS, src.c_str(), src.length(), chunk.c_str(), "t");
   src = String();
   if (r == LUA_OK) r = lua_pcall(LS, 0, 0, 0);
   kAddBusy(luaProcP, micros() - t0);
@@ -769,6 +940,8 @@ static void luaOpenFn() {
   luaRunPath = path;
   luaRunName = luaCur >= 0 && luaCur < (int)luaApps.size() ? luaApps[luaCur].name : String("Uygulama");
   luaRunBg = luaCur >= 0 && luaCur < (int)luaApps.size() && luaApps[luaCur].bg;
+  luaRunPerm = luaCur >= 0 && luaCur < (int)luaApps.size() ? luaApps[luaCur].perm : LP_ESKI;
+  luaBtUsed = false;
   luaErrNew = luaDrawReq = luaExitReq = luaRawInput = luaHasStep = luaQuit = luaErrPending = false;
   luaFg = true;
 #ifdef HOST
@@ -803,11 +976,45 @@ static void luaCloseFn() {
   luaFg = false;
   if (keep) return;  // arka planda sürer; Görevler'den sonlandırılabilir
   luaStopProc();
+  if (luaBtUsed) bsRelease(false);  // uygulamanın başlattığı Bluetooth taraması ve listesi
+  luaBtUsed = false;
 }
 
 static const App APP_LUA = {"Uygulama", "Uygulama", I_CODE, luaOpenFn, luaDraw, luaTap, nullptr, luaSwipe, luaRaw, luaTick, nullptr, luaCloseFn};
 
-static void luaAppOpen(int i) {
+// --- İzin onayı: NVS'de (luaizin) dosya yolunun özetiyle; değer = dosyanın CRC32'si ve izinler.
+// Dosya ya da izin satırı değişince yeniden sorulur.
+static uint32_t luaFileCrc(const String& path) {
+  File f = SD.open(path);
+  if (!f) return 0;
+  uint8_t b[256];
+  uint32_t c = 0;
+  for (int n; (n = f.read(b, sizeof b)) > 0;) c = crc32Upd(c, b, n);
+  f.close();
+  return c;
+}
+static String luaPermKey(const String& path) {
+  char k[12];
+  snprintf(k, sizeof k, "a%08x", (unsigned)crc32Upd(0, (const uint8_t*)path.c_str(), path.length()));
+  return k;
+}
+static uint64_t luaApproval(const String& path) {
+  Lock l;
+  prefs.begin("luaizin", true);
+  uint64_t v = prefs.getULong64(luaPermKey(path).c_str(), 0);
+  prefs.end();
+  return v;
+}
+static void luaSetApproval(const String& path, uint64_t v) {
+  Lock l;
+  prefs.begin("luaizin", false);
+  if (v) prefs.putULong64(luaPermKey(path).c_str(), v);
+  else prefs.remove(luaPermKey(path).c_str());
+  prefs.end();
+}
+static uint64_t luaWant(const LuaAppInfo& a) { return (uint64_t)luaFileCrc(a.path) << 8 | a.perm; }
+
+static void luaAppOpenNow(int i) {
   if (i < 0 || i >= (int)luaApps.size()) return;
   if (kAlive(luaPid) && luaApps[i].path != luaRunPath && !luaStopProc()) {  // arka plandaki başka uygulama
     toast("Önceki uygulama kapanıyor, biraz bekle");
@@ -817,266 +1024,82 @@ static void luaAppOpen(int i) {
   appOpen(&APP_LUA);
 }
 
-// ============================================================================
-// Örnek uygulamalar ve rehber (klasör yoksa bir kez yazılır)
-// ============================================================================
-static const char LUA_EX_MERHABA[] PROGMEM = R"(-- ad: Merhaba
--- simge: kod
--- İlk Lua uygulaman: ekrana dokundukça sayı artar.
-local sayi = 0
-
-function ciz()
-  ekran.temizle()
-  ekran.yazi("Merhaba DAXEN!", ekran.en / 2, 64, renk.gumus, 3, "orta")
-  ekran.yazi("Ekrana dokun", ekran.en / 2, 92, renk.gri, 2, "orta")
-  ekran.yazi(tostring(sayi), ekran.en / 2, 130, renk.vurgu, 5, "orta")
-end
-
-function dokun(x, y)
-  sayi = sayi + 1
-  ciz()
-end
-)";
-
-static const char LUA_EX_ZAR[] PROGMEM = R"(-- ad: Zar
--- simge: zar
--- İki zar atar. Dokun: at.
-local d1, d2 = 1, 1
-local kalan = 0
-
-local noktalar = {
-  {{0, 0}},
-  {{-1, -1}, {1, 1}},
-  {{-1, -1}, {0, 0}, {1, 1}},
-  {{-1, -1}, {1, -1}, {-1, 1}, {1, 1}},
-  {{-1, -1}, {1, -1}, {0, 0}, {-1, 1}, {1, 1}},
-  {{-1, -1}, {1, -1}, {-1, 0}, {1, 0}, {-1, 1}, {1, 1}},
+static void luaAppOpen(int i) {
+  if (i < 0 || i >= (int)luaApps.size()) return;
+  const LuaAppInfo& a = luaApps[i];
+  uint64_t want = luaWant(a), have = luaApproval(a.path);
+  if (have == want) {
+    luaAppOpenNow(i);
+    return;
+  }
+  String path = a.path;
+  String msg = String(have ? "Uygulama değişmiş. " : "") + "Kullanacakları: " + luaPermText(a.perm) +
+               (a.manifest ? "" : " (izin satırı yok, eski uygulama)") + ". İzin verilsin mi?";
+  dialog(a.name, msg, {"Vazgeç", "İzin ver"}, [i, path, want](int c) {
+    if (c != 1) return;
+    luaSetApproval(path, want);
+    sysLog("lua", "izin verildi: " + baseName(path));
+    luaAppOpenNow(i);
+  }, 1);
 }
 
-local function zar(cx, cy, n)
-  ekran.dikdortgen(cx - 40, cy - 40, 80, 80, renk.yuzey, true)
-  ekran.dikdortgen(cx - 40, cy - 40, 80, 80, renk.cizgi, false)
-  for _, p in ipairs(noktalar[n]) do
-    ekran.daire(cx + p[1] * 22, cy + p[2] * 22, 7, renk.gumus, true)
-  end
-end
+// --- Yönetim: kaldırma (onaylı; veri klasörü kalır) ve Dosyalar'dan yükleme ---
+static void luaRemoveAsk(int i) {
+  if (i < 0 || i >= (int)luaApps.size()) return;
+  String path = luaApps[i].path, name = luaApps[i].name;
+  dialog("Kaldırılsın mı?", name + " silinecek. Uygulamanın verileri (veri klasörü) kalır.", {"Vazgeç", "Kaldır"}, [path, name](int c) {
+    if (c != 1) return;
+    if (kAlive(luaPid) && luaRunPath == path && !luaStopProc()) {
+      toast("Uygulama kapanmadı, sonra dene");
+      return;
+    }
+    if (!SD.remove(path)) {
+      toast("Silinemedi");
+      return;
+    }
+    luaSetApproval(path, 0);
+    luaScanned = false;
+    sysLog("lua", "kaldırıldı: " + baseName(path));
+    toast(name + " kaldırıldı");
+    shellRedraw(true);
+  }, 1);
+}
 
-function ciz()
-  ekran.temizle()
-  zar(105, 110, d1)
-  zar(215, 110, d2)
-  ekran.yazi("Toplam " .. (d1 + d2), 160, 170, renk.gumus, 3, "orta")
-  ekran.yazi("Atmak için dokun", 160, 204, renk.soluk, 1, "orta")
-end
+static void luaInstall(const String& from) {
+  luaAppCount();  // klasör yoksa oluşur
+  String to = joinPath(LUA_APPS_DIR, baseName(from));
+  auto go = [from, to]() {
+    if (!fCopyFile(from, to)) {
+      toast("Yüklenemedi");
+      return;
+    }
+    luaScanned = false;
+    sysLog("lua", "yüklendi: " + baseName(to));
+    toast("Yüklendi; Uygulamalar'da, ilk açılışta izin sorulur");
+  };
+  if (!SD.exists(to)) go();
+  else dialog("Üzerine yazılsın mı?", baseName(to) + " zaten yüklü. Yeni dosyayla değiştirilsin mi?", {"Vazgeç", "Değiştir"}, [go](int c) {
+    if (c == 1) go();
+  }, 1);
+}
 
-function dokun()
-  kalan = 10
-end
-
-function adim(dt)
-  if kalan > 0 then
-    kalan = kalan - 1
-    d1, d2 = math.random(6), math.random(6)
-    ciz()
-  end
-end
-)";
-
-static const char LUA_EX_SAYAC[] PROGMEM = R"(-- ad: Sayaç
--- simge: liste
--- Kaldığı yeri hatırlayan sayaç. Alttaki düğmeler: -1 / +1, sayıya dokun: sıfırla.
-local n = tonumber(ayar.al("n", "0")) or 0
-
-local function dugme(x, y, w, h, yazi)
-  ekran.dikdortgen(x, y, w, h, renk.yuzey, true)
-  ekran.dikdortgen(x, y, w, h, renk.cizgi, false)
-  ekran.yazi(yazi, x + w / 2, y + h / 2 - 11, renk.gumus, 3, "orta", renk.yuzey)
-end
-
-function ciz()
-  ekran.temizle()
-  ekran.yazi(tostring(n), 160, 56, renk.gumus, 5, "orta")
-  ekran.yazi("Sıfırlamak için sayıya dokun", 160, 134, renk.soluk, 1, "orta")
-  dugme(20, 168, 130, 52, "−1")
-  dugme(170, 168, 130, 52, "+1")
-end
-
-function dokun(x, y)
-  if y > 160 then
-    if x < 160 then n = n - 1 else n = n + 1 end
-  else
-    n = 0
-  end
-  ayar.kaydet("n", n)
-  ciz()
-end
-)";
-
-static const char LUA_EX_TOP[] PROGMEM = R"(-- ad: Top
--- simge: oyun
--- Yerçekimli zıplayan top. Parmağınla fırlat.
-local x, y, vx, vy = 160, 100, 3, 0
-local r = 12
-local sx, sy, st = 0, 0, 0
-
-local function top(c)
-  ekran.daire(math.floor(x), math.floor(y), r, c, true)
-end
-
-function ciz()
-  ekran.temizle()
-  ekran.yazi("Sürükleyip bırak: fırlat", 160, 40, renk.soluk, 1, "orta")
-  top(renk.vurgu)
-end
-
-function adim(dt)
-  top(renk.zemin)
-  vy = vy + 0.4
-  x, y = x + vx, y + vy
-  if x < r then x = r; vx = -vx * 0.9 end
-  if x > ekran.en - r then x = ekran.en - r; vx = -vx * 0.9 end
-  if y > ekran.boy - r then y = ekran.boy - r; vy = -vy * 0.82; vx = vx * 0.98 end
-  if y < ekran.ust + r + 24 then y = ekran.ust + r + 24; vy = -vy end
-  top(renk.vurgu)
-end
-
-function bas(px, py)
-  sx, sy, st = px, py, zaman.ms()
-end
-
-function birak(px, py)
-  local t = math.max(30, zaman.ms() - st)
-  vx = (px - sx) / t * 12
-  vy = (py - sy) / t * 12
-end
-)";
-
-static const char LUA_EX_ZAMAN[] PROGMEM = R"(-- ad: Zamanlayıcı
--- simge: kronometre
--- arkaplan: evet
--- Geri sayım. Uygulamadan çıksan da arka planda sayar, bitince haber verir.
-local sure = 5 * 60
-local kalan = sure
-local calisiyor = false
-local son = zaman.ms()
-
-local function iki(n) return string.format("%02d", n) end
-
-local function dugme(x, y, w, h, yazi, vurgu)
-  local zemin = vurgu and renk.vurgu or renk.yuzey
-  ekran.dikdortgen(x, y, w, h, zemin, true)
-  ekran.dikdortgen(x, y, w, h, renk.cizgi, false)
-  ekran.yazi(yazi, x + w / 2, y + h / 2 - 8, vurgu and renk.zemin or renk.gumus, 2, "orta", zemin)
-end
-
-local function sayi()
-  ekran.dikdortgen(20, 44, 280, 76, renk.zemin, true)
-  ekran.yazi(iki(kalan // 60) .. ":" .. iki(kalan % 60), 160, 50, calisiyor and renk.vurgu or renk.gumus, 5, "orta")
-end
-
-function ciz()
-  ekran.temizle()
-  sayi()
-  ekran.yazi(calisiyor and "Çıksan da sayar" or "Süreyi ayarla, başlat", 160, 134, renk.soluk, 1, "orta")
-  dugme(16, 168, 90, 48, "−1 dk")
-  dugme(115, 168, 90, 48, calisiyor and "Durdur" or "Başlat", true)
-  dugme(214, 168, 90, 48, "+1 dk")
-end
-
-function dokun(x, y)
-  if y < 160 then return end
-  if x < 110 then
-    sure = math.max(60, sure - 60); kalan = sure; calisiyor = false
-  elseif x < 210 then
-    if kalan == 0 then kalan = sure end
-    calisiyor = not calisiyor
-    son = zaman.ms()
-  else
-    sure = math.min(99 * 60, sure + 60); kalan = sure; calisiyor = false
-  end
-  ciz()
-end
-
-function adim(dt)
-  if not calisiyor then return end
-  if zaman.ms() - son < 1000 then return end
-  son = son + 1000
-  kalan = kalan - 1
-  if kalan <= 0 then
-    kalan = 0
-    calisiyor = false
-    sistem.bildir("Zamanlayıcı: süre doldu")
-    sistem.led(0, 0, 255)
-    ciz()
-  else
-    sayi()
-  end
-end
-)";
-
-static const char LUA_GUIDE[] PROGMEM = R"(DAXEN VANE · Kendi uygulamanı yaz (Lua)
-=========================================
-
-Bu klasördeki her .lua dosyası Uygulamalar ekranında bir uygulama olarak görünür.
-Dosyanın ilk satırları uygulamanın adını ve simgesini söyler:
-
-  -- ad: Benim Uygulamam
-  -- simge: oyun
-  -- arkaplan: evet      (isteğe bağlı: çıkınca kapanmaz, arka planda sürer)
-
-Her uygulama ayrı bir süreç olarak çalışır: uzun bir hesap yapsa da saat, dokunma ve alarmlar
-donmaz. Çalışan süreçleri Görevler uygulamasında görür, istersen sonlandırırsın. Arka planda
-süren uygulama ekrana çizemez ama adim() ve sistem.bildir() çalışır; tekrar açınca ciz() gelir.
-
-Simgeler: kod oyun zar saat alarm not liste hesap grafik muzik kalem kitap isik hedef
-kronometre dunya bulut gunes ates bayrak kart yilan foto klavye cip
-
-Uygulama, tanımladığın işlevlerle çalışır (hepsi isteğe bağlı):
-  baslat()          açılınca bir kez
-  ciz()             ekran baştan çizilecekken
-  dokun(x, y)       ekrana dokunup bırakınca
-  kaydir(yon)       "sol", "sag", "yukari", "asagi"
-  bas(x, y), surukle(x, y), birak(x, y)
-                    parmağı izlemek için (tanımlarsan dokun/kaydir gelmez)
-  adim(dt)          saniyede ~30 kez; dt: geçen milisaniye (animasyon için)
-  kapat()           çıkarken
-
-Ekran 320 x 240. Üstteki 30 piksel başlık çubuğudur (ekran.ust); sol üst köşe geri tuşudur.
-  ekran.temizle([renk])
-  ekran.dikdortgen(x, y, en, boy, renk, [dolu=true])
-  ekran.cizgi(x1, y1, x2, y2, renk, [kalınlık=1])
-  ekran.daire(x, y, r, renk, [dolu=true])
-  ekran.piksel(x, y, renk)
-  ekran.yazi(metin, x, y, [renk], [boyut 1-5], ["sol"|"orta"|"sag"], [arka renk])
-      boyut 1: küçük, 2: normal, 3: büyük, 4 ve 5: yalnızca rakamlar (çok büyük)
-  ekran.genislik(metin, [boyut])
-  ekran.renk(k, y, m)              0-255 değerlerden renk
-  ekran.simge(ad, x, y, [boyut], [renk])
-  ekran.en, ekran.boy, ekran.ust
-
-Renkler: renk.zemin yuzey yuzey2 gumus gri soluk cizgi vurgu siyah beyaz
-         kirmizi turuncu sari yesil mavi mor
-
-  zaman.ms()                 açılıştan beri milisaniye
-  zaman.saat()               saat, dakika, saniye
-  zaman.tarih()              yıl, ay, gün, haftanın günü (0 = pazar)
-
-Dosyalar yalnızca uygulamanın kendi klasöründedir (uygulamalar/veri/<dosya adı>/):
-  dosya.oku(ad)   dosya.yaz(ad, metin)   dosya.ekle(ad, metin)
-  dosya.var(ad)   dosya.sil(ad)          dosya.liste()
-  ayar.al(ad, varsayılan)    ayar.kaydet(ad, değer)
-
-  sistem.bildir(metin)       alttaki balon
-  sistem.cikis()             uygulamayı kapatır
-  sistem.isik()              ortam ışığı (%)
-  sistem.led(k, y, m)        kartın RGB ışığı, kısa süre
-  sistem.bellek()            uygulamanın kalan belleği (bayt)
-
-Lua'nın string, table, math, utf8 ve coroutine kitaplıkları vardır (io ve os yok).
-Takılan bir uygulamadan geri tuşuyla çıkabilirsin; süreç sonlandırılır.
-Hata olursa ekranda satır numarasıyla görünür.
-Örnekler: merhaba.lua, zar.lua, sayac.lua, top.lua, zamanlayici.lua (arka planda sayar). Değiştirip dene!
-)";
+// ============================================================================
+// Örnek uygulamalar ve rehber: sıkıştırılmış olarak flash'ta (apps/luapack.h, kaynakları
+// firmware/lua/), klasör yoksa bir kez SD'ye açılır. Rehber yeni sürümde bir kez yenilenir.
+// ============================================================================
+static bool lpWrite(const LuaPackFile& p, const String& dir) {
+  uint8_t* b = (uint8_t*)malloc(p.len);
+  if (!b) return false;
+  bool ok = lzUnpack(p.data, p.plen, b, p.len) == p.len;
+  File f;
+  if (ok) f = SD.open(joinPath(dir, p.name), FILE_WRITE);
+  if (f) {
+    ok = f.write(b, p.len) == p.len;
+    f.close();
+  }
+  free(b);
+  return ok && f;
+}
 
 static void luaWriteFile(const char* path, const char* data) {
   File f = SD.open(path, FILE_WRITE);
@@ -1086,19 +1109,15 @@ static void luaWriteFile(const char* path, const char* data) {
 }
 
 static void luaEnsureExamples() {
-  if (!SD.exists(LUA_APPS_DIR)) {
+  bool fresh = !SD.exists(LUA_APPS_DIR);
+  if (fresh) {
     if (!SD.exists("/daxen")) SD.mkdir("/daxen");
     SD.mkdir(LUA_APPS_DIR);
-    luaWriteFile(LUA_APPS_DIR "/merhaba.lua", LUA_EX_MERHABA);
-    luaWriteFile(LUA_APPS_DIR "/zar.lua", LUA_EX_ZAR);
-    luaWriteFile(LUA_APPS_DIR "/sayac.lua", LUA_EX_SAYAC);
-    luaWriteFile(LUA_APPS_DIR "/top.lua", LUA_EX_TOP);
   }
-  // 2. sürüm: süreçler ve arka plan (yeni örnek ve güncel rehber, bir kez)
-  if (!SD.exists(LUA_APPS_DIR "/veri/.surum2")) {
-    if (!SD.exists(LUA_APPS_DIR "/zamanlayici.lua")) luaWriteFile(LUA_APPS_DIR "/zamanlayici.lua", LUA_EX_ZAMAN);
-    luaWriteFile(LUA_APPS_DIR "/REHBER.txt", LUA_GUIDE);
-    if (!SD.exists(LUA_APPS_DIR "/veri")) SD.mkdir(LUA_APPS_DIR "/veri");
-    luaWriteFile(LUA_APPS_DIR "/veri/.surum2", "2");
-  }
+  if (!fresh && SD.exists(LUA_APPS_DIR "/veri/.surum3")) return;
+  // ilk kez: bütün örnekler; güncellemede yalnız rehber (silinen örnekler geri gelmesin)
+  for (auto& p : LUA_PACK)
+    if (p.group == 0 && (fresh || !strcmp(p.name, "REHBER.txt"))) lpWrite(p, LUA_APPS_DIR);
+  if (!SD.exists(LUA_APPS_DIR "/veri")) SD.mkdir(LUA_APPS_DIR "/veri");
+  luaWriteFile(LUA_APPS_DIR "/veri/.surum3", "3");
 }

@@ -266,7 +266,7 @@ static String bleRow(int no, const BleDev& d) {
 
 static void bleAgo(uint32_t ms, char* b) {
   if (ms < 1000) strcpy(b, "şimdi");
-  else snprintf(b, 16, "%u sn önce", (unsigned)(ms / 1000));
+  else snprintf(b, 24, "%u sn önce", (unsigned)(ms / 1000));
 }
 
 static void bleDetail(const BleDev& d, uint32_t now, std::vector<String>& o) {
@@ -291,7 +291,7 @@ static void bleDetail(const BleDev& d, uint32_t now, std::vector<String>& o) {
   blePush(o, "Servisler: %s", L ? sv : "reklamda yok");
   if (d.tx != BD_NO_TX) blePush(o, "Yayın gücü: %d dBm", d.tx);
   blePush(o, "Bağlanabilir: %s", d.flags & BD_CONN ? "evet" : d.flags & BD_NOCONN ? "hayır" : "bilinmiyor");
-  char a1[16], a2[16];
+  char a1[24], a2[24];
   bleAgo(now - d.first, a1);
   bleAgo(now - d.last, a2);
   blePush(o, "Paket: %u · ilk %s · son %s", (unsigned)d.seen, a1, a2);

@@ -24,6 +24,8 @@ class Preferences {
   uint32_t getUInt(const char* k, uint32_t d = 0) { auto it = db().find(key(k)); return it == db().end() ? d : strtoul(it->second.c_str(), 0, 10); }
   size_t putUChar(const char* k, uint8_t v) { return putUInt(k, v); }
   uint8_t getUChar(const char* k, uint8_t d = 0) { return getUInt(k, d); }
+  size_t putULong64(const char* k, uint64_t v) { db()[key(k)] = std::to_string(v); return 8; }
+  uint64_t getULong64(const char* k, uint64_t d = 0) { auto it = db().find(key(k)); return it == db().end() ? d : strtoull(it->second.c_str(), 0, 10); }
   size_t putShort(const char* k, int16_t v) { return putInt(k, v); }
   int16_t getShort(const char* k, int16_t d = 0) { return getInt(k, d); }
   size_t putFloat(const char* k, float v) { db()[key(k)] = std::to_string(v); return 4; }
