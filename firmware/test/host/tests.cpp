@@ -1167,6 +1167,79 @@ static void testDraw() {
   appExit();
 }
 
+// ---------------------------------------------------------------------------
+// YKS: soru sayacı, çalışma geçmişi, odak modu (core/soru.h, apps/yks.h)
+// ---------------------------------------------------------------------------
+static void testSoru() {
+  group("soru sayacı ve geçmiş");
+  CHECK(sqDayNum(1970, 1, 1) == 0 && sqDayNum(2026, 11, 22) - sqDayNum(2026, 11, 1) == 21);
+  CHECK(sqDayOf("2026-11-22") == sqDayNum(2026, 11, 22) && sqDayOf("2026-1x-22") == -1 && sqDayOf("") == -1);
+  CHECK(sqWeekday(sqDayNum(2026, 11, 22)) == 6 && sqWeekday(sqDayNum(2026, 11, 23)) == 0);  // pazar, pazartesi
+  SoruLog s;
+  uint32_t d0 = sqDayNum(2026, 11, 20);
+  CHECK(sqAdd(s, d0, 1, 10) == 10 && sqAdd(s, d0, 3, 5) == 5 && s.last[0] == 15 && s.ders[1] == 10);
+  CHECK(sqAdd(s, d0, 3, -9) == -5 && s.ders[3] == 0 && s.last[0] == 10);  // sıfırın altına inmez
+  sqAdd(s, d0 + 2, 0, 7);  // iki gün sonra
+  CHECK(s.last[0] == 7 && s.last[1] == 0 && s.last[2] == 10 && s.ders[1] == 0 && sqSum(s, 3) == 17);
+  sqRoll(s, d0 + 2 + SQ_DAYS);
+  CHECK(sqSum(s, SQ_DAYS) == 0);
+  CHECK(sqDersOf("TYT Matematik") == 1 && sqDersOf("Fizik") == 3 && sqDersOf("Resim") == -1 && sqDersOf("") == -1);
+  int32_t day, sec;
+  CHECK(histParseSession("{\"type\":\"session\",\"date\":\"2026-11-21\",\"at\":5,\"sec\":1500,\"ders\":\"Fizik\"}", day, sec) &&
+        day == sqDayNum(2026, 11, 21) && sec == 1500);
+  CHECK(!histParseSession("{\"type\":\"complete\",\"date\":\"2026-11-21\"}", day, sec));
+  CHECK(histLevel(0) == 0 && histLevel(10) == 1 && histLevel(60) == 2 && histLevel(120) == 3 && histLevel(300) == 4);
+  uint16_t m[10] = {0, 30, 20, 0, 5, 5, 5, 5, 0, 0};
+  int cur, best;
+  histStreaks(m, 10, cur, best);
+  CHECK(cur == 2 && best == 4);  // bugün henüz yok: dünden sayılır
+  m[0] = 10;
+  histStreaks(m, 10, cur, best);
+  CHECK(cur == 3);
+
+  group("YKS soru sekmesi ve odak modu");
+  appOpen(&APP_YKS);
+  yksSetTab(2);
+  sqLoad();
+  int before = sq.last[0];
+  g_soru.clear();
+  sqDers = 4;  // Kimya
+  yksSoruTap(220, 120);  // +10
+  yksSoruTap(40, 120);   // −1
+  CHECK(sq.last[0] == before + 9 && sq.ders[4] >= 9);
+  g_ms += 5000;
+  yksTick();
+  CHECK(g_soru.size() == 1 && g_soru[0].first == "Kimya" && g_soru[0].second == 9);
+  {
+    SoruLog back;
+    CHECK(prefs.getBytes("soru", &back, sizeof back) == sizeof back && back.last[0] == sq.last[0]);
+  }
+  yksSoruTap(250, 44);  // ders seçici
+  CHECK(sqPick);
+  yksSoruTap(222, 124 + 28 + 5);  // Biyoloji (satır 1, sütun 2)
+  CHECK(!sqPick && sqDers == 5);
+  yksSetTab(3);
+  yksTap(100, 140);
+  CHECK(yksHist);
+  CHECK(yksBack() && !yksHist);
+  // odak modu: oyunlar açılmaz, afiş çıkmaz, 3 saat sonra biter
+  focusSet(true);
+  appOpen(&APP_GAMES);
+  CHECK(curApp == &APP_YKS);
+  bannerUntil = 0;
+  Notif n;
+  n.title = "Mesaj";
+  n.text = "selam";
+  uiNotif(n);
+  CHECK(bannerUntil == 0);
+  g_ms += FOCUS_MS + 1;
+  shellTick();
+  CHECK(!focusOn);
+  appOpen(&APP_GAMES);
+  CHECK(curApp == &APP_GAMES);
+  appExit();
+}
+
 static void testGizli() {
   group("gizli özellikler");
   homeShow();
@@ -1407,6 +1480,7 @@ int main() {
   testGizli();
   testMem();
   testDraw();
+  testSoru();
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

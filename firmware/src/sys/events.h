@@ -63,6 +63,22 @@ static void enqueueEvent(const char* type, const String& itemId, int sec, const 
   }
 }
 
+// Soru sayacı (apps/yks.h): buluta ve SD'deki kalıcı kayda gider; plana etkisi yoktur, yerel olay
+// listesine girmez (plan olaylarının yerini almasın).
+static void enqueueSoru(const String& ders, int n) {
+  String date = todayStr();
+  JsonDocument d;
+  d["type"] = "soru";
+  d["date"] = date;
+  d["at"] = nowMs();
+  d["ders"] = ders;
+  d["n"] = n;
+  String s;
+  serializeJson(d, s);
+  queueAppend(s);
+  sdLog(s, date);
+}
+
 // Açılışta kuyrukta bekleyen olaylar ekrana yeniden işlenir (telefon henüz görmedi).
 static void rebuildLocalEvents() {
   std::vector<String> q = queuePeek(60);
@@ -78,7 +94,7 @@ static void rebuildLocalEvents() {
     e.date = String((const char*)(d["date"] | ""));
     e.sec = d["sec"] | 0;
     e.at = d["at"].as<long long>();
-    if (e.type.length()) localEvents.push_back(e);
+    if (e.type.length() && e.type != "soru") localEvents.push_back(e);
   }
 }
 

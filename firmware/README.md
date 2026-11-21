@@ -35,7 +35,7 @@ satıra dokununca ya da BOOT'a basınca kapanır. Menü açıkken alttaki uygula
 
 | Uygulama | Ne yapar |
 | --- | --- |
-| **YKS** | Plan (dokun: tamamlandı, basılı tut: başlat / ertele), Sayaç (Pomodoro dahil, telefondaki sayaçla ortak), Özet |
+| **YKS** | Plan (dokun: tamamlandı, basılı tut: başlat / ertele), Sayaç (Pomodoro ve odak modu dahil, telefondaki sayaçla ortak), Soru (günlük çözülen soru, derse göre, hedef, son 14 gün), Özet (Çalışma serisi → son 12 haftanın ısı haritası) |
 | **Notlar** | Klavyeyle metin notu ve parmakla el yazısı notu (`/daxen/notlar`) |
 | **Dosyalar** | SD kart: aç, yeniden adlandır, kopyala, kes, yapıştır, sil, klasör oluştur |
 | **Ayarlar** | Wi-Fi (ağ listesi, şifre, 5 kayıtlı ağ), Bluetooth, Ekran (parlaklık, gece kısma, otomatik parlaklık, dokunmatik ayarı), Bulut hesabı, Depolama, Güncelleme, Sistem |
@@ -89,6 +89,14 @@ görür ve kendisi çıkar, böylece yarım kalan SD yazması ya da tutulan bir 
 Ağır işler (Lua, web sunucusu, ağ aracı, satranç motoru, Bluetooth taraması) başlamadan önce bellek
 bekçisine sorar: 18 KB taban korunur, aynı anda en çok 3 ağır iş çalışır. Ayrıntı ve sayılar:
 [docs/bellek.md](../docs/bellek.md).
+
+**Odak modu** (YKS → Sayaç): telefondan gelen bildirimler afiş olarak çıkmaz (Bildirimler'de durur),
+Oyunlar açılmaz; 3 saat sonra kendiliğinden biter. Sistem alanında "Odak" görünür.
+
+**Soru sayacı** (YKS → Soru): +1/+5/+10/+20 ve −1 düzeltme; ders seçici (kronometredeki ders varsayılan).
+Sayılar NVS'de; her değişiklik birkaç saniye sonra `soru` olayı olarak buluta ve SD'deki kalıcı kayda
+gider (telefondaki uygulama bu olayı şimdilik yok sayar). Çalışma geçmişi SD'deki aylık kalıcı
+kayıttaki kronometre oturumlarından hesaplanır (telefonda tutulan süreler dahil değildir).
 
 ## Ses
 

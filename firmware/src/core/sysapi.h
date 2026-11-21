@@ -18,6 +18,7 @@ static bool backupLoad(String& msg);
 static void gizliAc(const char* file);  // gizli özellikler (apps/lua.h, docs/gizli.md)
 static void gizliDevFirst();
 static void toggleItem(const Item& it);
+static void enqueueSoru(const String& ders, int n);  // sys/events.h
 static void postponeItem(const Item& it);
 static void startItemTimer(const Item& it);
 static void selectForTimer(const Item& it);

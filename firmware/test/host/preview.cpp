@@ -1,6 +1,7 @@
 // DAXEN VANE arayüz önizlemesi (bilgisayarda): gerçek arayüz kodunu sahte ekranla derler,
 // her senaryonun ekranını out/ klasörüne yazar. Senaryo adı verilirse yalnız o çalışır.
 #include "host_sys.h"
+#include <map>
 
 int main(int argc, char** argv) {
   setupState();
@@ -95,8 +96,43 @@ int main(int argc, char** argv) {
     yksDraw(true);
     shot("33-yks-sayac-calisiyor");
     timerReset();
+    focusSet(true);
+    yksDraw(true);
+    shot("33b-yks-odak");
     yksSetTab(2);
-    shot("34-yks-ozet");
+    sqLoad();
+    for (int d = 13; d >= 1; d--) sq.last[d] = (d * 37) % 140;
+    sqDers = 1; yksSoruTap(100, 120); yksSoruTap(160, 120); yksSoruTap(220, 120);  // +1 +5 +10 Matematik
+    sqDers = 3; yksSoruTap(280, 120);                                               // +20 Fizik
+    yksDrawSoru();
+    shot("34-yks-soru");
+    yksSoruTap(250, 44);
+    shot("34b-yks-soru-ders");
+    yksSoruTap(20, 10 + 124);
+    yksSetTab(3);
+    shot("35-yks-ozet");
+    {  // kalıcı kayıt: son 80 günün kronometre oturumları
+      struct tm t; localNow(t);
+      time_t now = time(nullptr);
+      sdMkdirs("/calisma");
+      std::map<std::string, std::string> files;
+      for (int i = 0; i < 80; i++) {
+        time_t d = now - (time_t)i * 86400; struct tm dt; localtime_r(&d, &dt);
+        int mins = (i * 53 + 17) % 200; if (i % 9 == 4) mins = 0;
+        if (!mins) continue;
+        char date[16], fn[48], line[160];
+        strftime(date, sizeof date, "%Y-%m-%d", &dt);
+        snprintf(fn, sizeof fn, "/calisma/kayit-%04d-%02d.txt", dt.tm_year + 1900, dt.tm_mon + 1);
+        snprintf(line, sizeof line, "{\"type\":\"session\",\"date\":\"%s\",\"at\":1,\"sec\":%d,\"ders\":\"Matematik\"}\n", date, mins * 60);
+        files[fn] += line;
+        files[fn] += "{\"type\":\"complete\",\"itemId\":\"x\",\"date\":\"" + std::string(date) + "\"}\n";
+      }
+      for (auto& f : files) sdWrite(f.first.c_str(), f.second.c_str());
+    }
+    yksTap(100, 140);
+    shot("36-yks-gecmis");
+    yksBack();
+    focusSet(false);
   }
   if (want("settings")) {
     appOpen(&APP_SETTINGS);

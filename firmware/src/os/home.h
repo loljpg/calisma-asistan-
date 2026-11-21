@@ -264,6 +264,10 @@ static void homeShow() {
 }
 
 static void appOpen(const App* a, bool fromHome) {
+  if (focusOn && a == &APP_GAMES) {  // odak modu (apps/yks.h)
+    toast("Odak modunda oyunlar kapalı");
+    return;
+  }
   deskNoteOpen(a);
   if (curApp && curApp != a && curApp->close) curApp->close();
   closeStack();
@@ -522,6 +526,10 @@ static void shellBoot(int stage) {
 static void shellTick() {
   uint32_t ms = millis();
   clockBgTick();
+  if (focusOn && (int32_t)(ms - focusUntil) >= 0) {
+    focusOn = false;
+    toast("Odak modu bitti");
+  }
   if (assetsFresh) {  // varlık paketi indi: yazı tipleriyle baştan çiz
     assetsFresh = false;
     luaScanned = false;
@@ -588,7 +596,7 @@ static bool shellOverlayActive() { return ov.kind || kbm.active || ringOn || ban
 static bool appWantsQuiet() { return curApp && curApp->raw && shScreen == SH_APP; }  // oyun ve çizimde afiş yok
 static void uiNotif(const Notif& n) {
   banner = n;
-  if (kbm.active || ov.kind || otaProgress >= 0 || appWantsQuiet()) return;
+  if (kbm.active || ov.kind || otaProgress >= 0 || appWantsQuiet() || focusOn) return;  // odak modu: afiş yok (listede durur)
   drawBanner();
   bannerUntil = millis() + BANNER_MS;
 }

@@ -29,6 +29,12 @@ class File {
   int read() { if (!_f) return -1; int c = fgetc(_f); return c == EOF ? -1 : c; }
   size_t read(uint8_t* b, size_t n) { return _f ? fread(b, 1, n, _f) : 0; }
   size_t readBytes(char* b, size_t n) { return read((uint8_t*)b, n); }
+  size_t readBytesUntil(char t, char* b, size_t n) {
+    size_t k = 0;
+    int c;
+    while (k < n && (c = read()) >= 0 && c != t) b[k++] = (char)c;
+    return k;
+  }
   int peek() { if (!_f) return -1; int c = fgetc(_f); if (c != EOF) ungetc(c, _f); return c == EOF ? -1 : c; }
   int available() { if (!_f) return 0; long p = ftell(_f); return (int)(size() - p); }
   bool seek(uint32_t pos) { return _f && fseek(_f, pos, SEEK_SET) == 0; }

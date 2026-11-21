@@ -30,6 +30,7 @@ static int deskActs(DeskAct* o) {
   if (kAlive(luaPid) && !luaFg) o[n++] = {I_CODE, "Lua"};
   if (ndBusy() || bsBusy()) o[n++] = {I_PULSE, "Tarama"};
   if (swRunning) o[n++] = {I_STOPWATCH, "Sayaç"};
+  if (focusOn) o[n++] = {I_TARGET, "Odak"};
   if (media.on && media.playing) o[n++] = {I_NOTE, "Medya"};
   return n;
 }
@@ -40,7 +41,7 @@ static int deskDrawActs(int x) {
     x -= 18;
     drawIcon(I_LOCK, x, 5, 14, C_TEXT2, C_BG);
   }
-  DeskAct a[5];
+  DeskAct a[6];
   int n = std::min(3, deskActs(a));
   for (int i = 0; i < n; i++) {
     x -= 18;
@@ -81,7 +82,7 @@ static void sysMenuDraw() {
   slider(36, SM_BRI_Y, 276, (cfg.bright - 16) * 100 / (255 - 16), C_BG);
 
   text("Son kullanılanlar", 10, SM_APP_Y, F_XS, C_TEXT3, C_BG, ML_DATUM);
-  DeskAct act[5];
+  DeskAct act[6];
   int na = deskActs(act);
   if (na) {  // arka planda süren işler (sistem alanı)
     int x = 312;

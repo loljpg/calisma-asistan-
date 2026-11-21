@@ -39,6 +39,8 @@ static std::vector<Item> displayItems(int& studied, View& snapshot) {
 static bool planIsToday(const View& v) { return v.valid && v.date == todayStr(); }
 static bool hasCreds() { return cfg.dbUrl.length() > 0; }
 static int queueCount() { return 3; }
+static std::vector<std::pair<String, int>> g_soru;  // sıraya konan soru olayları
+static void enqueueSoru(const String& ders, int n) { g_soru.push_back({ders, n}); }
 static void saveConfig() {}
 static void wifiKnownSave() {}
 static int g_backups = 0;

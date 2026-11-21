@@ -32,7 +32,10 @@ static bool outTimerPending = false, remoteTimerDirty = false;
 static long long timerRevSeen = 0;
 
 static bool sdOk = false;
-static volatile bool assetsFresh = false;  // varlık paketi yeni indi: ekran baştan çizilsin (sys/assets.h)
+static volatile bool assetsFresh = false;
+// Odak modu (apps/yks.h): telefondan gelen bildirim afişi ve oyunlar kapalı; focusUntil'de biter
+static bool focusOn = false;
+static uint32_t focusUntil = 0;  // varlık paketi yeni indi: ekran baştan çizilsin (sys/assets.h)
 static Preferences prefs;
 
 // Bluetooth: bağlıyken telefon buluta aracılık eder, kart kendi bulut işlerini durdurur.
