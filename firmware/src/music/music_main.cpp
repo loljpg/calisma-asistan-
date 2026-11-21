@@ -20,6 +20,7 @@
 #include "MP3DecoderHelix.h"
 #ifndef HOST
 #include <driver/i2s.h>
+#include <driver/gpio.h>
 #endif
 
 #include "../config.h"
@@ -46,7 +47,8 @@ static void sysSetBacklight(int level) { ledcWrite(0, constrain(level, 4, 255));
 // ============================================================================
 static std::vector<String> tracks;
 static int cur = -1;
-static int volume = 60;          // 0-100
+static int volume = 60;          // 0-100, kulaklık
+static int spkVol = 15;          // 0-100, hoparlör (üstel ölçek, aşağıya bak)
 static bool shuffle = false;
 static uint8_t repeatMode = 1;   // 0 kapalı, 1 liste, 2 tek şarkı
 static String curTitle, curArtist, curFolder;
@@ -265,13 +267,20 @@ static int32_t a2dpData(Frame* f, int32_t count) {
 }
 
 // --- Hoparlör: I2S → iç DAC (yalnızca GPIO26; GPIO25 dokunmatiğin saat ucudur, açılmaz) ---
-// DAC 8 bittir: örnekler tek kanala indirilir, birinci dereceden gürültü biçimlendirmeyle
-// 8 bite yuvarlanır (nicemleme gürültüsü yüksek frekanslara itilir, cızırtı azalır).
-// 3,5–8 Ω hoparlör için en yüksek düzey %80 ile sınırlı.
-static const int SPK_BUF = 256;
-static const int32_t SPK_MAX = 205;  // /256
+// Kartın yükselteci çok yüksek kazançlı: DAC'ın tek basamağı (13 mV) bile yüksek ses veriyor. Bu yüzden:
+//  · Ses düzeyi üstel: 0,25 basamaktan 56 basamağa (dirençle kısılmış hoparlör için de yetsin).
+//  · 8 kat aşırı örnekleme (352,8 kHz) ve 2. dereceden gürültü biçimlendirme: 8 bitlik DAC basamaktan
+//    küçük sesleri de verebilir, nicemleme gürültüsü duyulmayan yüksek frekanslara itilir.
+//  · Taban gerilimi 1,65 V değil 0,82 V (64 basamak) ve yarım saniyede yavaşça kurulur: çıt sesi azalır.
+//  · Çalmıyorken DAC kapatılır, uç sabit sıfıra çekilir (DAC'ın kendi gürültüsü/vızıltısı kesilir).
+//  · Yeniden başlatmada uç sıfırda tutulur (gpio_hold), açılışta patırtı olmaz.
+static const int SPK_OSR = 8;
+static const int SPK_RATE = 44100 * SPK_OSR;
+static const int SPK_BUF = 1024;               // DMA tamponu (çerçeve, ~2,9 ms)
+static const int32_t SPK_BIAS = 64 << 8;       // 16 bitlik ölçekte; 1 DAC basamağı = 256
+static const int32_t SPK_AMAX = 56 << 8;       // tabanın altına inmesin diye pay bırakılır
 static bool spkReady = false;
-static volatile bool spkStopReq = false;
+static volatile bool spkStopReq = false, spkParked = true;
 
 static void spkWrite(uint16_t* buf, int frames) {
 #ifndef HOST
@@ -280,22 +289,56 @@ static void spkWrite(uint16_t* buf, int frames) {
 #else
   (void)buf;
   (void)frames;
-  delay(5);
+  delay(3);
 #endif
 }
 
-// Sıfırdan orta noktaya (ya da tersi) yavaşça: çıt sesi olmasın
-static void spkRamp(bool up) {
+// Ses düzeyi → kazanç (16 bitlik örnek × kazanç >> 16 = DAC ölçeğinde genlik)
+static int32_t spkGain(int vol) {
+  if (vol <= 0) return 0;
+  float lsb = 0.25f * powf(2.f, vol / 12.5f);  // 10 → 0,44 · 50 → 4 · 100 → 64 basamak
+  int32_t g = (int32_t)(lsb * 512.f);
+  return std::min<int32_t>(g, SPK_AMAX * 2);
+}
+
+// Tabanı 0 ile SPK_BIAS arasında yavaşça kaydırır (çıt sesi olmasın)
+static void spkBiasRamp(bool up) {
   static uint16_t b[SPK_BUF * 2];
-  const int steps = 24;
-  for (int r = 0; r < steps; r++) {
+  const int total = SPK_RATE / 2;  // 0,5 sn
+  for (int done = 0; done < total; done += SPK_BUF) {
     for (int i = 0; i < SPK_BUF; i++) {
-      int32_t t = r * SPK_BUF + i, tot = steps * SPK_BUF;
-      uint16_t v = (uint16_t)(((up ? t : tot - t) * 0x8000LL / tot)) & 0xFF00;
-      b[2 * i] = b[2 * i + 1] = v;
+      int32_t t = done + i;
+      if (t > total) t = total;
+      int32_t v = (int32_t)((int64_t)SPK_BIAS * (up ? t : total - t) / total);
+      uint16_t q = (uint16_t)((v + 128) & 0xFF00);
+      b[2 * i] = b[2 * i + 1] = q;
     }
     spkWrite(b, SPK_BUF);
   }
+}
+
+static void spkPinLow() {
+#ifndef HOST
+  pinMode(PIN_SPK, OUTPUT);
+  digitalWrite(PIN_SPK, LOW);
+#endif
+}
+
+static void spkPark() {  // taban → 0, DAC kapalı, uç sabit sıfır
+  spkBiasRamp(false);
+#ifndef HOST
+  i2s_set_dac_mode(I2S_DAC_CHANNEL_DISABLE);
+#endif
+  spkPinLow();
+  spkParked = true;
+}
+
+static void spkUnpark() {
+#ifndef HOST
+  i2s_set_dac_mode(I2S_DAC_CHANNEL_LEFT_EN);  // i2s_set_pin(NULL) çağrılmaz: o iki kanalı da açar
+#endif
+  spkParked = false;
+  spkBiasRamp(true);
 }
 
 static bool spkBegin() {
@@ -303,17 +346,17 @@ static bool spkBegin() {
 #ifndef HOST
   i2s_config_t c = {};
   c.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN);
-  c.sample_rate = 44100;
+  c.sample_rate = SPK_RATE;
   c.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
   c.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
   c.communication_format = I2S_COMM_FORMAT_STAND_MSB;
   c.intr_alloc_flags = 0;
-  c.dma_buf_count = 6;
+  c.dma_buf_count = 8;
   c.dma_buf_len = SPK_BUF;
   c.use_apll = false;
   c.tx_desc_auto_clear = false;  // boşalırsa son tampon tekrarlanır (sıfıra düşüp çıt yapmaz)
   if (i2s_driver_install(I2S_NUM_0, &c, 0, nullptr) != ESP_OK) return false;
-  i2s_set_dac_mode(I2S_DAC_CHANNEL_LEFT_EN);  // i2s_set_pin(NULL) çağrılmaz: o iki kanalı da açar
+  i2s_set_dac_mode(I2S_DAC_CHANNEL_DISABLE);  // çalmaya başlayınca açılır
 #endif
   spkReady = true;
   return true;
@@ -321,35 +364,57 @@ static bool spkBegin() {
 
 static void spkTask(void*) {
   static uint16_t out[SPK_BUF * 2];
-  int32_t err = 0;
-  bool live = false;  // DAC orta noktada mı
+  int32_t e1 = 0, e2 = 0;     // gürültü biçimlendirme hataları
+  int32_t prev = 0;           // aradeğerleme için önceki örnek (tek kanal)
+  uint32_t idleSince = 0;
   for (;;) {
-    if (outMode != OUT_SPK || !spkReady || spkStopReq) {
-      if (live) {
-        spkRamp(false);
-        live = false;
+    bool want = outMode == OUT_SPK && spkReady && !spkStopReq;
+    bool active = want && playing;
+    if (!active) {
+      // kısa duraklamada taban korunur; 1,5 sn çalmazsa (ya da çıkışta hemen) uç sıfıra alınır
+      if (!idleSince) idleSince = millis();
+      if (!spkParked && (!want || millis() - idleSince > 1500)) {
+        spkPark();
+        e1 = e2 = prev = 0;
       }
-      vTaskDelay(pdMS_TO_TICKS(30));
+      if (!spkParked) {
+        for (int i = 0; i < SPK_BUF; i++) out[2 * i] = out[2 * i + 1] = (uint16_t)SPK_BIAS;
+        spkWrite(out, SPK_BUF);
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(20));
+      }
       continue;
     }
-    if (!live) {
-      spkRamp(true);
-      live = true;
+    idleSince = 0;
+    if (spkParked) spkUnpark();
+    int32_t g = spkGain(spkVol);
+    const int inN = SPK_BUF / SPK_OSR;
+    uint32_t avail = rbUsed();
+    int n = std::min<uint32_t>(inN, avail);
+    int o = 0;
+    for (int i = 0; i < inN; i++) {
+      int32_t cur = prev;
+      if (i < n) {
+        uint32_t k = (rbTail % RB_FRAMES) * 2;
+        cur = (((int32_t)rb[k] + rb[k + 1]) >> 1) * g >> 16;  // tek kanal, ses düzeyi (DAC ölçeği)
+        rbTail++;
+      }
+      for (int s4 = 1; s4 <= SPK_OSR; s4++) {
+        int32_t y = SPK_BIAS + prev + (cur - prev) * s4 / SPK_OSR;  // doğrusal aradeğerleme
+        int32_t u = y - 2 * e1 + e2;                                 // NTF = (1 − z⁻¹)²
+        int32_t q = (u + 128) & ~0xFF;
+        if (q < 0) q = 0;
+        if (q > 0xFF00) q = 0xFF00;
+        int32_t e = q - u;
+        if (e > 1024) e = 1024;
+        if (e < -1024) e = -1024;
+        e2 = e1;
+        e1 = e;
+        out[2 * o] = out[2 * o + 1] = (uint16_t)q;
+        o++;
+      }
+      prev = cur;
     }
-    uint32_t avail = playing ? rbUsed() : 0;
-    int n = std::min<uint32_t>(SPK_BUF, avail);
-    int32_t g = volume * volume * SPK_MAX / 10000;  // kulak için karesel eğri, /256
-    for (int i = 0; i < n; i++) {
-      uint32_t k = (rbTail % RB_FRAMES) * 2;
-      int32_t m = (((int32_t)rb[k] + rb[k + 1]) >> 1) * g >> 8;
-      int32_t v = m + 32768 + err;
-      v = v < 0 ? 0 : (v > 65535 ? 65535 : v);
-      uint16_t q = (uint16_t)(v & 0xFF00);
-      err = v - q;
-      out[2 * i] = out[2 * i + 1] = q;
-      rbTail++;
-    }
-    for (int i = n; i < SPK_BUF; i++) out[2 * i] = out[2 * i + 1] = 0x8000;
     if (n > 0) playedFrames += n;
     spkWrite(out, SPK_BUF);
   }
@@ -496,6 +561,7 @@ static void saveState() {
   if (cur >= 0 && cur < (int)tracks.size()) p.putString("path", tracks[cur]);
   p.putUInt("off", filePos);
   p.putInt("vol", volume);
+  p.putInt("svol", spkVol);
   p.putBool("shf", shuffle);
   p.putUChar("rep", repeatMode);
   p.putString("hp", btTarget);
@@ -535,10 +601,14 @@ static void exitToMain() {
   fillBg(0, 0, SCR_W, SCR_H);
   drawLogo(LOGO_L, LOGO_L_W, LOGO_L_H, (SCR_W - LOGO_L_W) / 2, 80);
   text("DAXEN VANE'e dönülüyor…", 160, 186, F_XS, C_TEXT3, C_BG, MC_DATUM);
-  if (spkReady) {  // hoparlör sessizce kısılır
+  if (spkReady) {  // hoparlör sessizce kısılır, uç sıfırda tutulur
     spkStopReq = true;
-    delay(400);
+    for (int i = 0; i < 150 && !spkParked; i++) delay(10);
   }
+  spkPinLow();
+#ifndef HOST
+  gpio_hold_en((gpio_num_t)PIN_SPK);  // yeniden başlarken de sıfırda kalsın (ana yazılım bırakır)
+#endif
   if (a2dpStarted) a2dp.end();
   delay(300);
   const esp_partition_t* other = esp_ota_get_next_update_partition(nullptr);
@@ -584,7 +654,10 @@ static void drawControls() {
   if (repeatMode == 2) text("1", 302, 154, F_XS, C_ACC, C_ACCBG, TR_DATUM);
 }
 
+static int& curVol() { return outMode == OUT_SPK ? spkVol : volume; }
+
 static void drawVolume() {
+  int volume = curVol();
   fillBg(0, 198, SCR_W, 42);
   drawIcon(volume ? I_VOLUME : I_SPEAKER_OFF, 12, 207, 20, C_TEXT2, C_BG);
   iconButton(40, 202, 30, I_MINUS);
@@ -664,8 +737,8 @@ static void drawBt(bool full) {
     drawIcon(I_VOLUME, 12, HDR_H + 54, 24, C_ACC, C_BG);
     text("Hoparlör", 46, HDR_H + 52, F_MD, C_TEXT, C_BG);
     text("Kartın SPEAK soketindeki hoparlörden çalar", 46, HDR_H + 74, F_XS, C_TEXT2, C_BG);
-    auto ls = wrapText("Ses 8 bit olduğu için hafif cızırtılı olabilir. Ses düzeyi Şimdi ekranında; en yüksek düzey hoparlörü korumak için sınırlı. Bluetooth kapalı.",
-                       F_SM, 296, 4);
+    auto ls = wrapText("Kartın yükselteci çok güçlü: sesi düşükten aç. Çok yüksek ve cızırtılıysa hoparlör kablolarından birine 47–100 Ω direnç ekle, sonra sesi açabilirsin. Bluetooth kapalı.",
+                       F_SM, 296, 5);
     for (size_t i = 0; i < ls.size(); i++) text(ls[i], 12, HDR_H + 104 + i * 20, F_SM, C_TEXT2, C_BG);
     return;
   }
@@ -721,7 +794,7 @@ static void skip(int dir) {
 }
 
 static void setVolume(int v) {
-  volume = constrain(v, 0, 100);
+  curVol() = constrain(v, 0, 100);
   if (scr == MS_NOW) drawVolume();
 }
 
@@ -775,8 +848,8 @@ static void onTap(int x, int y) {
         drawControls();
       }
     } else if (y >= 198) {
-      if (x < 76) setVolume(volume - 5);
-      else if (x >= 270) setVolume(volume + 5);
+      if (x < 76) setVolume(curVol() - (outMode == OUT_SPK ? 2 : 5));
+      else if (x >= 270) setVolume(curVol() + (outMode == OUT_SPK ? 2 : 5));
       else setVolume((x - 80) * 100 / 156);
     } else if (y >= HDR_H + 60 && y < HDR_H + 84 && !outReady()) {
       go(MS_BT);
@@ -877,6 +950,10 @@ void setup() {
   mtx = xSemaphoreCreateRecursiveMutex();
   btMtx = xSemaphoreCreateMutex();
   pinMode(PIN_BOOT, INPUT_PULLUP);
+  spkPinLow();  // hoparlör yükseltecinin girişi sıfırda
+#ifndef HOST
+  gpio_hold_dis((gpio_num_t)PIN_SPK);
+#endif
   // LED'ler kapalı
   pinMode(PIN_LED_R, OUTPUT);
   pinMode(PIN_LED_G, OUTPUT);
@@ -930,6 +1007,7 @@ void setup() {
   String last = p.getString("path", "");
   uint32_t off = p.getUInt("off", 0);
   volume = constrain(p.getInt("vol", 60), 0, 100);
+  spkVol = constrain(p.getInt("svol", 15), 0, 100);
   shuffle = p.getBool("shf", false);
   repeatMode = p.getUChar("rep", 1) % 3;
   btTarget = p.getString("hp", "");

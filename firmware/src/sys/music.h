@@ -10,7 +10,7 @@
 // yazılımından çıkınca ya da bir sorun olursa kart kendiliğinden bu yazılıma döner.
 #define MUSIC_DIR "/daxen/sys"
 #define MUSIC_FILE MUSIC_DIR "/muzik-" FW_VARIANT ".bin"
-#define MUSIC_MIN_BUILD 28  // hoparlör çıkışı bu sürümle geldi; daha eski modül yenisiyle değiştirilir
+#define MUSIC_MIN_BUILD 35  // hoparlör düzeltmesi (düzey, gürültü, patırtı) bu sürümle geldi; eski modül yenisiyle değiştirilir
 static String musicErr;
 static int musicCachedState = -1;
 static uint32_t musicCachedSize = 0;
@@ -107,6 +107,7 @@ static void musicDownload() {
   uiSplash("Müzik modülü indirilecek…");
   delay(600);
   esp_ota_mark_app_valid_cancel_rollback();
+  speakerHold();
   ESP.restart();
 }
 
@@ -147,6 +148,7 @@ static void musicLaunch() {
     musicProgress("Müzik açılıyor", 100);
     if (esp_ota_set_boot_partition(next) == ESP_OK) {
       delay(200);
+      speakerHold();
       ESP.restart();
     }
   }
@@ -189,6 +191,7 @@ static void musicLaunch() {
     prefs.end();
   }
   delay(200);
+  speakerHold();
   ESP.restart();
 }
 

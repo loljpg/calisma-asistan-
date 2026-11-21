@@ -2,6 +2,15 @@
 // DAXEN VANE sistem katmanı · Kalıcı ayarlar (NVS).
 // main.cpp'den sırayla eklenir (tek çeviri birimi); kendinden önceki dosyalardaki tanımları kullanır.
 
+#include <driver/gpio.h>
+// Yeniden başlamadan önce hoparlör yükseltecinin girişi (GPIO26) sıfırda tutulur; yoksa açılış
+// sırasında boşta kalıp patırtı yapar. Yeni yazılım (ana ya da müzik) açılışta bırakır.
+static void speakerHold() {
+  pinMode(PIN_SPK, OUTPUT);
+  digitalWrite(PIN_SPK, LOW);
+  gpio_hold_en((gpio_num_t)PIN_SPK);
+}
+
 // ============================================================================
 // Kalıcı ayarlar
 // ============================================================================

@@ -134,8 +134,9 @@ static void svcLight();
 
 void setup() {
   diagBoot();
-  pinMode(PIN_SPK, OUTPUT);  // hoparlör yükseltecinin girişi boşta kalıp gürültü/akım çekmesin
+  pinMode(PIN_SPK, OUTPUT);  // hoparlör yükseltecinin girişi boşta kalıp gürültü/vızıltı yapmasın
   digitalWrite(PIN_SPK, LOW);
+  gpio_hold_dis((gpio_num_t)PIN_SPK);  // önceki yazılım yeniden başlarken sıfırda tutmuştu
   Serial.begin(115200);
   mtx = xSemaphoreCreateRecursiveMutex();
   pinMode(PIN_BOOT, INPUT_PULLUP);
@@ -287,6 +288,7 @@ static void svcClock() {  // 200 ms: dakika işleri, Pomodoro, bakım, tanı
     if (minute >= 240 && minute < 270 && millis() > 20UL * 3600UL * 1000UL && !swRunning && swElapsedMs() == 0 &&
         millis() - lastInteract > 10UL * 60UL * 1000UL && !bleInflight && !kbm.active) {
       esp_ota_mark_app_valid_cancel_rollback();
+      speakerHold();
       ESP.restart();
     }
     // Yaklaşan oturum (2 dk içinde) LED ile haber verilir.

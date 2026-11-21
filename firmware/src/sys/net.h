@@ -738,6 +738,7 @@ static bool checkOta(bool manual) {
   if (r == HTTP_UPDATE_OK) {
     otaProgress = 100;
     delay(1500);
+    speakerHold();
     ESP.restart();
   }
   otaProgress = -1;

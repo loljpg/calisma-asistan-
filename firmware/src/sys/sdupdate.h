@@ -100,6 +100,7 @@ static void sdTryUpdate() {
       otaProgress = 100;
       uiOtaProgress();
       delay(800);
+      speakerHold();
       ESP.restart();
     }
     Update.abort();
