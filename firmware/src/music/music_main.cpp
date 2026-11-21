@@ -18,6 +18,9 @@
 #include <algorithm>
 #include "BluetoothA2DPSource.h"
 #include "MP3DecoderHelix.h"
+#ifndef HOST
+#include <driver/i2s.h>
+#endif
 
 #include "../config.h"
 #include "../core/types.h"
@@ -174,8 +177,13 @@ static uint32_t readId3(File& f, String& title, String& artist) {
 }
 
 // ============================================================================
-// Çalma: SD → MP3 çözücü → halka arabellek → Bluetooth (44,1 kHz stereo)
+// Çalma: SD → MP3 çözücü → halka arabellek → Bluetooth kulaklık ya da hoparlör (44,1 kHz)
 // ============================================================================
+// Ses çıkışı: 0 kulaklık (Bluetooth A2DP), 1 hoparlör (kartın SPEAK soketi: ESP32'nin iç DAC'ı,
+// GPIO26, kart üzerindeki yükselteç). Hoparlör kipinde Bluetooth hiç açılmaz.
+enum : uint8_t { OUT_HP = 0, OUT_SPK = 1 };
+static volatile uint8_t outMode = OUT_SPK;
+static bool a2dpStarted = false;
 static const uint32_t RB_FRAMES = 8192;  // 32 KB ≈ 186 ms
 static int16_t* rb = nullptr;
 static volatile uint32_t rbHead = 0, rbTail = 0;
@@ -242,7 +250,7 @@ static uint32_t posMs() {
 
 // Bluetooth görevinden çağrılır: arabellekten okur, ses düzeyini uygular.
 static int32_t a2dpData(Frame* f, int32_t count) {
-  uint32_t avail = playing ? rbUsed() : 0;
+  uint32_t avail = playing && outMode == OUT_HP ? rbUsed() : 0;
   int32_t n = std::min<int32_t>(count, avail);
   int32_t g = volume * volume * 256 / 10000;  // kulak için karesel eğri
   for (int32_t i = 0; i < n; i++) {
@@ -255,6 +263,100 @@ static int32_t a2dpData(Frame* f, int32_t count) {
   if (n > 0) playedFrames += n;
   return count;
 }
+
+// --- Hoparlör: I2S → iç DAC (yalnızca GPIO26; GPIO25 dokunmatiğin saat ucudur, açılmaz) ---
+// DAC 8 bittir: örnekler tek kanala indirilir, birinci dereceden gürültü biçimlendirmeyle
+// 8 bite yuvarlanır (nicemleme gürültüsü yüksek frekanslara itilir, cızırtı azalır).
+// 3,5–8 Ω hoparlör için en yüksek düzey %80 ile sınırlı.
+static const int SPK_BUF = 256;
+static const int32_t SPK_MAX = 205;  // /256
+static bool spkReady = false;
+static volatile bool spkStopReq = false;
+
+static void spkWrite(uint16_t* buf, int frames) {
+#ifndef HOST
+  size_t w;
+  i2s_write(I2S_NUM_0, buf, frames * 4, &w, portMAX_DELAY);
+#else
+  (void)buf;
+  (void)frames;
+  delay(5);
+#endif
+}
+
+// Sıfırdan orta noktaya (ya da tersi) yavaşça: çıt sesi olmasın
+static void spkRamp(bool up) {
+  static uint16_t b[SPK_BUF * 2];
+  const int steps = 24;
+  for (int r = 0; r < steps; r++) {
+    for (int i = 0; i < SPK_BUF; i++) {
+      int32_t t = r * SPK_BUF + i, tot = steps * SPK_BUF;
+      uint16_t v = (uint16_t)(((up ? t : tot - t) * 0x8000LL / tot)) & 0xFF00;
+      b[2 * i] = b[2 * i + 1] = v;
+    }
+    spkWrite(b, SPK_BUF);
+  }
+}
+
+static bool spkBegin() {
+  if (spkReady) return true;
+#ifndef HOST
+  i2s_config_t c = {};
+  c.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN);
+  c.sample_rate = 44100;
+  c.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+  c.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
+  c.communication_format = I2S_COMM_FORMAT_STAND_MSB;
+  c.intr_alloc_flags = 0;
+  c.dma_buf_count = 6;
+  c.dma_buf_len = SPK_BUF;
+  c.use_apll = false;
+  c.tx_desc_auto_clear = false;  // boşalırsa son tampon tekrarlanır (sıfıra düşüp çıt yapmaz)
+  if (i2s_driver_install(I2S_NUM_0, &c, 0, nullptr) != ESP_OK) return false;
+  i2s_set_dac_mode(I2S_DAC_CHANNEL_LEFT_EN);  // i2s_set_pin(NULL) çağrılmaz: o iki kanalı da açar
+#endif
+  spkReady = true;
+  return true;
+}
+
+static void spkTask(void*) {
+  static uint16_t out[SPK_BUF * 2];
+  int32_t err = 0;
+  bool live = false;  // DAC orta noktada mı
+  for (;;) {
+    if (outMode != OUT_SPK || !spkReady || spkStopReq) {
+      if (live) {
+        spkRamp(false);
+        live = false;
+      }
+      vTaskDelay(pdMS_TO_TICKS(30));
+      continue;
+    }
+    if (!live) {
+      spkRamp(true);
+      live = true;
+    }
+    uint32_t avail = playing ? rbUsed() : 0;
+    int n = std::min<uint32_t>(SPK_BUF, avail);
+    int32_t g = volume * volume * SPK_MAX / 10000;  // kulak için karesel eğri, /256
+    for (int i = 0; i < n; i++) {
+      uint32_t k = (rbTail % RB_FRAMES) * 2;
+      int32_t m = (((int32_t)rb[k] + rb[k + 1]) >> 1) * g >> 8;
+      int32_t v = m + 32768 + err;
+      v = v < 0 ? 0 : (v > 65535 ? 65535 : v);
+      uint16_t q = (uint16_t)(v & 0xFF00);
+      err = v - q;
+      out[2 * i] = out[2 * i + 1] = q;
+      rbTail++;
+    }
+    for (int i = n; i < SPK_BUF; i++) out[2 * i] = out[2 * i + 1] = 0x8000;
+    if (n > 0) playedFrames += n;
+    spkWrite(out, SPK_BUF);
+  }
+}
+
+static void startA2dp();
+static void setOutput(uint8_t m);
 
 static void decoderTask(void*) {
   static uint8_t buf[1024];
@@ -359,6 +461,7 @@ static volatile bool btListChanged = false, btConnChanged = false;
 static SemaphoreHandle_t btMtx;
 
 static bool onBtFound(const char* ssid, esp_bd_addr_t, int rssi) {
+  if (outMode != OUT_HP) return false;
   String s(ssid);
   if (s.length()) {
     xSemaphoreTake(btMtx, portMAX_DELAY);
@@ -396,7 +499,33 @@ static void saveState() {
   p.putBool("shf", shuffle);
   p.putUChar("rep", repeatMode);
   p.putString("hp", btTarget);
+  p.putUChar("out", outMode);
   p.end();
+}
+
+static void startA2dp() {
+  if (a2dpStarted) return;
+  a2dpStarted = true;
+  a2dp.set_local_name("DAXEN VANE");
+  a2dp.set_ssid_callback(onBtFound);
+  a2dp.set_auto_reconnect(true);
+  a2dp.set_on_connection_state_changed(onBtState);
+  a2dp.set_avrc_passthru_command_callback(onAvrc);
+  a2dp.start(a2dpData);
+}
+
+// Çıkış değiştirme (çalarken de olur: arabellek aynı, yalnızca okuyan taraf değişir)
+static void setOutput(uint8_t m) {
+  if (m == outMode) return;
+  if (m == OUT_HP) {
+    outMode = OUT_HP;
+    startA2dp();
+  } else {
+    if (a2dpStarted && a2dp.is_connected()) a2dp.disconnect();
+    spkBegin();
+    outMode = OUT_SPK;
+  }
+  saveState();
 }
 
 // Ana yazılıma dön
@@ -406,7 +535,11 @@ static void exitToMain() {
   fillBg(0, 0, SCR_W, SCR_H);
   drawLogo(LOGO_L, LOGO_L_W, LOGO_L_H, (SCR_W - LOGO_L_W) / 2, 80);
   text("DAXEN VANE'e dönülüyor…", 160, 186, F_XS, C_TEXT3, C_BG, MC_DATUM);
-  a2dp.end();
+  if (spkReady) {  // hoparlör sessizce kısılır
+    spkStopReq = true;
+    delay(400);
+  }
+  if (a2dpStarted) a2dp.end();
   delay(300);
   const esp_partition_t* other = esp_ota_get_next_update_partition(nullptr);
   if (other) esp_ota_set_boot_partition(other);
@@ -416,18 +549,19 @@ static void exitToMain() {
 // ============================================================================
 // Arayüz
 // ============================================================================
-enum MuScreen { MS_NOW, MS_LIB, MS_BT };
+enum MuScreen { MS_NOW, MS_LIB, MS_BT };  // MS_BT: ses çıkışı (hoparlör / kulaklık)
 static MuScreen scr = MS_NOW;
 static int libFirst = 0;
 static const int LIB_ROW = 32, LIB_ROWS = 6;
 static uint32_t lastTouch = 0;
 static bool dimmed = false;
 
-static bool btConnected() { return a2dp.is_connected(); }
+static bool btConnected() { return a2dpStarted && a2dp.is_connected(); }
+static bool outReady() { return outMode == OUT_SPK || btConnected(); }
 
 static void drawHeaderNow() {
   header("Müzik");
-  headerAction(0, I_HEADPHONES, btConnected());
+  headerAction(0, outMode == OUT_SPK ? I_VOLUME : I_HEADPHONES, outReady());
   headerAction(1, I_LIST);
 }
 
@@ -468,7 +602,7 @@ static void drawNowInfo() {
     text(tracks.empty() ? "MP3'leri Muzik klasörüne koy" : String(tracks.size()) + " şarkı", 96, HDR_H + 36, F_SM, C_TEXT2, C_BG);
     return;
   }
-  bool conn = btConnected();
+  bool conn = outReady();
   auto ts = wrapText(curTitle, F_MD, 212, conn ? 2 : 1);
   int y = HDR_H + 8;
   for (auto& l : ts) {
@@ -519,29 +653,42 @@ static void drawLib(bool full) {
   scrollBar(HDR_H, LIB_ROW * LIB_ROWS, libFirst, LIB_ROWS, n);
 }
 
+static const char* const OUT_LABELS[] = {"Kulaklık", "Hoparlör"};
+static const int BT_LIST_Y = HDR_H + 106, BT_ROW = 26, BT_ROWS = 4;
+
 static void drawBt(bool full) {
-  if (full) header("Kulaklık");
+  if (full) header("Ses çıkışı");
   fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
+  segmented(12, HDR_H + 8, 296, 32, OUT_LABELS, 2, outMode);
+  if (outMode == OUT_SPK) {
+    drawIcon(I_VOLUME, 12, HDR_H + 54, 24, C_ACC, C_BG);
+    text("Hoparlör", 46, HDR_H + 52, F_MD, C_TEXT, C_BG);
+    text("Kartın SPEAK soketindeki hoparlörden çalar", 46, HDR_H + 74, F_XS, C_TEXT2, C_BG);
+    auto ls = wrapText("Ses 8 bit olduğu için hafif cızırtılı olabilir. Ses düzeyi Şimdi ekranında; en yüksek düzey hoparlörü korumak için sınırlı. Bluetooth kapalı.",
+                       F_SM, 296, 4);
+    for (size_t i = 0; i < ls.size(); i++) text(ls[i], 12, HDR_H + 104 + i * 20, F_SM, C_TEXT2, C_BG);
+    return;
+  }
   bool c = btConnected();
-  drawIcon(I_HEADPHONES, 12, HDR_H + 10, 24, c ? C_ACC : C_TEXT3, C_BG);
-  text(c ? (btTarget.length() ? btTarget : String("Bağlı")) : (btTarget.length() ? "Bağlanıyor: " + btTarget : String("Bağlı değil")), 46, HDR_H + 6,
-       F_MD, C_TEXT, C_BG);
-  text(c ? "Bağlı · ses buradan gidiyor" : "Kulaklığı eşleşme kipine al, listeden seç", 46, HDR_H + 28, F_XS, C_TEXT2, C_BG);
-  sectionLabel(HDR_H + 46, "Bulunan cihazlar");
+  drawIcon(I_HEADPHONES, 12, HDR_H + 54, 24, c ? C_ACC : C_TEXT3, C_BG);
+  text(fit(c ? (btTarget.length() ? btTarget : String("Bağlı")) : (btTarget.length() ? "Bağlanıyor: " + btTarget : String("Bağlı değil")), F_MD, 262), 46,
+       HDR_H + 50, F_MD, C_TEXT, C_BG);
+  text(c ? "Bağlı · ses buradan gidiyor" : "Kulaklığı eşleşme kipine al, listeden seç", 46, HDR_H + 72, F_XS, C_TEXT2, C_BG);
+  sectionLabel(HDR_H + 86, "Bulunan cihazlar");
+  if (btTarget.length()) text("Unut", 308, HDR_H + 86, F_XS, C_ACC, C_BG, TR_DATUM);
   std::vector<BtDev> list;
   xSemaphoreTake(btMtx, portMAX_DELAY);
   list = btFound;
   xSemaphoreGive(btMtx);
-  for (int i = 0; i < (int)list.size() && i < 4; i++) {
-    int y = HDR_H + 68 + i * 30;
+  for (int i = 0; i < (int)list.size() && i < BT_ROWS; i++) {
+    int y = BT_LIST_Y + i * BT_ROW;
     bool on = list[i].name == btTarget;
-    drawIcon(I_HEADPHONES, 14, y + 6, 16, on ? C_ACC : C_TEXT2, C_BG);
-    text(fit(list[i].name, F_SM, 210), 40, y + 15, F_SM, C_TEXT, C_BG, ML_DATUM);
-    text(on ? (c ? "Bağlı" : "Seçili") : String(list[i].rssi) + " dBm", 308, y + 15, F_XS, on ? C_ACC : C_TEXT3, C_BG, MR_DATUM);
-    hline(40, y + 29, 268);
+    drawIcon(I_HEADPHONES, 14, y + 5, 16, on ? C_ACC : C_TEXT2, C_BG);
+    text(fit(list[i].name, F_SM, 200), 40, y + BT_ROW / 2, F_SM, C_TEXT, C_BG, ML_DATUM);
+    text(on ? (c ? "Bağlı" : "Seçili") : String(list[i].rssi) + " dBm", 308, y + BT_ROW / 2, F_XS, on ? C_ACC : C_TEXT3, C_BG, MR_DATUM);
+    hline(40, y + BT_ROW - 1, 268);
   }
-  if (list.empty()) text("Aranıyor…", 160, HDR_H + 110, F_SM, C_TEXT3, C_BG, MC_DATUM);
-  button(12, 204, 296, 32, "Kulaklığı unut", btTarget.length() ? B_NORMAL : B_DISABLED, I_TRASH);
+  if (list.empty()) text("Aranıyor…", 160, BT_LIST_Y + 40, F_SM, C_TEXT3, C_BG, MC_DATUM);
 }
 
 static void redraw(bool full) {
@@ -631,7 +778,7 @@ static void onTap(int x, int y) {
       if (x < 76) setVolume(volume - 5);
       else if (x >= 270) setVolume(volume + 5);
       else setVolume((x - 80) * 100 / 156);
-    } else if (y >= HDR_H + 60 && y < HDR_H + 84 && !btConnected()) {
+    } else if (y >= HDR_H + 60 && y < HDR_H + 84 && !outReady()) {
       go(MS_BT);
     }
   } else if (scr == MS_LIB) {
@@ -641,7 +788,13 @@ static void onTap(int x, int y) {
       go(MS_NOW);
     }
   } else {
-    if (y >= 200) {
+    if (y >= HDR_H + 8 && y < HDR_H + 40) {  // çıkış seçimi
+      setOutput(segmentedHit(x, 12, 296, 2) == 1 ? OUT_SPK : OUT_HP);
+      drawBt(false);
+      return;
+    }
+    if (outMode != OUT_HP) return;
+    if (y >= HDR_H + 82 && y < HDR_H + 102 && x >= 250 && btTarget.length()) {  // unut
       btTarget = "";
       a2dp.clean_last_connection();
       a2dp.disconnect();
@@ -649,12 +802,12 @@ static void onTap(int x, int y) {
       drawBt(false);
       return;
     }
-    int i = (y - HDR_H - 68) / 30;
+    int i = (y - BT_LIST_Y) / BT_ROW;
     std::vector<BtDev> list;
     xSemaphoreTake(btMtx, portMAX_DELAY);
     list = btFound;
     xSemaphoreGive(btMtx);
-    if (y >= HDR_H + 68 && i >= 0 && i < (int)list.size() && i < 4 && list[i].name != btTarget) {
+    if (y >= BT_LIST_Y && i >= 0 && i < (int)list.size() && i < BT_ROWS && list[i].name != btTarget) {
       btTarget = list[i].name;  // bir sonraki aramada bulununca bağlanır
       saveState();
       if (btConnected()) {
@@ -779,22 +932,21 @@ void setup() {
   shuffle = p.getBool("shf", false);
   repeatMode = p.getUChar("rep", 1) % 3;
   btTarget = p.getString("hp", "");
+  // Kulaklık seçilmemişse hoparlörden başlanır
+  outMode = p.getUChar("out", btTarget.length() ? OUT_HP : OUT_SPK) == OUT_HP ? OUT_HP : OUT_SPK;
   p.end();
 
   xTaskCreatePinnedToCore(decoderTask, "mp3", 8192, nullptr, 2, nullptr, 1);
   for (int i = 0; i < (int)tracks.size(); i++)
     if (tracks[i] == last) {
       playTrack(i, off);
-      wantPlay = false;  // kulaklık bağlanınca kullanıcı başlatır
+      wantPlay = false;  // kullanıcı başlatır
       break;
     }
 
-  a2dp.set_local_name("DAXEN VANE");
-  a2dp.set_ssid_callback(onBtFound);
-  a2dp.set_auto_reconnect(true);
-  a2dp.set_on_connection_state_changed(onBtState);
-  a2dp.set_avrc_passthru_command_callback(onAvrc);
-  a2dp.start(a2dpData);
+  xTaskCreatePinnedToCore(spkTask, "spk", 4096, nullptr, 3, nullptr, 0);
+  if (outMode == OUT_SPK) spkBegin();
+  else startA2dp();
 
   lastTouch = millis();
   redraw(true);
@@ -821,8 +973,8 @@ void loop() {
     else if (k == 0x42) setVolume(volume - 5);
   }
 
-  // Çalma yalnızca kulaklık bağlıyken ilerler
-  bool should = wantPlay && btConnected() && cur >= 0;
+  // Çalma yalnızca çıkış hazırken ilerler (hoparlör her zaman, kulaklık bağlıyken)
+  bool should = wantPlay && outReady() && cur >= 0;
   if (should != playing) {
     playing = should;
     if (scr == MS_NOW && !confirmExit) drawControls();

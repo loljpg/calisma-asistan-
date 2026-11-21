@@ -2640,7 +2640,7 @@ static void splashLogo();
 // yazılımından çıkınca ya da bir sorun olursa kart kendiliğinden bu yazılıma döner.
 #define MUSIC_DIR "/daxen/sys"
 #define MUSIC_FILE MUSIC_DIR "/muzik-" FW_VARIANT ".bin"
-#define MUSIC_MIN_BUILD 0
+#define MUSIC_MIN_BUILD 28  // hoparlör çıkışı bu sürümle geldi; daha eski modül yenisiyle değiştirilir
 static String musicErr;
 static int musicCachedState = -1;
 static uint32_t musicCachedSize = 0;
@@ -2710,10 +2710,10 @@ static int musicState() {
   }
   String v;
   int b = 0;
-  bool ok = musicReadMarker(f, v, b) && v == FW_VARIANT && b >= MUSIC_MIN_BUILD;
+  bool okMarker = musicReadMarker(f, v, b) && v == FW_VARIANT;
   f.close();
   musicCachedSize = sz;
-  musicCachedState = ok ? 0 : 1;
+  musicCachedState = !okMarker ? 1 : (b >= MUSIC_MIN_BUILD ? 0 : 3);  // 3: eski modül
   return musicCachedState;
 }
 
@@ -2722,6 +2722,7 @@ static String musicInfo() {
   switch (musicState()) {
     case 0: return "Müzik modülü hazır";
     case 2: return "SD kart takılı değil";
+    case 3: return "Müzik modülü eski: yenisi indirilecek (1,3 MB)";
     default: return "Müzik modülü SD kartta yok (1,3 MB indirilecek)";
   }
 }

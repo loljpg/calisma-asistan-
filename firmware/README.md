@@ -71,7 +71,7 @@ Servisler çekirdek görevinde (öncelik 3) çalışır ve ekrana serbestçe çi
 vardır (öncelik 1), ekrana yalnızca ekran kilidiyle çizer. Sonlandırma işbirliklidir: süreç isteği
 görür ve kendisi çıkar, böylece yarım kalan SD yazması ya da tutulan bir kilit olmaz.
 
-## Müzik ve Bluetooth kulaklık
+## Müzik: Bluetooth kulaklık ya da hoparlör
 
 ESP32'nin belleği, Wi-Fi + telefon bağlantısı ile kulaklık sesini aynı anda kaldırmıyor. Bu yüzden
 müzik ayrı bir yazılımdır: Müzik uygulamasında **Müziği aç**'a basınca cihaz müzik yazılımıyla
@@ -80,7 +80,10 @@ yeniden başlar, çıkınca DAXEN kaldığı yerden açılır.
 1. MP3'leri SD kartta `/Muzik` klasörüne koy (Aktarım uygulamasıyla da olur).
 2. İlk seferde Müzik → **Modülü indir** (Wi-Fi gerekir, yaklaşık 1,3 MB). Ya da Releases'taki
    `muzik-cyd_st7789.bin` dosyasını SD kartın köküne kopyala.
-3. Müziği aç → Kulaklık sekmesinden kulaklığını seç. Kulaklık eşleşme kipinde olmalı.
+3. Müziği aç → üstteki çıkış simgesine dokun → **Hoparlör** ya da **Kulaklık** seç.
+   Kulaklık için kulaklığı eşleşme kipine al, listeden seç. Hoparlör kartın `SPEAK` soketine
+   (2 pinli, 1,25 mm) takılır; ses ESP32'nin 8 bitlik iç DAC'ından gelir (GPIO26), alarm ve
+   bildirim için iyi, müzikte hafif cızırtılı. Kulaklık seçilmemişse hoparlörden başlar.
 
 Müzik çalarken Wi-Fi, telefon bağlantısı ve bildirimler kapalıdır. Etiketsiz dosyalarda
 `Sanatçı - Şarkı.mp3` adı kullanılır.

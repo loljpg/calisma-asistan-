@@ -1,5 +1,5 @@
 #pragma once
-// Müzik: kulaklıkla SD karttan müzik. Çalma ayrı "müzik modu" yazılımında yapılır (klasik Bluetooth
+// Müzik: SD karttan müzik, Bluetooth kulaklığa ya da kartın hoparlörüne. Çalma ayrı "müzik modu" yazılımında yapılır (klasik Bluetooth
 // ve MP3 çözücü bu yazılıma sığmıyor); bu ekran o yazılımı hazırlar ve açar.
 #include "../os/shell.h"
 #include <SD.h>
@@ -28,11 +28,11 @@ static int muCountDir(const String& dir, int depth, int limit) {
 static void muDraw(bool full) {
   if (full) header("Müzik");
   fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
-  drawIcon(I_HEADPHONES, 12, HDR_H + 10, 32, C_ACC, C_BG);
-  text("Kulaklıkla SD karttan müzik", 54, HDR_H + 8, F_MD, C_TEXT, C_BG);
+  drawIcon(I_NOTE, 12, HDR_H + 10, 32, C_ACC, C_BG);
+  text("SD karttan müzik", 54, HDR_H + 8, F_MD, C_TEXT, C_BG);
   String cnt = muCount < 0 ? String("") : (muCount ? String(muCount) + (muCount >= 500 ? "+" : "") + " şarkı bulundu" : String("Muzik klasöründe şarkı yok"));
   text(cnt, 54, HDR_H + 30, F_XS, muCount > 0 ? C_TEXT2 : C_ACC, C_BG);
-  auto ls = wrapText("Müzik açıkken Wi-Fi ve telefon bağlantısı kapanır, radyo yalnızca kulaklığa ayrılır. Çıkınca DAXEN kaldığı yerden devam eder.",
+  auto ls = wrapText("Kulaklıktan ya da kartın hoparlöründen çalar. Müzik açıkken Wi-Fi ve telefon bağlantısı kapanır; çıkınca DAXEN kaldığı yerden devam eder.",
                      F_SM, 296, 4);
   for (size_t i = 0; i < ls.size(); i++) text(ls[i], 12, HDR_H + 58 + i * 19, F_SM, C_TEXT2, C_BG);
   int y = HDR_H + 58 + ls.size() * 19 + 6;
