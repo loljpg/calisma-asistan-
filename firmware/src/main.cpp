@@ -2823,14 +2823,29 @@ static void musicLaunch() {
 }
 
 // Açılışta (Bluetooth başlamadan, bellek bolken): istenmişse modülü indirip açar.
+// İndirme ayrı bir görevde (16 KB yığın) yapılır: TLS el sıkışması kurulum görevinin 8 KB
+// yığınını zorluyordu. Başlarken NVS'ye "mdl" yazılır; kart indirme sırasında yeniden başlarsa
+// bir sonraki açılışta sebebi (voltaj düşmesi / çökme) Müzik ekranında gösterilir.
+static volatile bool musicDlDone = false;
+static void musicDlTask(void*);
+
 static void musicBootTasks() {
-  bool want;
+  bool want, crashed;
   {
     Lock l;
     prefs.begin("cs", false);
     want = prefs.getBool("getmus", false);
     if (want) prefs.remove("getmus");
+    crashed = prefs.getBool("mdl", false);
+    if (crashed) prefs.remove("mdl");
     prefs.end();
+  }
+  if (crashed && !want) {
+    esp_reset_reason_t r = esp_reset_reason();
+    musicErr = r == ESP_RST_BROWNOUT ? "İndirirken voltaj düştü: hoparlörü çıkar, sağlam kablo/powerbank dene"
+               : (r == ESP_RST_PANIC || r == ESP_RST_TASK_WDT || r == ESP_RST_INT_WDT || r == ESP_RST_WDT)
+                   ? "İndirirken kart çöktü, tekrar dene"
+                   : "İndirme yarıda kesildi, tekrar dene";
   }
   if (!want || !sdOk) return;
   // Zayıf sinyalde ilk bağlantı uzun sürebilir: 45 sn beklenir, arada kayıtlı ağlar taranıp
@@ -2858,66 +2873,92 @@ static void musicBootTasks() {
                                          : "İndirilemedi: Wi-Fi'ye bağlanılamadı (sinyal zayıf)";
     return;
   }
-  if (!SD.exists("/daxen")) SD.mkdir("/daxen");
-  if (!SD.exists(MUSIC_DIR)) SD.mkdir(MUSIC_DIR);
-  String url = "https://github.com/" GITHUB_REPO "/releases/download/fw-v" + String(FW_BUILD) + "/muzik-" FW_VARIANT ".bin";
-  WiFiClientSecure client;
-  client.setInsecure();
-  HTTPClient http;
-  http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
-  http.setTimeout(20000);
-  musicProgress("Müzik modülü indiriliyor", 0);
-  int code = -1;
-  if (http.begin(client, url)) {
-    http.setUserAgent("daxen-vane");
-    code = http.GET();
+  {
+    Lock l;
+    prefs.begin("cs", false);
+    prefs.putBool("mdl", true);
+    prefs.end();
   }
-  if (code != 200) {
-    http.end();
-    musicErr = "İndirilemedi (" + String(code) + ")";
-    return;
+  musicDlDone = false;
+  if (xTaskCreatePinnedToCore(musicDlTask, "mdl", 16384, nullptr, 1, nullptr, 1) == pdPASS) {
+    while (!musicDlDone) delay(50);
+  } else {
+    musicErr = "İndirilemedi: bellek yetmedi";
   }
-  int total = http.getSize();
-  const char* tmp = MUSIC_DIR "/muzik.tmp";
-  File out = SD.open(tmp, FILE_WRITE);
-  WiFiClient* s = http.getStreamPtr();
-  uint8_t buf[2048];
-  int got = 0, lastPct = -1;
-  uint32_t lastData = millis();
-  while (http.connected() && (total < 0 || got < total) && millis() - lastData < 20000) {
-    size_t a = s->available();
-    if (!a) {
-      delay(5);
-      continue;
+  {
+    Lock l;
+    prefs.begin("cs", false);
+    prefs.remove("mdl");
+    prefs.end();
+  }
+  if (musicErr.length()) return;
+  musicLaunch();
+}
+
+static void musicDlTask(void*) {
+  []() {
+    if (!SD.exists("/daxen")) SD.mkdir("/daxen");
+    if (!SD.exists(MUSIC_DIR)) SD.mkdir(MUSIC_DIR);
+    String url = "https://github.com/" GITHUB_REPO "/releases/download/fw-v" + String(FW_BUILD) + "/muzik-" FW_VARIANT ".bin";
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+    http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+    http.setTimeout(20000);
+    musicProgress("Müzik modülü indiriliyor", 0);
+    int code = -1;
+    if (http.begin(client, url)) {
+      http.setUserAgent("daxen-vane");
+      code = http.GET();
     }
-    int r = s->readBytes(buf, std::min(a, sizeof buf));
-    if (r > 0) {
-      out.write(buf, r);
-      got += r;
-      lastData = millis();
-      int pct = total > 0 ? (int)((int64_t)got * 100 / total) : 0;
-      if (pct != lastPct) {
-        lastPct = pct;
-        musicProgress("Müzik modülü indiriliyor", pct);
+    if (code != 200) {
+      http.end();
+      musicErr = "İndirilemedi (" + String(code) + ")";
+      return;
+    }
+    int total = http.getSize();
+    const char* tmp = MUSIC_DIR "/muzik.tmp";
+    File out = SD.open(tmp, FILE_WRITE);
+    WiFiClient* s = http.getStreamPtr();
+    static uint8_t buf[2048];
+    int got = 0, lastPct = -1;
+    uint32_t lastData = millis();
+    while (http.connected() && (total < 0 || got < total) && millis() - lastData < 20000) {
+      size_t a = s->available();
+      if (!a) {
+        delay(5);
+        continue;
+      }
+      int r = s->readBytes(buf, std::min(a, sizeof buf));
+      if (r > 0) {
+        out.write(buf, r);
+        got += r;
+        lastData = millis();
+        int pct = total > 0 ? (int)((int64_t)got * 100 / total) : 0;
+        if (pct != lastPct) {
+          lastPct = pct;
+          musicProgress("Müzik modülü indiriliyor", pct);
+        }
       }
     }
-  }
-  out.close();
-  http.end();
-  if (total > 0 && got != total) {
-    SD.remove(tmp);
-    musicErr = "İndirme yarıda kaldı";
-    return;
-  }
-  if (SD.exists(MUSIC_FILE)) SD.remove(MUSIC_FILE);
-  SD.rename(tmp, MUSIC_FILE);
-  musicCachedState = -1;
-  musicErr = "";
-  if (musicState() != 0) {
-    musicErr = "İndirilen dosya bu karta uymuyor";
-    return;
-  }
-  musicLaunch();
+    out.close();
+    http.end();
+    if (total > 0 && got != total) {
+      SD.remove(tmp);
+      musicErr = "İndirme yarıda kaldı";
+      return;
+    }
+    if (SD.exists(MUSIC_FILE)) SD.remove(MUSIC_FILE);
+    SD.rename(tmp, MUSIC_FILE);
+    musicCachedState = -1;
+    musicErr = "";
+    if (musicState() != 0) {
+      musicErr = "İndirilen dosya bu karta uymuyor";
+      return;
+    }
+  }();
+  musicDlDone = true;
+  vTaskDelete(nullptr);
 }
 
 
@@ -3249,6 +3290,8 @@ static void svcLight();
 
 void setup() {
   diagBoot();
+  pinMode(PIN_SPK, OUTPUT);  // hoparlör yükseltecinin girişi boşta kalıp gürültü/akım çekmesin
+  digitalWrite(PIN_SPK, LOW);
   Serial.begin(115200);
   mtx = xSemaphoreCreateRecursiveMutex();
   pinMode(PIN_BOOT, INPUT_PULLUP);
