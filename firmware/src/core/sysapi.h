@@ -63,6 +63,7 @@ static bool webRunning();
 static String webStatus();
 static int webProgress();  // yükleme sürüyorsa yüzde, yoksa -1
 static int webUploadCount();
+static String webCode();  // tarayıcının giriş kodu (sunucu kapalıysa boş)
 
 // --- Arayüz kancaları ---
 static void uiToast(const String& msg);

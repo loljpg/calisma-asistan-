@@ -127,6 +127,7 @@ static bool webRunning() { return webOn; }
 static String webStatus() { return "Alındı: Sezen Aksu - Gidiyorum.mp3 (3,3 MB)"; }
 static int webProgress() { return -1; }
 static int webUploadCount() { return 4; }
+static String webCode() { return webOn ? "482913" : ""; }
 static bool weatherSearch(const String& q, std::vector<GeoHit>& out) {
   out.push_back({"İstanbul", "İstanbul, Türkiye", 41.01f, 28.97f});
   out.push_back({"Istanbul", "Ohio, ABD", 40.f, -83.f});

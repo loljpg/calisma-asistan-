@@ -430,7 +430,7 @@ static void setTap(int x, int y) {
         if (!wifiConnected()) {
           alertBox("Wi-Fi gerekli", "Tarayıcıdan girmek için kart ve telefon aynı Wi-Fi ağında olmalı.");
         } else if (webStart()) {
-          alertBox("Tarayıcıdan gir", "Telefonun tarayıcısında şu adresi aç:\nhttp://" + wifiIp() + "/hesap");
+          alertBox("Tarayıcıdan gir", "Telefonun tarayıcısında http://" + wifiIp() + "/hesap adresini aç. Giriş kodu: " + webCode());
         }
       } else if (y >= HDR_H + 50) {
         int i = (y - HDR_H - 50) / 32;

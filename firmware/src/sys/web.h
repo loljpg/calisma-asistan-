@@ -8,6 +8,12 @@
 // Yalnızca Dosya aktarımı ekranı (ya da Ayarlar → Bulut hesabı → tarayıcıdan gir) açıkken çalışır.
 // Aynı Wi-Fi ağındaki telefon http://<kartın adresi>/ adresini açar.
 //
+// Erişim: sunucu her açılışta 6 haneli bir giriş kodu üretir ve kartın ekranında gösterir. Tarayıcı
+// kodla girer ve 128 bitlik rastgele oturum çerezi alır (HttpOnly, SameSite=Strict); kod ya da çerez
+// olmadan hiçbir sayfa, indirme, yükleme ya da silme çalışmaz. 5 yanlış kodda giriş 60 sn kilitlenir.
+// Sunucu kapanınca kod ve oturum silinir. Sistem klasörleri (/daxen, /daxen/sys, /calisma)
+// web'den silinemez, içine yazılamaz.
+//
 // Sunucu çekirdekte ayrı bir süreçtir ("web"): büyük bir dosya gelirken arayüz donmaz. Sayfa
 // dosyaları JavaScript ile tek tek ham PUT olarak gönderir (1,4 KB'lık parçalar, kartta 4 KB
 // tamponla SD'ye yazılır); çok parçalı form yalnızca JavaScript yoksa kullanılır. Gelen dosya
@@ -25,6 +31,11 @@ static size_t webBufN = 0;
 static const size_t WEB_BUF = 4096;
 static int webPid = -1;
 static Proc* volatile webProcP = nullptr;
+static char webCodeStr[7] = "";       // giriş kodu (ekranda gösterilir)
+static char webTok[33] = "";          // geçerli oturum (boşsa kimse girmemiş)
+static uint8_t webFails = 0;          // art arda yanlış kod
+static uint32_t webLockUntil = 0;     // giriş kilidi (millis)
+static bool webUpDenied = false;      // süren yükleme yetkisiz: baytlar yok sayılır
 
 static const char WEB_HEAD[] PROGMEM = R"(<!doctype html><html lang=tr><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>DAXEN VANE</title><style>
@@ -74,7 +85,84 @@ static String webSafePath(String p) {
   return p;
 }
 
+// Sistem klasörleri: web'den silinemez, içlerine dosya yazılamaz (kuyruk, günlük, ayar dosyaları)
+static bool webSysPath(const String& p) {
+  String l = trLower(p);
+  return l == "/daxen" || l == "/daxen/sys" || l.startsWith("/daxen/sys/") || l == "/calisma" || l.startsWith("/calisma/");
+}
+static bool webSysDir(const String& d) {  // bu klasöre yazmak yasak mı
+  String l = trLower(d);
+  return l == "/daxen/sys" || l.startsWith("/daxen/sys/") || l == "/calisma" || l.startsWith("/calisma/");
+}
+
+static void webRedirect(const String& to);
+
+// Oturum çerezi geçerli mi (sabit süreli karşılaştırma)
+static bool webAuthed() {
+  if (!webTok[0]) return false;
+  String c = web->header("Cookie");
+  int i = c.indexOf("dv=");
+  if (i < 0 || c.length() < (unsigned)(i + 3 + 32)) return false;
+  uint8_t diff = 0;
+  for (int k = 0; k < 32; k++) diff |= (uint8_t)(c[i + 3 + k] ^ webTok[k]);
+  return diff == 0;
+}
+
+static void webLoginPage(const String& msg) {
+  String next = web->uri() == "/giris" ? String("/") : web->uri();
+  if (next == "/" && web->hasArg("d")) next += "?d=" + webUrlEnc(webSafePath(web->arg("d")));
+  web->send(web->uri() == "/giris" ? 200 : 401, "text/html; charset=utf-8",
+            String(FPSTR(WEB_HEAD)) + "<h2>Giriş</h2><p class=mut>Kartın ekranındaki 6 haneli kodu yaz.</p>" +
+                (msg.length() ? "<p>" + webEsc(msg) + "</p>" : String("")) +
+                "<form method=post action='/giris' class=box><input type=text name=k inputmode=numeric autocomplete=off maxlength=6 autofocus>"
+                "<input type=hidden name=r value='" + webEsc(next) + "'><button>Gir</button></form></main></body></html>");
+}
+
+// Sayfa isteklerinde: oturum yoksa giriş sayfası gösterilir
+static bool webGatePage() {
+  if (webAuthed()) return true;
+  webLoginPage("");
+  return false;
+}
+
+// İşlem isteklerinde (indirme, silme, klasör, hesap kaydı): oturum yoksa 401
+static bool webGate() {
+  if (webAuthed()) return true;
+  web->send(401, "text/plain; charset=utf-8", "Giriş gerekli");
+  return false;
+}
+
+static void webLoginPost() {
+  if ((int32_t)(millis() - webLockUntil) < 0) {
+    webLoginPage("Çok fazla yanlış deneme. " + String((webLockUntil - millis()) / 1000 + 1) + " sn sonra tekrar dene.");
+    return;
+  }
+  String k = web->arg("k");
+  k.trim();
+  bool ok = webCodeStr[0] && k.length() == 6;
+  for (int i = 0; ok && i < 6; i++) ok = k[i] == webCodeStr[i];
+  if (!ok) {
+    webFails++;
+    sysLog("web", "yanlış giriş kodu (" + String(webFails) + "/5)");
+    if (webFails >= 5) {
+      webFails = 0;
+      webLockUntil = millis() + 60000;
+      sysLog("web", "giriş 60 sn kilitlendi");
+    }
+    webLoginPage("Kod yanlış.");
+    return;
+  }
+  webFails = 0;
+  for (int i = 0; i < 4; i++) snprintf(webTok + i * 8, 9, "%08x", (unsigned)esp_random());
+  sysLog("web", "tarayıcı giriş yaptı");
+  String r = web->arg("r");
+  if (!r.startsWith("/") || r.startsWith("//")) r = "/";  // yalnızca bu sunucunun içine dön
+  web->sendHeader("Set-Cookie", String("dv=") + webTok + "; Path=/; HttpOnly; SameSite=Strict");
+  webRedirect(r);
+}
+
 static void webPage() {
+  if (!webGatePage()) return;
   if (!sdOk) {
     web->send(200, "text/html; charset=utf-8", String(FPSTR(WEB_HEAD)) + "<p>SD kart takılı değil.</p></main></body></html>");
     return;
@@ -115,15 +203,20 @@ static void webPage() {
   std::sort(files.begin(), files.end(), byName);
   for (auto& e : dirs) {
     String p = joinPath(dir, e.first);
-    web->sendContent("<div class=row>&#128193;<span><a href='/?d=" + webUrlEnc(p) + "'>" + webEsc(e.first) +
-                     "</a></span><form class=inl method=post action='/del?f=" + webUrlEnc(p) +
-                     "' onsubmit='return confirm(\"Klasör ve içindekiler silinsin mi?\")'><button class=del>Sil</button></form></div>");
+    web->sendContent("<div class=row>&#128193;<span><a href='/?d=" + webUrlEnc(p) + "'>" + webEsc(e.first) + "</a></span>" +
+                     (webSysPath(p) ? String("<span class=mut style='flex:none'>sistem</span>")
+                                    : "<form class=inl method=post action='/del?f=" + webUrlEnc(p) +
+                                          "' onsubmit='return confirm(\"Klasör ve içindekiler silinsin mi?\")'><button class=del>Sil</button></form>") +
+                     "</div>");
   }
   for (auto& e : files) {
     String p = joinPath(dir, e.first);
     web->sendContent("<div class=row><span><a href='/dl?f=" + webUrlEnc(p) + "'>" + webEsc(e.first) + "</a></span><span class=mut style='flex:none'>" +
-                     fmtBytes(e.second) + "</span><form class=inl method=post action='/del?f=" + webUrlEnc(p) +
-                     "' onsubmit='return confirm(\"Silinsin mi?\")'><button class=del>Sil</button></form></div>");
+                     fmtBytes(e.second) + "</span>" +
+                     (webSysPath(p) ? String("")
+                                    : "<form class=inl method=post action='/del?f=" + webUrlEnc(p) +
+                                          "' onsubmit='return confirm(\"Silinsin mi?\")'><button class=del>Sil</button></form>") +
+                     "</div>");
   }
   if (dirs.empty() && files.empty()) web->sendContent("<p class=mut>Klasör boş.</p>");
   web->sendContent("<div class=box><form method=post action='/mkdir?d=" + webUrlEnc(dir) +
@@ -217,7 +310,12 @@ static void webEndFile(bool ok) {
 static void webUploadChunk() {
   HTTPUpload& up = web->upload();
   if (up.status == UPLOAD_FILE_START) {
-    webBeginFile(webSafePath(web->hasArg("d") ? web->arg("d") : String("/")), up.filename, web->header("Content-Length").toInt());
+    String d = webSafePath(web->hasArg("d") ? web->arg("d") : String("/"));
+    webUpDenied = !webAuthed() || webSysDir(d);
+    if (webUpDenied) return;
+    webBeginFile(d, up.filename, web->header("Content-Length").toInt());
+  } else if (webUpDenied) {
+    return;
   } else if (up.status == UPLOAD_FILE_WRITE) {
     webWrite(up.buf, up.currentSize);
   } else if (up.status == UPLOAD_FILE_END || up.status == UPLOAD_FILE_ABORTED) {
@@ -229,7 +327,12 @@ static void webUploadChunk() {
 static void webRawChunk() {
   HTTPRaw& r = web->raw();
   if (r.status == RAW_START) {
-    webBeginFile(webSafePath(web->arg("d")), web->arg("n"), web->clientContentLength());
+    String d = webSafePath(web->arg("d"));
+    webUpDenied = !webAuthed() || webSysDir(d);
+    if (webUpDenied) return;
+    webBeginFile(d, web->arg("n"), web->clientContentLength());
+  } else if (webUpDenied) {
+    return;
   } else if (r.status == RAW_WRITE) {
     webWrite(r.buf, r.currentSize);
     if (webProcP && webProcP->killReq) {  // ekrandan çıkıldı: bağlantı kapatılır, yükleme yarıda kesilir
@@ -243,12 +346,18 @@ static void webRawChunk() {
 
 static bool fRemoveAll(const String& path);  // apps/files.h
 
+// Kayıtlı bilgiler sayfaya geri yazılmaz; boş bırakılan alan değişmez.
 static void webAccountPage() {
+  if (!webGatePage()) return;
+  auto field = [](const char* label, const char* name, const char* type, bool saved) {
+    return String(label) + (saved ? " <span class=mut>(kayıtlı; değişmeyecekse boş bırak)</span>" : "") + "<input type=" + type +
+           " name=" + name + " autocomplete=off>";
+  };
   String h = String(FPSTR(WEB_HEAD)) + "<h2>Bulut hesabı</h2><p class=mut>Telefondaki uygulamaya girdiğin Firebase bilgilerinin aynısı.</p>"
-             "<form method=post action='/hesap' class=box>Veritabanı adresi<input type=text name=db value='" + webEsc(cfg.dbUrl) +
-             "'>Web API anahtarı<input type=text name=key value='" + webEsc(cfg.apiKey) + "'>E-posta<input type=text name=mail value='" +
-             webEsc(cfg.email) + "'>Şifre" + (cfg.password.length() ? " (değişmeyecekse boş bırak)" : "") +
-             "<input type=password name=pass><button>Kaydet</button></form><p><a href='/'>&#8592; Dosyalar</a></p></main></body></html>";
+             "<form method=post action='/hesap' class=box>" + field("Veritabanı adresi", "db", "text", cfg.dbUrl.length()) +
+             field("Web API anahtarı", "key", "password", cfg.apiKey.length()) + field("E-posta", "mail", "text", cfg.email.length()) +
+             field("Şifre", "pass", "password", cfg.password.length()) +
+             "<button>Kaydet</button></form><p><a href='/'>&#8592; Dosyalar</a></p></main></body></html>";
   web->send(200, "text/html; charset=utf-8", h);
 }
 
@@ -271,10 +380,17 @@ static bool webStart() {
   if (WiFi.status() != WL_CONNECTED) return false;
   web = new (std::nothrow) WebServer(80);
   if (!web) return false;
-  const char* hdrs[] = {"Content-Length"};
-  web->collectHeaders(hdrs, 1);
+  const char* hdrs[] = {"Content-Length", "Cookie"};
+  web->collectHeaders(hdrs, 2);
+  for (int i = 0; i < 6; i++) webCodeStr[i] = '0' + esp_random() % 10;
+  webCodeStr[6] = 0;
+  webTok[0] = 0;
+  webFails = 0;
   web->on("/", HTTP_GET, webPage);
+  web->on("/giris", HTTP_GET, []() { webLoginPage(""); });
+  web->on("/giris", HTTP_POST, webLoginPost);
   web->on("/dl", HTTP_GET, []() {
+    if (!webGate()) return;
     String p = webSafePath(web->arg("f"));
     File f = SD.open(p);
     if (!f || f.isDirectory()) {
@@ -286,10 +402,16 @@ static bool webStart() {
     f.close();
   });
   web->on("/up", HTTP_POST, []() { webRedirect("/?d=" + webUrlEnc(webSafePath(web->arg("d")))); }, webUploadChunk);
-  web->on("/put", HTTP_PUT, []() { web->send(webUpOk ? 200 : 500, "text/plain", webUpOk ? "tamam" : "hata"); }, webRawChunk);
+  web->on("/put", HTTP_PUT, []() {
+    if (webUpDenied) web->send(403, "text/plain; charset=utf-8", webAuthed() ? "Sistem klasörüne yazılamaz" : "Giriş gerekli");
+    else web->send(webUpOk ? 200 : 500, "text/plain", webUpOk ? "tamam" : "hata");
+  }, webRawChunk);
   web->on("/del", HTTP_POST, []() {
+    if (!webGate()) return;
     String p = webSafePath(web->arg("f"));
-    if (p != "/") {
+    if (webSysPath(p)) {
+      webSetMsg("Sistem klasörü silinemez");
+    } else if (p != "/") {
       fRemoveAll(p);
       webSetMsg("Silindi: " + baseName(p));
       dataDirty = true;
@@ -297,19 +419,22 @@ static bool webStart() {
     webRedirect("/?d=" + webUrlEnc(dirName(p)));
   });
   web->on("/mkdir", HTTP_POST, []() {
+    if (!webGate()) return;
     String d = webSafePath(web->arg("d"));
     String n = safeName(web->arg("n"));
-    if (n.length()) SD.mkdir(joinPath(d, n));
+    if (n.length() && !webSysDir(d)) SD.mkdir(joinPath(d, n));
     webRedirect("/?d=" + webUrlEnc(d));
   });
   web->on("/hesap", HTTP_GET, webAccountPage);
   web->on("/hesap", HTTP_POST, []() {
+    if (!webGate()) return;
     String db = normalizeDbUrl(web->arg("db")), key = web->arg("key"), mail = web->arg("mail"), pass = web->arg("pass");
     key.trim();
     mail.trim();
     accountSet(db.length() ? db : cfg.dbUrl, key.length() ? key : cfg.apiKey, mail.length() ? mail : cfg.email,
                pass.length() ? pass : cfg.password);
     webSetMsg("Hesap bilgileri kaydedildi");
+    sysLog("web", "bulut hesabı tarayıcıdan değiştirildi");
     dataDirty = true;
     web->send(200, "text/html; charset=utf-8", String(FPSTR(WEB_HEAD)) + "<p>Kaydedildi. Kart buluta bağlanmayı deniyor.</p><p><a href='/'>Dosyalar</a></p></main></body></html>");
   });
@@ -340,10 +465,13 @@ static void webStop() {
   free(webBuf);  // yükleme tamponu yalnızca sunucu açıkken tutulur
   webBuf = nullptr;
   webBufN = 0;
+  webCodeStr[0] = 0;  // kod ve oturum sunucuyla birlikte biter
+  webTok[0] = 0;
   sysLog("web", "sunucu kapandı");
 }
 
 static bool webRunning() { return web != nullptr; }
+static String webCode() { return web ? String(webCodeStr) : String(); }
 
 static String webStatus() {
   Lock l;

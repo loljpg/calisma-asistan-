@@ -1,6 +1,7 @@
 #pragma once
 // Dosya aktarımı: kart bir web sayfası açar; aynı Wi-Fi'deki telefonun tarayıcısından SD karta
-// dosya (şarkı, resim, metin) gönderilir, indirilir ya da silinir. Yalnızca bu ekran açıkken çalışır.
+// dosya (resim, metin, uygulama) gönderilir, indirilir ya da silinir. Yalnızca bu ekran açıkken çalışır.
+// Tarayıcı ekranda gösterilen 6 haneli kodla girer (sys/web.h).
 #include "../os/shell.h"
 
 static void trDrawStatus() {
@@ -46,8 +47,9 @@ static void trDraw(bool full) {
   text("Aynı Wi-Fi: " + wifiSsid(), 46, HDR_H + 28, F_XS, C_TEXT3, C_BG);
   panel(12, HDR_H + 50, 296, 46, C_SURF, C_ACC);
   text("http://" + wifiIp(), 160, HDR_H + 73, F_MD, C_TEXT, C_SURF, MC_DATUM);
-  auto ls = wrapText("Sayfadan dosya gönderebilir, indirebilir ya da silebilirsin.", F_XS, 296, 2);
-  for (size_t i = 0; i < ls.size(); i++) text(ls[i], 12, HDR_H + 102 + i * 15, F_XS, C_TEXT2, C_BG);
+  String code = webCode();
+  text("Giriş kodu", 12, HDR_H + 108, F_SM, C_TEXT2, C_BG);
+  text(code.substring(0, 3) + " " + code.substring(3), 308, HDR_H + 104, F_MD, C_ACC, C_BG, TR_DATUM);
   trDrawStatus();
 }
 
