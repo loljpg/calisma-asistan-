@@ -83,21 +83,26 @@ static void diagStackTick() {
 // ESP-IDF ve NimBLE'nin kendi görevleri: adlarıyla bulunur, Görevler'de durum ve yığın boşluğu
 // görünür. İşlemci payları ölçülemez (FreeRTOS çalışma süresi sayacı bu derlemede kapalı).
 static void diagAdoptSystemTasks() {
+  // Yığın boyu biliniyorsa (ESP-IDF ve Arduino ayarlarından) Görevler doluluğu da gösterir; yığın
+  // boşluğu 1,5 KB'ın altına inerse günlüğe yazılır (diagStackTick): boylar bu kayıtlarla ayarlanır.
   static const struct {
     const char* task;
     const char* name;
+    uint16_t stack;
     const char* note;
   } known[] = {
-      {"wifi", "wifi", "Wi-Fi sürücüsü"},
-      {"tiT", "tcp/ip", "TCP/IP yığını (lwIP)"},
-      {"nimble_host", "bt-host", "Bluetooth yığını (NimBLE)"},
-      {"btController", "bt-denetleyici", "Bluetooth denetleyicisi"},
+      {"loopTask", "çekirdek", CONFIG_ARDUINO_LOOP_STACK_SIZE, "arayüz ve servisler (Arduino döngüsü)"},
+      {"esp_timer", "zamanlayıcı", CONFIG_ESP_TIMER_TASK_STACK_SIZE, "ESP-IDF zamanlayıcı geri çağrıları"},
+      {"wifi", "wifi", 0, "Wi-Fi sürücüsü"},
+      {"tiT", "tcp/ip", CONFIG_LWIP_TCPIP_TASK_STACK_SIZE, "TCP/IP yığını (lwIP)"},
+      {"nimble_host", "bt-host", 0, "Bluetooth yığını (NimBLE)"},
+      {"btController", "bt-denetleyici", 0, "Bluetooth denetleyicisi"},
   };
   for (auto& k : known) {
     TaskHandle_t h = xTaskGetHandle(k.task);
     if (!h) continue;
     BaseType_t core = xTaskGetAffinity(h);
-    kAdopt(k.name, h, (uint8_t)uxTaskPriorityGet(h), core == tskNO_AFFINITY ? 0 : (uint8_t)core, 0, k.note);
+    kAdopt(k.name, h, (uint8_t)uxTaskPriorityGet(h), core == tskNO_AFFINITY ? 0 : (uint8_t)core, k.stack, k.note);
   }
 }
 

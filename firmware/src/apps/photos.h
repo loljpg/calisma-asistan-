@@ -278,4 +278,10 @@ static bool phBack() {
   return false;
 }
 
-static const App APP_PHOTOS = {"Fotoğraflar", "Fotoğraflar", I_PHOTO, phOpen, phDraw, phTap, nullptr, phSwipe, nullptr, nullptr, phBack, nullptr};
+// Kapanınca liste bırakılır (yüzlerce yol birkaç KB tutar; açılışta yeniden taranır)
+static void phClose() {
+  std::vector<String>().swap(phList);
+  phIdx = -1;
+}
+
+static const App APP_PHOTOS = {"Fotoğraflar", "Fotoğraflar", I_PHOTO, phOpen, phDraw, phTap, nullptr, phSwipe, nullptr, nullptr, phBack, phClose};

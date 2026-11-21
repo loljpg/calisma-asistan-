@@ -313,4 +313,6 @@ static void fOfferOldMusicModule() {
          });
 }
 
-static const App APP_FILES = {"Dosyalar", "Dosyalar", I_FOLDER, fOpen, fDraw, fTap, fHold, fSwipe, nullptr, nullptr, fBack, nullptr};
+static void fClose() { std::vector<FEntry>().swap(fList); }  // klasör listesi bırakılır (açılışta yeniden okunur)
+
+static const App APP_FILES = {"Dosyalar", "Dosyalar", I_FOLDER, fOpen, fDraw, fTap, fHold, fSwipe, nullptr, nullptr, fBack, fClose};

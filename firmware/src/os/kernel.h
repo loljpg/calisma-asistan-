@@ -20,7 +20,7 @@
 #include "../core/state.h"
 
 #define K_HZ 1000
-#define K_MAX 16
+#define K_MAX 18  // 5 servis + ağ + 6 izlenen sistem görevi + Lua iletisi + açılan süreçler
 #define K_CORE_PRIO 3   // çekirdek (arayüz) görevi
 #define K_PROC_PRIO 1   // kullanıcı süreçleri
 

@@ -77,7 +77,7 @@ hesap yaparken saat, dokunma ve alarmlar donmaz.
 | ışık | servis | 50 ms | RGB ışık ve ekran parlaklığı |
 | ağ | görev, çekirdek 0 | — | Wi-Fi, bulut, hava, güncelleme |
 | wifi, tcp/ip, bt-host, bt-denetleyici | sistem görevi | — | ESP-IDF ve NimBLE'nin kendi görevleri (yalnızca izlenir) |
-| web | görev, çekirdek 1 | — | Aktarım ve hesap sayfası sunucusu; Aktarım kapalıyken 10 dk istek gelmezse kapanır |
+| web | görev, çekirdek 1 | — | Aktarım ve hesap sayfası sunucusu, yalnızca o ekran açıkken (üstünde başka ekran açık kalırsa 10 dk istek gelmeyince kapanır) |
 | ağ-araç | görev, çekirdek 1 | — | Terminal ağ araçları (ping, dns, tcp, traceroute, test), iş bitince kapanır |
 | lua:… | görev, çekirdek 1 | — | Açık (ya da arka plandaki) Lua uygulaması |
 | satranç | görev, çekirdek 1 | — | Satranç motoru, yalnızca düşünürken |

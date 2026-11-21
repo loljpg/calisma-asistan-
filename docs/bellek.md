@@ -54,8 +54,12 @@ Kurallar:
 
 ## Kendiliğinden kapananlar
 
-- **Web sunucusu:** Aktarım ekranı açık değilken 10 dakika istek gelmezse kapanır (yükleme
-  sürerken kapanmaz). Yığını, tamponu ve bağlantıları serbest kalır; bulut akışı geri gelir.
+- **Web sunucusu:** yalnızca Aktarım (ya da Ayarlar → Bulut hesabı → *Tarayıcıdan gir*) açıkken
+  çalışır, o ekrandan çıkınca kapanır. Üstünde başka bir ekran açık kalırsa 10 dakika istek
+  gelmeyince kapanır (yükleme sürerken kapanmaz). Yığını, tamponu ve bağlantıları serbest kalır;
+  bulut akışı geri gelir.
+- **Uygulama listeleri:** Fotoğraflar, Dosyalar, Bilgi kartları, Çizim, Terminal ve Ağ kapanınca
+  listelerini bellekten atar; açılınca yeniden okur.
 - **Ağ aracı:** iş bitince süreç kapanır.
 - **Satranç motoru:** hamle bulununca süreç kapanır.
 - **Bluetooth taraması:** kullanılmayan cihaz listesi bırakılır.

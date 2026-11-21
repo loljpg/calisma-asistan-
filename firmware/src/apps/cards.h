@@ -292,4 +292,12 @@ static void kdOpen() {
   kdLoadDecks();
 }
 
-static const App APP_CARDS = {"Bilgi kartları", "Kartlar", I_CARDS, kdOpen, kdDraw, kdTap, nullptr, kdSwipe, nullptr, nullptr, kdBack, nullptr};
+// Kapanınca deste bellekten çıkar (ilerleme her değişimde NVS'ye yazılıyor: kdSaveBoxes)
+static void kdClose() {
+  std::vector<Card>().swap(kdCards);
+  std::vector<uint8_t>().swap(kdBox);
+  std::vector<DeckInfo>().swap(kdDecks);
+  kdDeck = -1;
+}
+
+static const App APP_CARDS = {"Bilgi kartları", "Kartlar", I_CARDS, kdOpen, kdDraw, kdTap, nullptr, kdSwipe, nullptr, nullptr, kdBack, kdClose};
