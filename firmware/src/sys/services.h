@@ -53,7 +53,6 @@ static void sysRequestOta() {
   uiSplash("Yeniden başlatılıp denetlenecek…");
   delay(700);
   esp_ota_mark_app_valid_cancel_rollback();
-  speakerHold();
   ESP.restart();
 }
 
@@ -61,7 +60,6 @@ static void sysRestart() {
   uiSplash("Yeniden başlatılıyor…");
   delay(500);
   esp_ota_mark_app_valid_cancel_rollback();
-  speakerHold();
   ESP.restart();
 }
 

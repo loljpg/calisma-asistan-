@@ -51,6 +51,18 @@ int main(int argc, char** argv) {
     toast("Telefonla eşleşti");
     shot("13-ana-balon");
     toastUntil = 0;
+    // Müzikten kalan modül dosyası bir kez sorulur; "Sil" dosyayı siler, sonra bir daha sorulmaz
+    homeShow();
+    fOfferOldMusicModule();
+    shot("14-eski-muzik-modulu");
+    if (ov.kind != OV_DIALOG || !SD.exists(OLD_MUSIC_FILE)) { fprintf(stderr, "eski müzik modülü sorulmadı\n"); exit(1); }
+    auto cb = ov.cb;
+    ov = Overlay();
+    cb(1);
+    toastUntil = 0;
+    homeShow();
+    fOfferOldMusicModule();
+    if (SD.exists(OLD_MUSIC_FILE) || ov.kind != OV_NONE) { fprintf(stderr, "eski müzik modülü silinmedi ya da yine soruldu\n"); exit(1); }
   }
   if (want("launcher")) {
     launcherShow();
@@ -287,8 +299,6 @@ int main(int argc, char** argv) {
     phIdx = 0; phShow(); phBar = true; phDrawBar();
     shot("b9-foto");
     phIdx = -1;
-    appOpen(&APP_MUSIC);
-    shot("c0-muzik-ana");
   }
   if (want("s5")) {
     sdRemoveTree("/daxen/uygulamalar");

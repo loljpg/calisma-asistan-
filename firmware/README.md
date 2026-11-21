@@ -1,10 +1,10 @@
 # DAXEN VANE · masa saati yazılımı (ESP32 CYD)
 
 ESP32-2432S028R ("Cheap Yellow Display") için küçük bir işletim sistemi. Ekstra parça gerekmez:
-kart, USB kablosu ve powerbank yeterli. SD kart isteğe bağlıdır ama notlar, kitaplar, fotoğraflar,
-müzik ve kendi uygulamaların için gerekir.
+kart, USB kablosu ve powerbank yeterli. SD kart isteğe bağlıdır ama notlar, kitaplar, fotoğraflar
+ve kendi uygulamaların için gerekir.
 
-<img src="onizleme.png" width="880" alt="Ekranların önizlemesi: açılış, ana ekran, uygulamalar, YKS, hava, saat, notlar, satranç, müzik, kartlar, Lua uygulaması, ayarlar">
+<img src="onizleme.png" width="880" alt="Ekranların önizlemesi: açılış, ana ekran, uygulamalar, YKS, hava, saat, notlar, satranç, medya, kartlar, Lua uygulaması, ayarlar">
 
 Tasarım: "Obsidian Silver". Siyah zemin, grafit paneller, gümüş yazılar, tek vurgu rengi çelik
 mavisi. Yazılar Inter, simgeler çizgi tabanlı ve vektörel. Ayarlar → Ekran → *Kapak rengini vurgu
@@ -14,7 +14,7 @@ yap* açıksa telefonda çalan şarkının kapağı vurgu rengini belirler.
 
 Üstte tarih, bildirim sayısı, Bluetooth ve Wi-Fi. Ortada saat ve hava durumu, altında YKS'ye kalan
 gün ve seri (alev), topuyla oynayan kedi, şimdiki ya da sıradaki oturum kartı ve alt çubuk:
-YKS, Notlar, Müzik, Ayarlar, Uygulamalar.
+YKS, Notlar, Ayarlar, Uygulamalar.
 
 Dokunma: dokun, **basılı tut** (bağlam menüsü), kaydır. Ekranın **sol kenarından sağa kaydırmak**
 ve başlıktaki sol ok her uygulamada geri gider.
@@ -27,8 +27,7 @@ ve başlıktaki sol ok her uygulamada geri gider.
 | **Notlar** | Klavyeyle metin notu ve parmakla el yazısı notu (`/daxen/notlar`) |
 | **Dosyalar** | SD kart: aç, yeniden adlandır, kopyala, kes, yapıştır, sil, klasör oluştur |
 | **Ayarlar** | Wi-Fi (ağ listesi, şifre, 5 kayıtlı ağ), Bluetooth, Ekran (parlaklık, gece kısma, otomatik parlaklık, dokunmatik ayarı), Bulut hesabı, Depolama, Güncelleme, Sistem |
-| **Müzik** | SD karttaki MP3'leri Bluetooth kulaklığa çalar (aşağıya bak) |
-| **Medya** | Telefonda çalan şarkıyı yönetir |
+| **Medya** | Telefonda çalan şarkıyı gösterir ve yönetir (kart ses çalmaz) |
 | **Bildirimler** | Telefondan gelen bildirimler |
 | **Hesap Mak.** | Bilimsel hesap makinesi: işlem önceliği, parantez, trigonometri (derece/radyan), Ans |
 | **Saat** | Alarm (günler, erteleme), geri sayım, kronometre (turlar), dünya saatleri |
@@ -71,22 +70,12 @@ Servisler çekirdek görevinde (öncelik 3) çalışır ve ekrana serbestçe çi
 vardır (öncelik 1), ekrana yalnızca ekran kilidiyle çizer. Sonlandırma işbirliklidir: süreç isteği
 görür ve kendisi çıkar, böylece yarım kalan SD yazması ya da tutulan bir kilit olmaz.
 
-## Müzik: Bluetooth kulaklık ya da hoparlör
+## Ses
 
-ESP32'nin belleği, Wi-Fi + telefon bağlantısı ile kulaklık sesini aynı anda kaldırmıyor. Bu yüzden
-müzik ayrı bir yazılımdır: Müzik uygulamasında **Müziği aç**'a basınca cihaz müzik yazılımıyla
-yeniden başlar, çıkınca DAXEN kaldığı yerden açılır.
-
-1. MP3'leri SD kartta `/Muzik` klasörüne koy (Aktarım uygulamasıyla da olur).
-2. İlk seferde Müzik → **Modülü indir** (Wi-Fi gerekir, yaklaşık 1,3 MB). Ya da Releases'taki
-   `muzik-cyd_st7789.bin` dosyasını SD kartın köküne kopyala.
-3. Müziği aç → üstteki çıkış simgesine dokun → **Hoparlör** ya da **Kulaklık** seç.
-   Kulaklık için kulaklığı eşleşme kipine al, listeden seç. Hoparlör kartın `SPEAK` soketine
-   (2 pinli, 1,25 mm) takılır; ses ESP32'nin 8 bitlik iç DAC'ından gelir (GPIO26), alarm ve
-   bildirim için iyi, müzikte hafif cızırtılı. Kulaklık seçilmemişse hoparlörden başlar.
-
-Müzik çalarken Wi-Fi, telefon bağlantısı ve bildirimler kapalıdır. Etiketsiz dosyalarda
-`Sanatçı - Şarkı.mp3` adı kullanılır.
+Kart ses çalmaz. SD karttan müzik çalma (ayrı müzik yazılımı, Bluetooth kulaklık ve hoparlör)
+kaldırıldı. SD karttaki şarkılara dokunulmaz; SD'de kalan eski müzik modülü dosyası
+(`/daxen/sys/muzik-*.bin`) için bir kez "silinsin mi?" diye sorulur. `SPEAK` soketindeki
+yükseltecin girişi (GPIO26) açılışta LOW tutulur, takılı bir hoparlör vızıldamaz.
 
 ## İlk yükleme (telefondan, OTG ile)
 
@@ -139,7 +128,7 @@ Kart yalnızca aynı modelin **daha yeni** sürümünü yükler; işlediği dosy
 
 ## SD kart
 
-Takılı değilse sistem yine çalışır (notlar, müzik, fotoğraf ve Lua uygulamaları hariç). FAT32 olmalı.
+Takılı değilse sistem yine çalışır (notlar, fotoğraf ve Lua uygulamaları hariç). FAT32 olmalı.
 
 | Klasör | İçerik |
 | --- | --- |
@@ -150,8 +139,7 @@ Takılı değilse sistem yine çalışır (notlar, müzik, fotoğraf ve Lua uygu
 | `/daxen/cizim/` | Çizimler |
 | `/daxen/kartlar/` | Kendi bilgi kartı destelerin |
 | `/daxen/uygulamalar/` | Lua uygulamaları ve verileri |
-| `/daxen/sys/` | Müzik yazılımı gibi sistem dosyaları |
-| `/Muzik/` | MP3'ler |
+| `/daxen/sys/` | Sistem dosyaları |
 
 ## Telefonla eşleşme
 
@@ -161,20 +149,20 @@ Bluetooth bağlıyken Wi-Fi gerekmez: plan, tikler, sayaç, saat, bildirimler ve
 ## Geliştirme notları
 
 - PlatformIO, `espressif32@6.9.0` (Arduino core 2.0.x).
-  Ortamlar: `cyd`, `cyd_st7789` (ana yazılım) ve `muzik_cyd`, `muzik_cyd_st7789` (müzik yazılımı).
+  Ortamlar: `cyd` (ILI9341) ve `cyd_st7789`.
 - `src/main.cpp` açılış ve çekirdek servislerinin kaydı; `src/sys/` sistem katmanı (kalıcı ayarlar,
-  SD kart, ağ ve bulut, Bluetooth, web sunucusu, müzik modülü, ışıklar, sistem hizmetleri);
+  SD kart, ağ ve bulut, Bluetooth, web sunucusu, ışıklar, sistem hizmetleri);
   `src/os/kernel.h` zamanlayıcı kesmesi ve süreç zamanlayıcı; `src/daxen.h` arayüzü toplar:
   `core/` ortak durum ve yardımcılar, `ui/` tasarım sistemi (renkler, simgeler, bileşenler, klavye),
   `os/` çekirdek ve kabuk (ana ekran, başlatıcı, dokunma), `apps/` uygulamalar. Yeni uygulama: `apps/` altına
   bir `App` tanımı yaz, `os/shell.h` içindeki `AppId` ve `os/registry.h` tablosuna ekle.
 - Renkler `ui/theme.h`, simgeler `ui/icons.h` (48'lik ızgarada vektör), logo `tools/make_logo.py`,
   yazı tipleri `tools/make_fonts.py` (Inter, SIL Open Font License 1.1).
-- Müzik yazılımı `src/music/` (ESP32-A2DP ve libhelix), Lua 5.4 `lib/lua/` (MIT).
+- Lua 5.4 `lib/lua/` (MIT).
 - Dokunmatik: `core/touch.h` (XPT2046, eksen başına 5 ölçümün ortancası), `core/calib.h`
   (9 noktadan en küçük karelerle afin dönüşüm: ölçek, kayma, eksen takası, dönüklük), `os/calibrate.h`.
 - **Testler:** `test/host/run.sh test` gerçek kodu bilgisayarda AddressSanitizer ve
   UndefinedBehaviorSanitizer ile derler; birim testlerini (satranç perft, hesap makinesi, kalibrasyon,
-  sudoku, Lua, Türkçe metin, çekirdek) ve bütün ekran senaryolarını çalıştırır. GitHub'da her derlemeden
+  sudoku, Lua, Türkçe metin, çekirdek, ayar geçişleri) ve bütün ekran senaryolarını çalıştırır. GitHub'da her derlemeden
   önce çalışır; geçmezse sürüm çıkmaz. `run.sh preview` ekran görüntülerini `test/host/out/` klasörüne yazar.
 - Derleme ve sürüm yayınlama `.github/workflows/firmware.yml` ile GitHub'da yapılır.

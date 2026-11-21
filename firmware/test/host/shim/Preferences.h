@@ -8,7 +8,11 @@ class Preferences {
   bool begin(const char* ns, bool = false) { _ns = ns; return true; }
   void end() {}
   bool remove(const char* k) { db()[key(k)].clear(); db().erase(key(k)); return true; }
-  bool clear() { return true; }
+  bool clear() {  // yalnızca bu ad alanının anahtarları
+    std::string pre = _ns + "/";
+    for (auto it = db().begin(); it != db().end();) it = it->first.compare(0, pre.size(), pre) == 0 ? db().erase(it) : std::next(it);
+    return true;
+  }
   bool isKey(const char* k) { return db().count(key(k)); }
   size_t putString(const char* k, const String& v) { db()[key(k)] = std::string(v.c_str()); return v.length(); }
   String getString(const char* k, const String& d = String()) { auto it = db().find(key(k)); return it == db().end() ? d : String(it->second.c_str()); }

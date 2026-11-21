@@ -1,14 +1,14 @@
 // DAXEN VANE — ESP32 Cheap Yellow Display (ESP32-2432S028R) işletim yazılımı
 //
 // Masaüstü bir cihaz: ana ekran (saat, hava, kedi, YKS kartı), uygulamalar (YKS, Notlar, Dosyalar,
-// Ayarlar, Müzik, Medya, Bildirimler, Hesap makinesi, Saat, Hava durumu, Yapılacaklar, Oyunlar,
-// Fotoğraflar, Okuyucu, Çizim, Bilgi kartları, Işık ölçer, Dosya aktarımı, Lua uygulamaları).
+// Ayarlar, Medya, Bildirimler, Hesap makinesi, Saat, Hava durumu, Yapılacaklar, Oyunlar, Fotoğraflar,
+// Okuyucu, Çizim, Bilgi kartları, Işık ölçer, Dosya aktarımı, Sistem, Görevler, Lua uygulamaları).
 // Yazılım tek çeviri birimidir. Bu dosya açılışı ve çekirdeğin servislerini içerir; geri kalanı
 // sırayla eklenir:
 //   daxen.h   arayüz: core/ (ortak durum, yardımcılar), ui/ (tasarım sistemi), os/ (çekirdek, kabuk),
 //             apps/ (uygulamalar)
 //   sys/      sistem katmanı: kalıcı ayarlar, SD kart, ağ ve Firebase (docs/firebase.md), Bluetooth
-//             (docs/bluetooth.md), web sunucusu, müzik modülü, ışıklar, sistem hizmetleri
+//             (docs/bluetooth.md), web sunucusu, ışıklar, sistem hizmetleri
 // Zamanlama os/kernel.h'tedir: 1 kHz zamanlayıcı kesmesi, servisler ve süreçler (Görevler uygulaması).
 
 #include <Arduino.h>
@@ -52,7 +52,6 @@ static const char FW_MARKER[] = "CSFW:" FW_VARIANT ":" STR(FW_BUILD) ";";
 #include "sys/ble.h"
 #include "os/calibrate.h"  // dokunmatik ayarı (9 nokta, doğrulama)
 #include "sys/web.h"
-#include "sys/music.h"
 #include "sys/power.h"
 #include "sys/services.h"
 
@@ -134,9 +133,11 @@ static void svcLight();
 
 void setup() {
   diagBoot();
-  pinMode(PIN_SPK, OUTPUT);  // hoparlör yükseltecinin girişi boşta kalıp gürültü/vızıltı yapmasın
+  // SPEAK soketindeki yükseltecin girişi boşta kalıp vızıldamasın (ses çıkışı yok). fw-v40 ve
+  // öncesi yeniden başlarken bu pini sıfırda kilitliyordu; kilit burada çözülür.
+  gpio_hold_dis((gpio_num_t)PIN_SPK);
+  pinMode(PIN_SPK, OUTPUT);
   digitalWrite(PIN_SPK, LOW);
-  gpio_hold_dis((gpio_num_t)PIN_SPK);  // önceki yazılım yeniden başlarken sıfırda tutmuştu
   Serial.begin(115200);
   mtx = xSemaphoreCreateRecursiveMutex();
   pinMode(PIN_BOOT, INPUT_PULLUP);
@@ -150,6 +151,10 @@ void setup() {
   setLed(0, 0, 0);
 
   loadConfig();
+  {
+    Lock l;
+    storeMigrate(prefs);  // bir kerelik ayar geçişleri (core/migrate.h)
+  }
   wifiKnownLoad();
   themeApply();
 
@@ -219,7 +224,6 @@ void setup() {
   }
   configTzTime("<+03>-3", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
   if (haveWifi) bootOtaCheck();
-  musicBootTasks();
   bleBegin();
 
   TaskHandle_t netH = nullptr;
@@ -227,6 +231,7 @@ void setup() {
   lastInteract = millis();
   homeShow();
   if (!haveWifi && !bleHasToken) settingsOpenPage(SP_WIFI);  // ilk kurulum: önce Wi-Fi
+  else fOfferOldMusicModule();  // SD'de kalan eski müzik modülü bir kez sorulur
 
   // Çekirdek: zamanlayıcı kesmesi ve servisler (kayıt sırası öncelik sırasıdır)
   kernelBegin();
@@ -288,7 +293,6 @@ static void svcClock() {  // 200 ms: dakika işleri, Pomodoro, bakım, tanı
     if (minute >= 240 && minute < 270 && millis() > 20UL * 3600UL * 1000UL && !swRunning && swElapsedMs() == 0 &&
         millis() - lastInteract > 10UL * 60UL * 1000UL && !bleInflight && !kbm.active) {
       esp_ota_mark_app_valid_cancel_rollback();
-      speakerHold();
       ESP.restart();
     }
     // Yaklaşan oturum (2 dk içinde) LED ile haber verilir.

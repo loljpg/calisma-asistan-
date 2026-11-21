@@ -355,6 +355,48 @@ static void testKernel() {
   CHECK(after <= before + 1);
 }
 
+// ---------------------------------------------------------------------------
+// Kalıcı ayar geçişleri (core/migrate.h)
+// ---------------------------------------------------------------------------
+static void testMigrate() {
+  group("ayar geçişleri");
+  Preferences p;
+  // Müzik yazılımının bıraktığı kayıtlar ve korunması gereken bir kullanıcı ayarı
+  p.begin("mus", false);
+  p.putInt("vol", 12);
+  p.putString("hp", "00:11:22:33:44:55");
+  p.end();
+  p.begin("mus2", false);
+  p.putString("lbl", "app1");
+  p.end();
+  p.begin("cs", false);
+  p.remove("mig");
+  p.putBool("getmus", true);
+  p.putBool("mdl", true);
+  p.putBool("inv", true);
+  p.end();
+  CHECK(storeMigrate(p) == STORE_MIG);
+  p.begin("mus", true);
+  CHECK(!p.isKey("vol") && !p.isKey("hp"));
+  p.end();
+  p.begin("mus2", true);
+  CHECK(!p.isKey("lbl"));
+  p.end();
+  p.begin("cs", true);
+  CHECK(!p.isKey("getmus") && !p.isKey("mdl"));
+  CHECK(p.getBool("inv", false));  // kullanıcı ayarı kalır
+  CHECK(p.getInt("mig", 0) == STORE_MIG);
+  p.end();
+  // İkinci açılışta hiçbir şey silinmez
+  p.begin("mus", false);
+  p.putInt("vol", 3);
+  p.end();
+  CHECK(storeMigrate(p) == STORE_MIG);
+  p.begin("mus", true);
+  CHECK(p.getInt("vol", 0) == 3);
+  p.end();
+}
+
 int main() {
   setupState();
   testCalib();
@@ -364,6 +406,7 @@ int main() {
   testSudoku();
   testLua();
   testKernel();
+  testMigrate();
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

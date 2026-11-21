@@ -46,7 +46,7 @@ static void trDraw(bool full) {
   text("Aynı Wi-Fi: " + wifiSsid(), 46, HDR_H + 28, F_XS, C_TEXT3, C_BG);
   panel(12, HDR_H + 50, 296, 46, C_SURF, C_ACC);
   text("http://" + wifiIp(), 160, HDR_H + 73, F_MD, C_TEXT, C_SURF, MC_DATUM);
-  auto ls = wrapText("Şarkıları Muzik klasörüne gönder; Müzik uygulaması oradan çalar.", F_XS, 296, 2);
+  auto ls = wrapText("Sayfadan dosya gönderebilir, indirebilir ya da silebilirsin.", F_XS, 296, 2);
   for (size_t i = 0; i < ls.size(); i++) text(ls[i], 12, HDR_H + 102 + i * 15, F_XS, C_TEXT2, C_BG);
   trDrawStatus();
 }

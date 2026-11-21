@@ -123,7 +123,7 @@ static void runCalibration() {
       if (y < 186) continue;
       if (x < 160) break;  // yeniden
       Lock l;
-      calToLegacy(tcal, cfg.swapXY, cfg.x1, cfg.x2, cfg.y1, cfg.y2);  // eski müzik modülü için
+      calToLegacy(tcal, cfg.swapXY, cfg.x1, cfg.x2, cfg.y1, cfg.y2);  // eski bir sürüme dönülürse de doğru dokunsun
       cfg.calibrated = true;
       saveConfig();
       return;

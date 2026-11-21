@@ -43,7 +43,6 @@ INC="-I$HERE -I$HERE/shim -I$SRC -I$SRC/core -I$LUA"
 
 echo "derleniyor ($MODE)…"
 $CXX $CXXF $INC "$HERE/preview.cpp" $COMMON $LUAOBJ -o "$BUILD/preview"
-$CXX $CXXF -I"$HERE/mshim" $INC "$HERE/music_preview.cpp" $COMMON -o "$BUILD/music_preview"
 [ "$MODE" = test ] && $CXX $CXXF $INC "$HERE/tests.cpp" $COMMON $LUAOBJ -o "$BUILD/tests"
 
 # --- geçici SD kart: örnek klasör ve dosyalar ---
@@ -54,6 +53,7 @@ mkdir -p "$SD/Muzik/Sezen Aksu" "$SD/calisma" "$SD/daxen/notlar" "$SD/daxen/kart
 for t in "Barış Manço - Gülpembe" "MFÖ - Ele Güne Karşı" "Tarkan - Kuzu Kuzu" "Sezen Aksu - Gidiyorum"; do : >"$SD/Muzik/$t.mp3"; done
 for t in Firuze Gidiyorum "Hadi Bakalım" "Yalnızlık Senfonisi"; do : >"$SD/Muzik/Sezen Aksu/$t.mp3"; done
 printf 'süt, ekmek\n' >"$SD/daxen/notlar/alisveris.txt"
+mkdir -p "$SD/daxen/sys" && truncate -s 1382048 "$SD/daxen/sys/muzik-cyd_st7789.bin"  # müzikten kalan eski modül
 printf 'Türev | Değişim oranı\nİntegral | Alan\n' >"$SD/daxen/kartlar/ornek.txt"
 : >"$SD/foto.jpg"
 export DAXEN_SD="$SD" DAXEN_OUT="$OUT"
@@ -64,12 +64,10 @@ if [ "$MODE" = test ]; then
   "$BUILD/tests"
   echo "ekran senaryoları…"
   "$BUILD/preview" >/dev/null
-  "$BUILD/music_preview" >/dev/null
   rm -f "$OUT"/*.ppm
   echo "hepsi geçti"
 else
   "$BUILD/preview" $ONLY >/dev/null
-  [ -z "$ONLY" ] && "$BUILD/music_preview" >/dev/null
   python3 "$HERE/topng.py" "$OUT"
   echo "görüntüler: $OUT"
 fi

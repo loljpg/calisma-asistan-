@@ -152,13 +152,11 @@ static void setDrawBt() {
   bool pairing = blePairUntil && (int32_t)(blePairUntil - millis()) > 0;
   drawIcon(I_PHONE, 12, HDR_H + 30, 24, bleLinked ? C_ACC : C_TEXT2, C_BG);
   text(bleStatusText(), 46, HDR_H + 27, F_MD, C_TEXT, C_BG);
-  String sub = bleLinked ? "Bildirimler, müzik ve plan telefondan geliyor"
+  String sub = bleLinked ? "Bildirimler, medya ve plan telefondan geliyor"
                          : (pairing ? "Uygulamada \"Masa saatini bul\"a dokun" : "Telefondaki uygulamayla internetsiz bağlantı");
   text(fit(sub, F_XS, 262), 46, HDR_H + 49, F_XS, C_TEXT2, C_BG);
   button(12, HDR_H + 72, 144, 32, pairing ? "Eşleşme açık" : "Eşleşme kipi", pairing ? B_ON : (bleLinked ? B_DISABLED : B_PRIMARY), I_BT);
   button(164, HDR_H + 72, 144, 32, "Eşleşmeyi sil", bleHasToken ? B_NORMAL : B_DISABLED, I_TRASH);
-  sectionLabel(HDR_H + 118, "Kulaklık");
-  listRow(HDR_H + 140, 40, I_HEADPHONES, "Bluetooth kulaklık", "Müzik uygulamasından bağlanır", "", true);
 }
 
 // --- Ekran ---
@@ -247,7 +245,7 @@ static void setDrawStorage() {
     progress(12, HDR_H + 50, 296, 4, tot ? (int)(used * 100 / tot) : 0, C_ACC);
   } else {
     text("SD kart takılı değil", 46, HDR_H + 6, F_MD, C_TEXT, C_BG);
-    text("Notlar, müzik ve dosyalar için SD kart gerekir", 46, HDR_H + 27, F_XS, C_TEXT2, C_BG);
+    text("Notlar ve dosyalar için SD kart gerekir", 46, HDR_H + 27, F_XS, C_TEXT2, C_BG);
   }
   int q = queueCount();
   listRow(HDR_H + 64, 40, I_REFRESH, "Gönderilmeyi bekleyen", "Çalışma kayıtları (telefona ya da buluta)", String(q), false);
@@ -386,15 +384,13 @@ static void setTap(int x, int y) {
             toast("Uygulamada \"Masa saatini bul\"a dokun");
           }
         } else if (bleHasToken) {
-          dialog("Eşleşme silinsin mi?", "Telefon yeniden eşleşene kadar bildirim ve müzik gelmez.", {"Vazgeç", "Sil"}, [](int c) {
+          dialog("Eşleşme silinsin mi?", "Telefon yeniden eşleşene kadar bildirim ve medya bilgisi gelmez.", {"Vazgeç", "Sil"}, [](int c) {
             if (c == 1) {
               bleForget();
               toast("Bluetooth eşleşmesi silindi");
             }
           });
         }
-      } else if (y >= HDR_H + 140) {
-        openApp(AID_MUSIC);
       }
       break;
     case SP_DISPLAY: {

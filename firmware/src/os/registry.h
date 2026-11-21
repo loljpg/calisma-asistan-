@@ -3,7 +3,7 @@
 #include "home.h"
 
 static const App* const APP_TABLE[AID_COUNT] = {
-    &APP_YKS,   &APP_NOTES,  &APP_FILES,  &APP_SETTINGS, &APP_MUSIC, &APP_MEDIA, &APP_NOTIFS, &APP_CALC,     &APP_CLOCK, &APP_WEATHER,
+    &APP_YKS,   &APP_NOTES,  &APP_FILES,  &APP_SETTINGS, &APP_MEDIA, &APP_NOTIFS, &APP_CALC,     &APP_CLOCK, &APP_WEATHER,
     &APP_TODO,  &APP_GAMES,  &APP_PHOTOS, &APP_READER,   &APP_DRAW,  &APP_CARDS, &APP_LIGHT,  &APP_TRANSFER, &APP_SYSINFO,
     &APP_TASKS,
 };
@@ -27,11 +27,8 @@ static void openFileWith(const String& path) {
   } else if (e == "el") {
     appOpenChild(&APP_NOTES);
     hwOpen(path);
-  } else if (e == "mp3" || e == "wav") {
-    appOpenChild(&APP_MUSIC);
   } else if (e == "bin") {
-    alertBox("Yazılım dosyası", "firmware-" FW_VARIANT ".bin adıyla SD kartın köküne koyarsan açılışta yüklenir. muzik-" FW_VARIANT
-                                ".bin müzik modülüdür.");
+    alertBox("Yazılım dosyası", "firmware-" FW_VARIANT ".bin adıyla SD kartın köküne koyarsan açılışta yüklenir.");
   } else {
     toast("Bu dosya türü açılamıyor");
   }

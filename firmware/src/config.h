@@ -27,7 +27,7 @@
 #define PIN_LED_G 16
 #define PIN_LED_B 17
 #define PIN_LDR 34         // ışık sensörü
-#define PIN_SPK 26  // SPEAK soketi (kart üzerindeki yükselteç); müzik yazılımı iç DAC ile sürer
+#define PIN_SPK 26         // SPEAK soketi (kart üzerindeki yükselteç); ses çıkışı yok, açılışta LOW tutulur
 #define PIN_BOOT 0         // BOOT butonu
 
 #define TOUCH_IRQ 36

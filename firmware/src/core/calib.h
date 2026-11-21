@@ -97,7 +97,7 @@ static TouchCal calFromLegacy(bool swapXY, int x1, int x2, int y1, int y2) {
   return k;
 }
 
-// Afin katsayılardan eski biçime yaklaşık dönüş (eski müzik modülü de doğru dokunsun diye)
+// Afin katsayılardan eski biçime yaklaşık dönüş (eski bir sürüme dönülürse de doğru dokunsun diye)
 static void calToLegacy(const TouchCal& k, bool& swapXY, int& x1, int& x2, int& y1, int& y2) {
   swapXY = fabsf(k.b) > fabsf(k.a);
   const float mid = 2048;

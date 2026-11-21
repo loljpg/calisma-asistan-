@@ -64,13 +64,6 @@ static String webStatus();
 static int webProgress();  // yükleme sürüyorsa yüzde, yoksa -1
 static int webUploadCount();
 
-// --- Müzik yazılımı (kulaklıkla SD müzik) ---
-// 0: hazır (SD'de var), 1: SD'de yok, 2: SD kart yok
-static int musicState();
-static String musicInfo();
-static void musicDownload();  // yeniden başlayıp indirir
-static void musicLaunch();    // müzik yazılımını açar (yeniden başlar)
-
 // --- Arayüz kancaları ---
 static void uiToast(const String& msg);
 static void uiNotif(const Notif& n);

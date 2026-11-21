@@ -84,7 +84,7 @@ static void webPage() {
   web->send(200, "text/html; charset=utf-8", "");
   web->sendContent(FPSTR(WEB_HEAD));
   String h = "<div class=box><form id=fm method=post enctype=multipart/form-data action='/up?d=" + webUrlEnc(dir) +
-             "'><b>Dosya gönder</b><p class=mut>Şarkılar için Muzik klasörünü seç. Birden çok dosya seçebilirsin.</p>"
+             "'><b>Dosya gönder</b><p class=mut>Birden çok dosya seçebilirsin.</p>"
              "<input type=file name=f id=fi multiple> <button id=gb>Gönder</button>"
              "<div id=pt class=mut style='margin-top:8px'></div><div style='height:3px;background:#30353A;margin-top:6px'>"
              "<div id=pb style='height:3px;width:0;background:#7892A5'></div></div></form></div>"

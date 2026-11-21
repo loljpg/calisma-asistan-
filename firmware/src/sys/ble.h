@@ -3,7 +3,7 @@
 // main.cpp'den sırayla eklenir (tek çeviri birimi); kendinden önceki dosyalardaki tanımları kullanır.
 
 // ============================================================================
-// Bluetooth (telefonla internetsiz bağlantı, bildirim ve müzik) — docs/bluetooth.md
+// Bluetooth (telefonla internetsiz bağlantı, bildirimler ve telefondaki medyanın kumandası) — docs/bluetooth.md
 // ============================================================================
 // Kart çevre birimidir; telefon bağlanır ve "H" mesajıyla eşleşme anahtarını yollar. Kart ilk
 // eşleşen telefonun anahtarını saklar; başka telefon yalnızca Ayarlar → Bluetooth eşleşme

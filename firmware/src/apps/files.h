@@ -290,4 +290,27 @@ static void fOpen() {
   }
 }
 
+// Müzik yazılımı kaldırıldı: SD'de kalan eski modül dosyası kendiliğinden silinmez, bir kez sorulur.
+#define OLD_MUSIC_FILE "/daxen/sys/muzik-" FW_VARIANT ".bin"
+static void fOfferOldMusicModule() {
+  if (!sdOk || !SD.exists(OLD_MUSIC_FILE)) return;
+  bool asked;
+  {
+    Lock l;
+    prefs.begin("cs", false);
+    asked = prefs.getBool("musq", false);
+    if (!asked) prefs.putBool("musq", true);
+    prefs.end();
+  }
+  if (asked) return;
+  File f = SD.open(OLD_MUSIC_FILE, FILE_READ);
+  uint64_t size = f ? f.size() : 0;
+  if (f) f.close();
+  dialog("Eski müzik modülü", "Müzik kaldırıldı. Modül dosyası SD kartta " + fmtBytes(size) + " yer kaplıyor. Silinsin mi?",
+         {"Kalsın", "Sil"}, [](int c) {
+           if (c != 1) return;
+           toast(SD.remove(OLD_MUSIC_FILE) ? "Eski müzik modülü silindi" : "Silinemedi");
+         });
+}
+
 static const App APP_FILES = {"Dosyalar", "Dosyalar", I_FOLDER, fOpen, fDraw, fTap, fHold, fSwipe, nullptr, nullptr, fBack, nullptr};

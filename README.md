@@ -31,7 +31,7 @@ Ayarlar → Bulut ve masa saati bölümünden Firebase hesabına bağlanınca:
 
 Firebase kurulumu ve veri yapısı: [docs/firebase.md](docs/firebase.md)
 
-Masa saati **DAXEN VANE** adlı küçük bir işletim sistemi çalıştırır: YKS planı ve sayaç, notlar, hava, saat ve alarm, oyunlar, SD karttan Bluetooth kulaklığa müzik ve kendi yazdığın Lua uygulamaları. Yazılım yükleme, ilk kurulum ve uygulamalar: [firmware/README.md](firmware/README.md)
+Masa saati **DAXEN VANE** adlı küçük bir işletim sistemi çalıştırır: YKS planı ve sayaç, notlar, hava, saat ve alarm, oyunlar, telefondaki müziğin kumandası ve kendi yazdığın Lua uygulamaları. Yazılım yükleme, ilk kurulum ve uygulamalar: [firmware/README.md](firmware/README.md)
 
 ## Nasıl derleniyor
 

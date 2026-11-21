@@ -1,5 +1,5 @@
 #pragma once
-// Dokunmatik (XPT2046) ve buton. Ana yazılım ile müzik yazılımı ortak kullanır.
+// Dokunmatik (XPT2046) ve buton.
 #include <Arduino.h>
 #include <Preferences.h>
 #include "types.h"

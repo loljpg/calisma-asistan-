@@ -13,7 +13,8 @@ static void closeStack();
 // Ana ekran
 // ============================================================================
 static const int DOCK_Y = 192, NOW_Y = 134, NOW_H = 52;
-static const uint8_t DOCK[] = {AID_YKS, AID_NOTES, AID_MUSIC, AID_SETTINGS};
+static const uint8_t DOCK[] = {AID_YKS, AID_NOTES, AID_SETTINGS};
+static const int DOCK_N = sizeof(DOCK), DOCK_SW = 240 / DOCK_N;  // uygulama yuvaları 0–240, sağda Uygulamalar
 static bool homeNotifIcons = false;
 
 static void homeDrawStatus() {
@@ -87,11 +88,12 @@ static void homeDrawDock() {
   fillBg(0, DOCK_Y, SCR_W, SCR_H - DOCK_Y);
   hline(0, DOCK_Y, SCR_W);
   const App* const* tbl = appTable();
-  for (int i = 0; i < 5; i++) {
-    int cx = i < 4 ? 30 + i * 60 : 280;
-    uint8_t icon = i < 4 ? tbl[DOCK[i]]->icon : I_APPS;
-    const char* lb = i < 4 ? tbl[DOCK[i]]->label : "Uygulamalar";
-    drawIcon(icon, cx - 11, DOCK_Y + 6, 22, i == 4 ? C_ACC : C_TEXT, C_BG);
+  for (int i = 0; i <= DOCK_N; i++) {
+    bool all = i == DOCK_N;
+    int cx = all ? 280 : DOCK_SW / 2 + i * DOCK_SW;
+    uint8_t icon = all ? I_APPS : tbl[DOCK[i]]->icon;
+    const char* lb = all ? "Uygulamalar" : tbl[DOCK[i]]->label;
+    drawIcon(icon, cx - 11, DOCK_Y + 6, 22, all ? C_ACC : C_TEXT, C_BG);
     text(lb, cx, DOCK_Y + 36, F_XS, C_TEXT2, C_BG, MC_DATUM);
   }
 }
@@ -127,8 +129,8 @@ static void homeTap(int x, int y) {
     openApp(AID_YKS);
     return;
   }
-  int i = x >= 240 ? 4 : constrain(x / 60, 0, 3);
-  if (i < 4) {
+  int i = x >= 240 ? DOCK_N : constrain(x / DOCK_SW, 0, DOCK_N - 1);
+  if (i < DOCK_N) {
     appFromHome = true;
     appOpen(appTable()[DOCK[i]], true);
   } else {

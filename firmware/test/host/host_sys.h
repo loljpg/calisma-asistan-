@@ -132,10 +132,6 @@ static bool weatherSearch(const String& q, std::vector<GeoHit>& out) {
   out.push_back({"Istanbul", "Ohio, ABD", 40.f, -83.f});
   return true;
 }
-static int musicState() { return 0; }
-static String musicInfo() { return "Müzik yazılımı SD kartta hazır"; }
-static void musicDownload() {}
-static void musicLaunch() {}
 static void uiSplash(const String&) {}
 static void uiOtaProgress() {}
 static bool sysWake() { return false; }
