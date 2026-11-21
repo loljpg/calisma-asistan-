@@ -112,14 +112,15 @@ static void tmDrawDetail(bool full) {
   if (svc) tmDetailRow(2, "Periyot", String(p->period) + " ms (" + String(1000 / p->period) + " Hz)");
   else {
     uint32_t fr = kStackFree(*p);
-    tmDetailRow(2, "Yığın", fmtBytes(p->stack) + (fr ? " · boş " + fmtBytes(fr) : String("")));
+    String st = p->stack ? fmtBytes(p->stack) : String("—");  // sistem görevlerinin boyutu bilinmiyor
+    tmDetailRow(2, "Yığın", st + (fr ? " · boş " + fmtBytes(fr) : String("")));
   }
   if (p->measured) {
     tmDetailRow(3, "Çalışma", tmCount(p->runs) + " kez");
     tmDetailRow(4, "Süre", "son " + tmUs(p->lastUs) + " · en uzun " + tmUs(p->maxUs));
     tmDetailRow(5, "İşlemci", tmPct(p->cpu10) + " · toplam " + tmTotal(p->totalUs));
   } else {
-    tmDetailRow(3, "Çalışma", "çoğunlukla ağı bekler");
+    tmDetailRow(3, "Çalışma", p->note ? p->note : "ölçülmüyor");
     tmDetailRow(4, "Süre", "ölçülmüyor");
     tmDetailRow(5, "İşlemci", "—");
   }

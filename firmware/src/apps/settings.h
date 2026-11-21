@@ -291,13 +291,13 @@ static void setDrawSystem() {
   fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
   drawLogo(LOGO_S, LOGO_S_W, LOGO_S_H, 12, HDR_H + 10);
   text("fw-" + String(FW_BUILD) + " · " FW_VARIANT, 308, HDR_H + 14, F_XS, C_TEXT2, C_BG, TR_DATUM);
-  text("ESP32 · 240 MHz · 4 MB", 308, HDR_H + 30, F_XS, C_TEXT3, C_BG, TR_DATUM);
+  text(sysChipText(), 308, HDR_H + 30, F_XS, C_TEXT3, C_BG, TR_DATUM);
   String rows[5][2] = {
       {"Çalışma süresi", uptimeStr()},
-      {"Son açılış", bootShort()},
+      {"Son açılış", bootShort() + (diagLastCrash.length() ? " · çökme kaydı" : "")},
       {"Bellek", String(sysHeapFree() / 1024) + " KB boş · en az " + String(sysHeapMin() / 1024) + " KB"},
-      {"Sıcaklık", String(sysTemp(), 0) + " °C"},
-      {"Ağ", wifiConnected() ? wifiIp() : String("—")},
+      {"En büyük blok", String(sysHeapMaxAlloc() / 1024) + " KB"},
+      {"Ağ", wifiConnected() ? wifiIp() + " · " + String(wifiRssi()) + " dBm" : String("—")},
   };
   for (int i = 0; i < 5; i++) {
     int y = HDR_H + 46 + i * 25;

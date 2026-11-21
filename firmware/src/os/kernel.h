@@ -20,7 +20,7 @@
 #include "../core/state.h"
 
 #define K_HZ 1000
-#define K_MAX 14
+#define K_MAX 16
 #define K_CORE_PRIO 3   // çekirdek (arayüz) görevi
 #define K_PROC_PRIO 1   // kullanıcı süreçleri
 
@@ -42,7 +42,8 @@ struct Proc {
   volatile bool killReq = false;
   volatile bool done = false;
   bool killable = false;
-  bool measured = true;  // CPU süresi ölçülüyor mu (ağ görevi çoğunlukla ağı bekler, ölçülmez)
+  bool measured = true;  // CPU süresi ölçülüyor mu (ağ ve sistem görevleri ölçülmez)
+  const char* note = nullptr;  // ölçülmeyen görevin ne yaptığı (Görevler'de gösterilir)
   uint32_t runs = 0, lastUs = 0, maxUs = 0;
   uint64_t totalUs = 0;
   volatile uint32_t winUs = 0;  // içinde bulunulan 1 saniyelik pencere
@@ -182,9 +183,10 @@ static int kSpawn(const char* name, void (*entry)(Proc*), uint32_t stack, bool k
 }
 
 // Var olan bir FreeRTOS görevini tabloya ekler (ağ görevi)
-static int kAdopt(const char* name, TaskHandle_t h, uint8_t prio, uint8_t core, uint32_t stack) {
+static int kAdopt(const char* name, TaskHandle_t h, uint8_t prio, uint8_t core, uint32_t stack, const char* note = nullptr) {
   Proc* p = kAlloc(name);
   if (!p) return -1;
+  p->note = note;
   p->kind = PK_TASK;
   p->task = h;
   p->prio = prio;

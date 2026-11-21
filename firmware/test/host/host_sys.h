@@ -112,7 +112,7 @@ static void sysCalibrate() {}
 static uint32_t sysHeapFree() { return 96 * 1024; }
 static uint32_t sysHeapMin() { return 61 * 1024; }
 static uint32_t sysHeapMaxAlloc() { return 52 * 1024; }
-static float sysTemp() { return 46.f; }
+static String sysChipText() { return "ESP32 rev3 · 240 MHz · 4 MB"; }
 static void weatherRefresh() {}
 static void accountSet(const String& db, const String& key, const String& mail, const String& pass) {
   cfg.dbUrl = db;

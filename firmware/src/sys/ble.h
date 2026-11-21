@@ -184,8 +184,11 @@ static void bleFlushEvents() {
   bleSend('E', (const uint8_t*)body.c_str(), body.length());
 }
 
+static bool bleLogged = false;  // günlüğe bağlandı yazıldı mı (ayrıldı bir kez yazılsın)
 static void bleOnLinked() {
   bleLinked = true;
+  if (!bleLogged) sysLog("bt", "telefon bağlandı");
+  bleLogged = true;
   bleInflight = 0;
   bleSendStatus();
   dataDirty = true;
@@ -193,6 +196,8 @@ static void bleOnLinked() {
 
 static void bleOnUnlinked() {
   bleLinked = false;
+  if (bleLogged) sysLog("bt", "telefon ayrıldı");
+  bleLogged = false;
   bleInflight = 0;
   media.on = false;
   if (accentOn) {

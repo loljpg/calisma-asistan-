@@ -58,6 +58,7 @@ static void sysRequestOta() {
 
 static void sysRestart() {
   uiSplash("Yeniden başlatılıyor…");
+  sysLog("açılış", "kullanıcı yeniden başlattı");
   delay(500);
   esp_ota_mark_app_valid_cancel_rollback();
   ESP.restart();
@@ -66,7 +67,6 @@ static void sysRestart() {
 static uint32_t sysHeapFree() { return ESP.getFreeHeap(); }
 static uint32_t sysHeapMin() { return ESP.getMinFreeHeap(); }
 static uint32_t sysHeapMaxAlloc() { return ESP.getMaxAllocHeap(); }
-static float sysTemp() { return temperatureRead(); }
 static void weatherRefresh() { wantWeather = true; }
 
 static void accountSet(const String& db, const String& key, const String& mail, const String& pass) {

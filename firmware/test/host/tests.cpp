@@ -397,6 +397,38 @@ static void testMigrate() {
   p.end();
 }
 
+// ---------------------------------------------------------------------------
+// Sistem günlüğü halkası (core/log.h)
+// ---------------------------------------------------------------------------
+static void testLog() {
+  group("günlük halkası");
+  LogRing r;
+  CHECK(logTail(r, 10).empty());
+  logPut(r, "1 a: bir");
+  logPut(r, "2 a: iki\nyarım");  // satır içi yeni satır boşluk olur
+  auto t = logTail(r, 10);
+  CHECK(t.size() == 2 && t[0] == "1 a: bir" && t[1] == "2 a: iki yarım");
+  CHECK(logTail(r, 1).size() == 1 && logTail(r, 1)[0] == "2 a: iki yarım");
+  // Halka defalarca dolar: dönen her satır tam olmalı, en sonuncusu en yenisi
+  char line[64];
+  for (int i = 0; i < 500; i++) {
+    snprintf(line, sizeof line, "%5d test: satır %d son", i, i);
+    logPut(r, line);
+  }
+  t = logTail(r, 1000);
+  bool whole = !t.empty();
+  for (auto& x : t) whole = whole && x.startsWith("  ") && x.indexOf("test: satır") > 0 && x.endsWith(" son");
+  CHECK(whole);
+  CHECK(t.back() == "  499 test: satır 499 son");
+  CHECK(t.size() > 40 && t.size() < LOG_RING / 20);
+  // Uzun satır kısaltılır
+  String uzun;
+  for (int i = 0; i < 300; i++) uzun += 'x';
+  logPut(r, uzun.c_str());
+  CHECK(logTail(r, 1)[0].length() == LOG_LINE_MAX);
+  CHECK(r.used == LOG_RING && r.lines == 503);
+}
+
 int main() {
   setupState();
   testCalib();
@@ -407,6 +439,7 @@ int main() {
   testLua();
   testKernel();
   testMigrate();
+  testLog();
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

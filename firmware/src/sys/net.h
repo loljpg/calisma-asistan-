@@ -702,6 +702,7 @@ static bool checkOta(bool manual) {
     int code = http.GET();
     if (code != 200) {
       http.end();
+      sysLog("güncelleme", "sürüm bilgisi alınamadı (" + String(code) + ")");
       if (manual) setOtaMsg("Güncelleme bilgisi alınamadı (" + String(code) + ")");
       return false;
     }
@@ -723,6 +724,7 @@ static bool checkOta(bool manual) {
     return true;
   }
   String url = "https://github.com/" GITHUB_REPO "/releases/download/fw-v" + String(best) + "/firmware-" FW_VARIANT ".bin";
+  sysLog("güncelleme", "fw-v" + String(best) + " bulundu, indiriliyor");
   esp_ota_mark_app_valid_cancel_rollback();  // doğrulanmamış yazılım yeni güncelleme kuramaz
   otaProgress = 0;
   dataDirty = true;
@@ -737,10 +739,12 @@ static bool checkOta(bool manual) {
   t_httpUpdate_return r = httpUpdate.update(dl, url);
   if (r == HTTP_UPDATE_OK) {
     otaProgress = 100;
+    sysLog("güncelleme", "fw-v" + String(best) + " yazıldı, yeniden başlıyor");
     delay(1500);
     ESP.restart();
   }
   otaProgress = -1;
+  sysLog("güncelleme", "başarısız: " + httpUpdate.getLastErrorString());
   setOtaMsg("Güncelleme başarısız: " + httpUpdate.getLastErrorString());
   return false;
 }
@@ -857,9 +861,11 @@ static void netTask(void*) {
   bool viewOnce = false, statusOnce = false, wasConn = false;
   for (;;) {
     netBusy = false;
+    netPhase = live.c ? "canlı akış açık" : "boşta";
     vTaskDelay(pdMS_TO_TICKS(live.c ? 80 : 250));
     if (wifiScanReq) {
       wifiScanReq = false;
+      netPhase = "tarama";
       wifiDoScan();
     }
     if (wifiConnReq) {
@@ -898,6 +904,8 @@ static void netTask(void*) {
     if (conn != wasConn) {
       wasConn = conn;
       dataDirty = true;
+      sysLog("ağ", conn ? "Wi-Fi bağlı: " + WiFi.SSID() + ", " + String(WiFi.RSSI()) + " dBm, " + WiFi.localIP().toString()
+                        : String("Wi-Fi bağlantısı yok"));
     }
     netBusy = true;
     if (WiFi.status() != WL_CONNECTED) {
@@ -939,6 +947,7 @@ static void netTask(void*) {
       nextWeather = now;
     }
     if ((int32_t)(now - nextWeather) >= 0) {
+      netPhase = "hava";
       fetchWeather();
       bool ok;
       {
@@ -956,27 +965,36 @@ static void netTask(void*) {
       // gelince hemen kapatılmasın (her şifreli bağlantı on binlerce bayt bellek ister).
       setNet("Telefon bekleniyor", true);
     } else if (hasCreds()) {
+      netPhase = "bulut girişi";
       if (ensureAuth()) {
+        netPhase = "kronometre";
         fbPushTimer();
+        netPhase = "olaylar";
         fbFlushOutbox();
         bool liveOk = live.c && live.ready;
         if (wantView || !viewOnce || now - lastView > (liveOk ? VIEW_POLL_LIVE_MS : VIEW_EVERY_MS)) {
           wantView = false;
           viewOnce = true;
           lastView = now;
+          netPhase = "plan";
           if (fbFetchView()) setNet("Bağlı", true);
         }
         if (wantTimer || (!liveOk && now - lastTimerPoll > TIMER_POLL_MS)) {
           wantTimer = false;
           lastTimerPoll = now;
+          netPhase = "kronometre";
           fbFetchTimer();
         }
         if (!statusOnce || now - lastStatus > STATUS_EVERY_MS) {
           statusOnce = true;
           lastStatus = now;
+          netPhase = "durum";
           fbPushStatus();
         }
-        if (!live.c && idToken.length() && (int32_t)(millis() - live.retryAt) >= 0) liveConnect();
+        if (!live.c && idToken.length() && (int32_t)(millis() - live.retryAt) >= 0) {
+          netPhase = "canlı akış bağlanıyor";
+          liveConnect();
+        }
       }
     } else {
       setNet("Hesap bilgisi girilmedi", false);

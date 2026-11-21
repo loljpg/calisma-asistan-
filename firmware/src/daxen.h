@@ -6,6 +6,7 @@
 #include "core/util.h"
 #include "core/sysapi.h"
 #include "core/migrate.h"
+#include "core/log.h"
 #include "ui/theme.h"
 #include "ui/icons.h"
 #include "ui/widgets.h"

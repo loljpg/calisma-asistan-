@@ -46,6 +46,7 @@ static const char FW_MARKER[] = "CSFW:" FW_VARIANT ":" STR(FW_BUILD) ";";
 // --- Sistem katmanı (sırası önemlidir) ---
 #include "sys/store.h"
 #include "sys/sdlog.h"
+#include "sys/diag.h"
 #include "sys/net.h"
 #include "sys/sdupdate.h"
 #include "sys/events.h"
@@ -81,7 +82,9 @@ static void bootOtaCheck() {
   }
   uiSplash("Güncelleme denetleniyor…");
   otaInSetup = true;
+  netPhase = "güncelleme";
   checkOta(manual);
+  netPhase = "boşta";
   otaInSetup = false;
   otaProgress = -1;
 }
@@ -176,6 +179,7 @@ void setup() {
   Serial.println(FW_MARKER);
   uiSplash("SD kart denetleniyor…");
   sdOk = sdBegin();
+  diagStart();  // günlük (RAM + SD), önceki çökmenin özeti
   if (sdOk) {
     sdTryUpdate();
     queueMigrate();
@@ -240,7 +244,8 @@ void setup() {
   kService("bluetooth", 10, svcBle);
   kService("saat", 200, svcClock);
   kService("ışık", 50, svcLight);
-  kAdopt("ağ", netH, 1, 0, 16384);
+  kAdopt("ağ", netH, 1, 0, 16384, "çoğunlukla ağı bekler");
+  diagAdoptSystemTasks();  // Wi-Fi, TCP/IP ve Bluetooth görevleri Görevler'de görünsün (sys/diag.h)
 }
 
 // ============================================================================
@@ -274,9 +279,11 @@ static void svcClock() {  // 200 ms: dakika işleri, Pomodoro, bakım, tanı
     rtcUpSec = millis() / 1000;
     rtcMinHeap = ESP.getMinFreeHeap();
   }
+  diagTick();
   if (!markedValid && millis() > 45000) {
     markedValid = true;
     esp_ota_mark_app_valid_cancel_rollback();
+    sysLog("güncelleme", "45 sn sorunsuz: yazılım sağlam işaretlendi");
   }
 
   struct tm tmv;
@@ -293,6 +300,7 @@ static void svcClock() {  // 200 ms: dakika işleri, Pomodoro, bakım, tanı
     if (minute >= 240 && minute < 270 && millis() > 20UL * 3600UL * 1000UL && !swRunning && swElapsedMs() == 0 &&
         millis() - lastInteract > 10UL * 60UL * 1000UL && !bleInflight && !kbm.active) {
       esp_ota_mark_app_valid_cancel_rollback();
+      sysLog("açılış", "gece bakımı: yeniden başlatılıyor");
       ESP.restart();
     }
     // Yaklaşan oturum (2 dk içinde) LED ile haber verilir.

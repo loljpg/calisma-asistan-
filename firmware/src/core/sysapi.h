@@ -47,7 +47,7 @@ static bool sysWake();  // gece kısıkken ekranı açar; kısıktıysa true
 static uint32_t sysHeapFree();
 static uint32_t sysHeapMin();
 static uint32_t sysHeapMaxAlloc();
-static float sysTemp();
+static String sysChipText();  // ör. "ESP32 rev3 · 240 MHz · 4 MB"
 static void weatherRefresh();
 struct GeoHit {
   String name, region;

@@ -321,8 +321,10 @@ static bool webStart() {
     web->stop();
     delete web;
     web = nullptr;
+    sysLog("web", "açılamadı: bellek yetersiz");
     return false;
   }
+  sysLog("web", "sunucu açıldı");
   return true;
 }
 
@@ -338,6 +340,7 @@ static void webStop() {
   free(webBuf);  // yükleme tamponu yalnızca sunucu açıkken tutulur
   webBuf = nullptr;
   webBufN = 0;
+  sysLog("web", "sunucu kapandı");
 }
 
 static bool webRunning() { return web != nullptr; }

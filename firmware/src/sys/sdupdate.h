@@ -96,6 +96,7 @@ static void sdTryUpdate() {
     }
     f.close();
     if (ok) {
+      sysLog("güncelleme", "SD'den yüklendi: " + String(name));
       sdRenameDone(name, ".yuklendi");
       otaProgress = 100;
       uiOtaProgress();
@@ -104,6 +105,7 @@ static void sdTryUpdate() {
     }
     Update.abort();
     otaProgress = -1;
+    sysLog("güncelleme", "SD'den yüklenemedi: " + String(name));
     sdRenameDone(name, ".bad");
     fillBg(0, 0, SCR_W, SCR_H);
     text("SD'den güncelleme olmadı", 160, 100, F_MD, C_TEXT, C_BG, MC_DATUM);
