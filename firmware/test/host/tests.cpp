@@ -537,6 +537,74 @@ static void testCmd() {
   CHECK(termExec("app launch yokboyle").lines[0].startsWith("Böyle bir uygulama yok"));
 }
 
+// ---------------------------------------------------------------------------
+// Ağ teşhisi hesapları (core/netcalc.h) ve terminalin ağ komutları
+// ---------------------------------------------------------------------------
+static std::vector<uint8_t> ipPkt(uint8_t icmpType, uint16_t id, uint16_t seq, bool inner) {
+  std::vector<uint8_t> p(20, 0);
+  p[0] = 0x45;
+  p[9] = 1;
+  std::vector<uint8_t> ic = {icmpType, 0, 0, 0, 0, 0, 0, 0};
+  if (!inner) {
+    ic[4] = id >> 8, ic[5] = id & 255, ic[6] = seq >> 8, ic[7] = seq & 255;
+  } else {  // içinde bizim IP başlığımız ve yankı isteğimiz
+    std::vector<uint8_t> ip2(20, 0);
+    ip2[0] = 0x45;
+    ip2[9] = 1;
+    ic.insert(ic.end(), ip2.begin(), ip2.end());
+    std::vector<uint8_t> echo = {8, 0, 0, 0, (uint8_t)(id >> 8), (uint8_t)(id & 255), (uint8_t)(seq >> 8), (uint8_t)(seq & 255)};
+    ic.insert(ic.end(), echo.begin(), echo.end());
+  }
+  p.insert(p.end(), ic.begin(), ic.end());
+  return p;
+}
+
+static void testNet() {
+  group("ağ hesapları");
+  CHECK(rssiQuality(-40) == 100 && rssiQuality(-100) == 0 && rssiQuality(-75) == 50);
+  CHECK(String(authText(3)) == "WPA2" && String(authText(0)) == "açık" && String(authText(99)) == "bilinmiyor");
+  uint8_t m[6] = {0x24, 0x6f, 0x28, 0xaa, 0xbb, 0x0c};
+  CHECK(macText(m) == "24:6F:28:AA:BB:0C");
+  PingStats st;
+  st.add(true, 4);
+  st.add(false, 0);
+  st.add(true, 10);
+  st.add(true, 7);
+  CHECK(st.lossPct() == 25 && st.minMs == 4 && st.maxMs == 10);
+  CHECK(st.summary() == "4 gönderildi, 3 alındı, %25 kayıp · en az/ort/en çok 4/7/10 ms");
+  CHECK(PingStats().summary() == "0 gönderildi, 0 alındı, %0 kayıp");
+  auto e = ipPkt(0, 0x1234, 7, false);
+  CHECK(icmpMatch(e.data(), e.size(), 0x1234, 7) == 0);
+  CHECK(icmpMatch(e.data(), e.size(), 0x1234, 8) == -1);  // başka sıra
+  auto t = ipPkt(11, 0xbeef, 3, true);
+  CHECK(icmpMatch(t.data(), t.size(), 0xbeef, 3) == 11);
+  CHECK(icmpMatch(t.data(), t.size(), 0xbeee, 3) == -1);  // başkasının isteği
+  auto u = ipPkt(3, 0xbeef, 3, true);
+  CHECK(icmpMatch(u.data(), u.size(), 0xbeef, 3) == 3);
+  CHECK(icmpMatch(t.data(), 30, 0xbeef, 3) == -1);  // kısa paket
+  auto q = ipPkt(8, 1, 1, false);
+  CHECK(icmpMatch(q.data(), q.size(), 1, 1) == -1);  // istek, yanıt değil
+
+  group("terminal ağ komutları");
+  ndConsented = false;
+  ov = Overlay();
+  CmdOut o = termExec("wifi ping 192.168.1.1 3");
+  CHECK(o.lines.size() == 1 && o.lines[0].indexOf("onay") >= 0 && ov.kind == OV_DIALOG);  // önce onay
+  ov = Overlay();
+  ndConsented = true;
+  std::vector<String> drop;
+  ndDrain(drop);
+  o = termExec("wifi ping 192.168.1.1 3");
+  std::vector<String> l;
+  ndDrain(l);
+  CHECK(o.lines.empty() && l.size() == 5 && l.back().indexOf("%33 kayıp") >= 0);
+  CHECK(termExec("wifi tcp github.com 70000").lines[0].startsWith("Port"));
+  CHECK(termExec("wifi status").lines.size() == 7);
+  CHECK(termExec("wifi ip").lines.size() == 3);
+  CHECK(termExec("stop").lines[0] == "Süren ağ işi yok");
+  ndDrain(drop);
+}
+
 int main() {
   setupState();
   testCalib();
@@ -550,6 +618,7 @@ int main() {
   testLog();
   testOtaRoots();
   testCmd();
+  testNet();
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

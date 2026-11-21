@@ -65,7 +65,15 @@ static bool webRunning();
 static String webStatus();
 static int webProgress();  // yükleme sürüyorsa yüzde, yoksa -1
 static int webUploadCount();
-static String webCode();  // tarayıcının giriş kodu (sunucu kapalıysa boş)
+static String webCode();
+
+// --- Ağ teşhisi (sys/netdiag.h) ---
+static bool ndStart(uint8_t job, const String& host, int arg);  // false: iş sürüyor ya da bellek yok (ndError)
+static bool ndBusy();
+static void ndCancel();
+static String ndError();
+static void ndConnInfo(std::vector<String>& out);  // bağlı ağın ayrıntıları (anında)
+static void ndSaved(std::vector<String>& out);     // kayıtlı ağlar  // tarayıcının giriş kodu (sunucu kapalıysa boş)
 
 // --- Arayüz kancaları ---
 static void uiToast(const String& msg);

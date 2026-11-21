@@ -130,6 +130,68 @@ static String webStatus() { return "Alındı: Sezen Aksu - Gidiyorum.mp3 (3,3 MB
 static int webProgress() { return -1; }
 static int webUploadCount() { return 4; }
 static String webCode() { return webOn ? "482913" : ""; }
+// Ağ teşhisi: bilgisayarda gerçek ağ yok; işler anında biter ve sabit, gerçekçi çıktı üretir
+static bool g_ndBusy = false;
+static String g_ndErr;
+static bool ndBusy() { return g_ndBusy; }
+static void ndCancel() { g_ndBusy = false; }
+static String ndError() { return g_ndErr; }
+static bool ndStart(uint8_t job, const String& host, int arg) {
+  if (!g_wifi && job != ND_SCAN) {
+    ndEmit("Wi-Fi'ye bağlı değil");
+    return true;
+  }
+  switch (job) {
+    case ND_SCAN: {
+      std::vector<WifiAp> aps(3);
+      aps[0].ssid = "EvAgi", aps[0].rssi = -54, aps[0].ch = 6, aps[0].auth = 3;
+      aps[1].ssid = "Komsu_5G", aps[1].rssi = -71, aps[1].ch = 11, aps[1].auth = 7;
+      aps[2].ssid = "", aps[2].rssi = -88, aps[2].ch = 1, aps[2].auth = 0;
+      for (int i = 0; i < 3; i++)
+        for (int k = 0; k < 6; k++) aps[i].bssid[k] = 0x10 * (i + 1) + k;
+      wifiAps = aps;
+      ndEmit("3 erişim noktası (güçlüden zayıfa):");
+      break;
+    }
+    case ND_PING: {
+      PingStats st;
+      ndEmit("ping " + host);
+      for (int i = 0; i < arg; i++) {
+        st.add(i != 2, 3 + i);
+        ndEmit(i != 2 ? "  yanıt 192.168.1.1  " + String(3 + i) + " ms" : String("  yanıt yok"));
+      }
+      ndEmit("  " + st.summary());
+      break;
+    }
+    case ND_TEST:
+      ndEmit("Bağlantı testi");
+      ndEmit("1) Ağ geçidi 192.168.1.1");
+      ndEmit("  3 gönderildi, 3 alındı, %0 kayıp · en az/ort/en çok 2/3/5 ms");
+      ndEmit("2) DNS");
+      ndEmit("  github.com → 140.82.121.4  38 ms");
+      ndEmit("3) İnternet");
+      ndEmit("  tcp 140.82.121.4:443  bağlandı 61 ms");
+      ndEmit("Sonuç: ağ geçidi var · DNS çalışıyor · internet var");
+      break;
+    default:
+      ndEmit(host + " " + String(arg));
+  }
+  return true;
+}
+static void ndConnInfo(std::vector<String>& o) {
+  if (!g_wifi) {
+    o.push_back("Wi-Fi'ye bağlı değil");
+    return;
+  }
+  o.push_back("Ağ: EvAgi");
+  o.push_back("Sinyal: -54 dBm · %92 · iyi");
+  o.push_back("BSSID: 10:11:12:13:14:15 · kanal 6");
+  o.push_back("Adres: 192.168.1.22 / 255.255.255.0");
+  o.push_back("Ağ geçidi: 192.168.1.1");
+  o.push_back("DNS: 192.168.1.1");
+  o.push_back("Kartın MAC'i: 24:6F:28:AA:BB:CC");
+}
+static void ndSaved(std::vector<String>& o) { o.push_back("  EvAgi  (şifreli)"); }
 static bool weatherSearch(const String& q, std::vector<GeoHit>& out) {
   out.push_back({"İstanbul", "İstanbul, Türkiye", 41.01f, 28.97f});
   out.push_back({"Istanbul", "Ohio, ABD", 40.f, -83.f});

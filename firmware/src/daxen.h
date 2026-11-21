@@ -7,6 +7,7 @@
 #include "core/sysapi.h"
 #include "core/migrate.h"
 #include "core/log.h"
+#include "core/netcalc.h"
 #include "ui/theme.h"
 #include "ui/icons.h"
 #include "ui/widgets.h"
@@ -33,6 +34,7 @@
 #include "apps/lua.h"
 #include "apps/taskman.h"
 #include "apps/terminal.h"
+#include "apps/network.h"
 
 #include "os/home.h"
 #include "os/registry.h"

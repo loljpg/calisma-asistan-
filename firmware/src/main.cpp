@@ -54,6 +54,7 @@ static const char FW_MARKER[] = "CSFW:" FW_VARIANT ":" STR(FW_BUILD) ";";
 #include "sys/ble.h"
 #include "os/calibrate.h"  // dokunmatik ayarı (9 nokta, doğrulama)
 #include "sys/web.h"
+#include "sys/netdiag.h"
 #include "sys/power.h"
 #include "sys/services.h"
 

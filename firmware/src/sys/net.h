@@ -802,13 +802,29 @@ static void wifiRemember(const String& ssid, const String& pass) {
 static void wifiDoScan() {
   wifiScanBusy = true;
   int n = WiFi.scanNetworks(false, false);
-  if (n < 0) {
+  if (n < 0 && WiFi.status() != WL_CONNECTED) {
     // Zayıf sinyalde kopan bağlantı sürekli yeniden denenir; ESP32 bağlanmaya çalışırken tarama
     // yapamaz (liste boş kalırdı). Deneme durdurulur ve yeniden taranır; ağ görevi 30 sn sonra
-    // görünen kayıtlı ağların en güçlüsüne kendisi bağlanır.
+    // görünen kayıtlı ağların en güçlüsüne kendisi bağlanır. Bağlıyken bağlantıya dokunulmaz.
     WiFi.disconnect(false);
     vTaskDelay(pdMS_TO_TICKS(400));
     n = WiFi.scanNetworks(false, false);
+  }
+  if (wifiScanFull) {  // ağ araçları: her erişim noktası ayrı, ayrıntılı (en fazla 40)
+    wifiScanFull = false;
+    std::vector<WifiAp> aps;
+    for (int i = 0; i < n && aps.size() < 40; i++) {
+      WifiAp a;
+      a.ssid = WiFi.SSID(i);
+      a.rssi = WiFi.RSSI(i);
+      a.ch = WiFi.channel(i);
+      a.auth = WiFi.encryptionType(i);
+      if (uint8_t* b = WiFi.BSSID(i)) memcpy(a.bssid, b, 6);
+      aps.push_back(a);
+    }
+    std::sort(aps.begin(), aps.end(), [](const WifiAp& x, const WifiAp& y) { return x.rssi > y.rssi; });
+    Lock l;
+    wifiAps.swap(aps);
   }
   std::vector<WifiNet> list;
   for (int i = 0; i < n; i++) {

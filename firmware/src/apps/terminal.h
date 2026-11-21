@@ -13,6 +13,9 @@ static CmdHistory tlHist;
 static int tlTop = 0;              // kaydırma (en alttan kaç satır yukarıda)
 static int tlHistPos = -1;
 static bool tlVisible = false;     // Terminal ekranda mı (seri porttan gelen komut ekrana çizilmez)
+static bool tlFromSerial = false;  // çalışan komut seri porttan mı geldi
+static void tlAppend(const String& s, bool echo);
+static void tlDrawOut();
 static const int TL_Y = HDR_H + 2, TL_RH = 13, TL_ROWS = 12, TL_CHIP_Y = 198, TL_IN_Y = 220;
 static const char* const TL_CHIPS[] = {"help", "sysinfo", "memory", "tasks", "logs"};
 
@@ -150,14 +153,65 @@ static void cReboot(const std::vector<String>&, CmdOut& o) {
   }, 1);
 }
 
-static void cWifiStatus(const std::vector<String>&, CmdOut& o) {
-  if (!wifiConnected()) {
-    o.add("Wi-Fi'ye bağlı değil");
+static void cWifiStatus(const std::vector<String>&, CmdOut& o) { ndConnInfo(o.lines); }
+
+static void cWifiIp(const std::vector<String>&, CmdOut& o) {
+  std::vector<String> all;
+  ndConnInfo(all);
+  for (auto& s : all)
+    if (s.startsWith("Adres") || s.startsWith("Ağ geçidi") || s.startsWith("DNS") || s.startsWith("Wi-Fi")) o.add(s);
+}
+
+static void cWifiSaved(const std::vector<String>&, CmdOut& o) { ndSaved(o.lines); }
+
+// Ağ aracını başlatır; çıktı geldikçe Terminal'e (ya da seri porta) yazılır. İlk kullanımda kartın
+// ekranında onay istenir: araçlar yalnızca kullanma izni olunan ağlarda teşhis içindir.
+static void tlStartJob(uint8_t job, const String& host, int arg, CmdOut& o) {
+  bool ser = tlFromSerial;
+  if (ndConsented) {
+    ndToSerial = ser;
+    if (!ndStart(job, host, arg)) o.add(ndError());
     return;
   }
-  o.kv("Ağ", wifiSsid());
-  o.kv("Adres", wifiIp());
-  o.kv("Sinyal", String(wifiRssi()) + " dBm");
+  o.add("Ağ araçları için kartın ekranında onay ver");
+  dialog("Ağ araçları", "Yalnızca kullanma iznin olan ağlarda teşhis için kullan. Devam edilsin mi?", {"Vazgeç", "Devam"},
+         [job, host, arg, ser](int c) {
+           if (c != 1) return;
+           ndConsented = true;
+           ndToSerial = ser;
+           if (!ndStart(job, host, arg)) {
+             if (ser) Serial.println(ndError());
+             else {
+               tlAppend(ndError(), false);
+               if (tlVisible) tlDrawOut();
+             }
+           }
+         });
+}
+
+static void cWifiScan(const std::vector<String>&, CmdOut& o) { tlStartJob(ND_SCAN, "", 0, o); }
+static void cWifiPing(const std::vector<String>& a, CmdOut& o) {
+  int n = a.size() > 1 ? a[1].toInt() : 4;
+  tlStartJob(ND_PING, a[0], constrain(n, 1, 10), o);
+}
+static void cWifiDns(const std::vector<String>& a, CmdOut& o) { tlStartJob(ND_DNS, a[0], 0, o); }
+static void cWifiTcp(const std::vector<String>& a, CmdOut& o) {
+  int port = a[1].toInt();
+  if (port < 1 || port > 65535) {
+    o.add("Port 1–65535 olmalı");
+    return;
+  }
+  tlStartJob(ND_TCP, a[0], port, o);
+}
+static void cWifiTrace(const std::vector<String>& a, CmdOut& o) { tlStartJob(ND_TRACE, a[0], 0, o); }
+static void cWifiTest(const std::vector<String>&, CmdOut& o) { tlStartJob(ND_TEST, "", 0, o); }
+static void cStop(const std::vector<String>&, CmdOut& o) {
+  if (!ndBusy()) {
+    o.add("Süren ağ işi yok");
+    return;
+  }
+  ndCancel();
+  o.add("Durduruluyor…");
 }
 
 static void cBtStatus(const std::vector<String>&, CmdOut& o) {
@@ -177,7 +231,16 @@ static const Cmd TL_CMDS[] = {
     {"app", "launch", CL_USER, 1, 1, cAppLaunch, "<ad>", "uygulamayı açar"},
     {"storage", nullptr, CL_USER, 0, 0, cStorage, "", "SD kart ve yazılım alanı"},
     {"logs", nullptr, CL_USER, 0, 1, cLogs, "[satır]", "sistem günlüğü"},
-    {"wifi", "status", CL_USER, 0, 0, cWifiStatus, "", "Wi-Fi bağlantısı"},
+    {"wifi", "status", CL_USER, 0, 0, cWifiStatus, "", "bağlı ağın ayrıntıları"},
+    {"wifi", "ip", CL_USER, 0, 0, cWifiIp, "", "adres, ağ geçidi, DNS"},
+    {"wifi", "saved", CL_USER, 0, 0, cWifiSaved, "", "kayıtlı ağlar"},
+    {"wifi", "scan", CL_USER, 0, 0, cWifiScan, "", "çevredeki ağlar (BSSID, kanal, güvenlik)"},
+    {"wifi", "ping", CL_USER, 1, 2, cWifiPing, "<adres> [adet]", "ICMP yankı, gecikme ve kayıp"},
+    {"wifi", "dns", CL_USER, 1, 1, cWifiDns, "<ad>", "DNS sorgusu ve süresi"},
+    {"wifi", "tcp", CL_USER, 2, 2, cWifiTcp, "<adres> <port>", "TCP bağlantı testi"},
+    {"wifi", "traceroute", CL_USER, 1, 1, cWifiTrace, "<adres>", "yol üzerindeki yönlendiriciler"},
+    {"wifi", "test", CL_USER, 0, 0, cWifiTest, "", "ağ geçidi, DNS ve internet testi"},
+    {"stop", nullptr, CL_USER, 0, 0, cStop, "", "süren ağ işini durdurur"},
     {"bluetooth", "status", CL_USER, 0, 0, cBtStatus, "", "telefon bağlantısı"},
     {"reboot", nullptr, CL_USER, 0, 0, cReboot, "", "yeniden başlatır (onaylı)"},
 };
@@ -280,6 +343,19 @@ static void tlTap(int x, int y) {
   }
 }
 
+// Ağ aracının çıktısı geldikçe ekrana eklenir
+static void tlTick() {
+  static uint32_t at = 0;
+  if (ndToSerial || millis() - at < 150) return;
+  at = millis();
+  std::vector<String> l;
+  ndDrain(l);
+  if (l.empty()) return;
+  for (auto& s : l) tlAppend(s, false);
+  tlTop = 0;
+  tlDrawOut();
+}
+
 static void tlSwipe(int dir) {
   int old = tlTop;
   if (dir == SW_DOWN) tlTop += 6;  // parmak aşağı: eski satırlar
@@ -290,6 +366,7 @@ static void tlSwipe(int dir) {
 
 static void tlClose() {
   tlVisible = false;
+  if (!ndToSerial) ndCancel();  // ekrandan başlatılan ağ işi ekranla biter
   tlOut.clear();
   tlOut.shrink_to_fit();
 }
@@ -305,7 +382,9 @@ static void termSerialPoll() {
       buf.trim();
       if (buf.length()) {
         Serial.println("> " + buf);
+        tlFromSerial = true;
         CmdOut o = termExec(buf);
+        tlFromSerial = false;
         for (auto& s : o.lines) Serial.println(s);
       }
       buf = "";
@@ -313,7 +392,12 @@ static void termSerialPoll() {
       buf += c;
     }
   }
+  if (ndToSerial) {
+    std::vector<String> l;
+    ndDrain(l);
+    for (auto& s : l) Serial.println(s);
+  }
 #endif
 }
 
-static const App APP_TERMINAL = {"Terminal", "Terminal", I_CODE, tlOpen, tlDraw, tlTap, nullptr, tlSwipe, nullptr, nullptr, nullptr, tlClose};
+static const App APP_TERMINAL = {"Terminal", "Terminal", I_CODE, tlOpen, tlDraw, tlTap, nullptr, tlSwipe, nullptr, tlTick, nullptr, tlClose};

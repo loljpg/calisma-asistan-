@@ -387,6 +387,20 @@ int main(int argc, char** argv) {
     tlRun("sysinfo");
     shot("e5-terminal");
     ov = Overlay();
+    ndConsented = true;
+    tlRun("wifi ping 192.168.1.1 4");
+    tlTick();
+    shot("e6-terminal-ping");
+    appOpen(&APP_NETWORK);
+    shot("e7-ag-baglanti");
+    nwTap(160, 215);  // bağlantıyı test et
+    nwTick();
+    shot("e8-ag-test");
+    nwTap(240, HDR_H + 12);  // tarama sekmesi
+    nwTap(160, 215);
+    nwTick();
+    shot("e9-ag-tarama");
+    ov = Overlay();
     // satranç motoru süreçte: insan hamlesi → düşünme → yanıt
     appOpen(&APP_GAMES);
     appOpenChild(&APP_CHESS);

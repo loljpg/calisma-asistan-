@@ -25,7 +25,16 @@ USB seri porttan: 115200 baud, her komut bir satır (`\n`). Çıktı aynı porta
 | `app launch <ad>` | Uygulamayı açar (ad başlatıcıdaki gibi; boşluk varsa tırnak içinde) |
 | `storage` | SD kart dolu/boş, yazılım yuvası, günlük dosyası |
 | `logs [satır]` | Sistem günlüğünün son satırları (varsayılan 20) |
-| `wifi status` | Bağlı ağ, adres, sinyal |
+| `wifi status` | Bağlı ağ, sinyal (dBm, yüzde), BSSID, kanal, adres ve alt ağ maskesi, ağ geçidi, DNS sunucuları, kartın MAC adresi |
+| `wifi ip` | Adres, ağ geçidi ve DNS |
+| `wifi saved` | Kayıtlı ağlar (şifreler gösterilmez) |
+| `wifi scan` | Çevredeki erişim noktaları: her BSSID ayrı, sinyal, kanal, güvenlik türü (pasif tarama, bağlantı kesilmez) |
+| `wifi ping <adres> [adet]` | ICMP yankı (1–10, varsayılan 4): her yanıtın süresi, kayıp yüzdesi, en az/ort/en çok |
+| `wifi dns <ad>` | DNS sorgusu: adresler ve süre |
+| `wifi tcp <adres> <port>` | TCP bağlantı testi (4 sn zaman aşımı) |
+| `wifi traceroute <adres>` | Artan TTL'li ICMP ile yoldaki yönlendiriciler (en fazla 20 adım; yanıt vermeyen adım `*`) |
+| `wifi test` | Ağ geçidi (ping), DNS ve internet (TCP 443) testi |
+| `stop` | Süren ağ işini durdurur |
 | `bluetooth status` | Telefon bağlantısı |
 | `reboot` | Kartta onay penceresi açar, onaylanırsa yeniden başlatır |
 
@@ -37,5 +46,9 @@ bağlantılarını, güncellemeleri, web sunucusunu ve en düşük boş belleği
 RAM'de son 2 KB tutulur; SD varsa `/daxen/sys/gunluk.txt` dosyasına da eklenir. Şifre, PIN ya da
 giriş kodu günlüğe yazılmaz.
 
-Sonraki aşamalar: ağ araçları (`wifi scan`, `wifi ping`, `wifi dns`, `wifi tcp`, `wifi traceroute`),
-`bluetooth scan`, geliştirici komutları (PIN ile).
+Ağ araçları ayrı bir süreçte (`ağ-araç`, 8 KB yığın) çalışır, çıktı geldikçe yazılır ve iş bitince
+süreç kapanır. Boş bellek 18 KB tabanını koruyacak kadar değilse araç başlamaz ve nedenini söyler.
+Açılıştan sonraki ilk kullanımda kartın ekranında onay istenir: bu araçlar yalnızca kullanma iznin olan
+ağlarda teşhis içindir; tarama pasiftir, ağa müdahale eden hiçbir şey (parola deneme, trafik bozma) yoktur.
+
+Sonraki aşamalar: `bluetooth scan`, geliştirici komutları (PIN ile).
