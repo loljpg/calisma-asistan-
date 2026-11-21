@@ -162,7 +162,8 @@ Bluetooth bağlıyken Wi-Fi gerekmez: plan, tikler, sayaç, saat, bildirimler ve
 
 - PlatformIO, `espressif32@6.9.0` (Arduino core 2.0.x).
   Ortamlar: `cyd`, `cyd_st7789` (ana yazılım) ve `muzik_cyd`, `muzik_cyd_st7789` (müzik yazılımı).
-- `src/main.cpp` sistem hizmetleri (ağ, bulut, Bluetooth, güncelleme) ve servislerin kaydı;
+- `src/main.cpp` açılış ve çekirdek servislerinin kaydı; `src/sys/` sistem katmanı (kalıcı ayarlar,
+  SD kart, ağ ve bulut, Bluetooth, web sunucusu, müzik modülü, ışıklar, sistem hizmetleri);
   `src/os/kernel.h` zamanlayıcı kesmesi ve süreç zamanlayıcı; `src/daxen.h` arayüzü toplar:
   `core/` ortak durum ve yardımcılar, `ui/` tasarım sistemi (renkler, simgeler, bileşenler, klavye),
   `os/` çekirdek ve kabuk (ana ekran, başlatıcı, dokunma), `apps/` uygulamalar. Yeni uygulama: `apps/` altına
