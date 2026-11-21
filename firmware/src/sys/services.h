@@ -78,6 +78,7 @@ static void weatherRefresh() { wantWeather = true; }
 static void accountSet(const String& db, const String& key, const String& mail, const String& pass) {
   {
     Lock l;
+    if (db != cfg.dbUrl || key != cfg.apiKey || mail != cfg.email || pass.length()) cfg.rtok = "";  // eski oturum geçersiz
     cfg.dbUrl = db;
     cfg.apiKey = key;
     cfg.email = mail;
@@ -95,7 +96,7 @@ static void sysCalibrate() { runCalibration(); }
 // ============================================================================
 static void splashLogo() {
   fillBg(0, 0, SCR_W, SCR_H);
-  drawLogo(LOGO_L, LOGO_L_W, LOGO_L_H, (SCR_W - LOGO_L_W) / 2, 74);
+  DRAW_LOGO(LOGO_L, (SCR_W - LOGO_L_W) / 2, 74);
 }
 
 // Logonun altında ince yükleme çizgisi ve kısa durum yazısı

@@ -46,9 +46,11 @@ static const char FW_MARKER[] = "CSFW:" FW_VARIANT ":" STR(FW_BUILD) ";";
 // --- Sistem katmanı (sırası önemlidir) ---
 #include "sys/libtrim.h"  // kullanılmayan kütüphane parçalarının yerine küçük karşılıklar
 #include "sys/store.h"
+#include "sys/backup.h"
 #include "sys/sdlog.h"
 #include "sys/diag.h"
 #include "sys/ota_roots.h"
+#include "sys/google_roots.h"
 #include "sys/net.h"
 #include "sys/sdupdate.h"
 #include "sys/events.h"
@@ -238,6 +240,7 @@ void setup() {
   xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, &netH, 0);
   lastInteract = millis();
   homeShow();
+  if (cfg.lockOn && authHasPin()) lockActive = true;  // ekran kilidi: açılışta kilitli
   if (!haveWifi && !bleHasToken) settingsOpenPage(SP_WIFI);  // ilk kurulum: önce Wi-Fi
   else fOfferOldMusicModule();  // SD'de kalan eski müzik modülü bir kez sorulur
 

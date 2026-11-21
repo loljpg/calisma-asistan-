@@ -264,6 +264,65 @@ static void cBtInfo(const std::vector<String>& a, CmdOut& o) {
   bleDetail(d, millis(), o.lines);
 }
 
+// --- Güvenlik ---
+static void cDev(const std::vector<String>& a, CmdOut& o) {
+  if (a.size() && a[0] == "off") {
+    authDevOff();
+    o.add("Geliştirici seviyesi kapandı");
+    return;
+  }
+  if (authLevel() == CL_DEV) {
+    blePush(o.lines, "Geliştirici seviyesi açık (%u dk kaldı). Kapatmak: dev off", (unsigned)authDevLeftMin());
+    return;
+  }
+  if (!authHasPin()) {
+    o.add("Önce Ayarlar → Güvenlik'te PIN belirle");
+    return;
+  }
+  if (authWaitSec()) {
+    blePush(o.lines, "Çok fazla yanlış PIN: %u sn bekle", (unsigned)authWaitSec());
+    return;
+  }
+  o.add("PIN'i kartın ekranında gir (seri porta yazılmaz)");
+  authAsk("Geliştirici seviyesi için PIN", []() {
+    authDevOn();
+    toast("Geliştirici seviyesi 10 dk açık");
+  });
+}
+
+static void cLogsClear(const std::vector<String>&, CmdOut& o) {
+  o.add("Onay penceresi ekranda");
+  dialog("Günlük silinsin mi?", "Bellekteki ve SD karttaki sistem günlüğü silinir.", {"Vazgeç", "Sil"}, [](int c) {
+    if (c != 1) return;
+    {
+      Lock l;
+      logRing.head = logRing.used = 0;
+    }
+    if (sdOk) {
+      SD.remove("/daxen/sys/gunluk.txt");
+      SD.remove("/daxen/sys/gunluk.1.txt");
+    }
+    sysLog("güvenlik", "sistem günlüğü silindi");
+    toast("Günlük silindi");
+  }, 1);
+}
+
+static void cBackup(const std::vector<String>&, CmdOut& o) {
+  String m;
+  backupSave(false, m);
+  o.add(m + " (şifresiz; şifreli yedek: Ayarlar → Güvenlik)");
+}
+
+static void cRestore(const std::vector<String>&, CmdOut& o) {
+  o.add("Onay penceresi ekranda");
+  dialog("Yedekten geri yüklensin mi?", "Ekran, hava, Wi-Fi ve bulut ayarları yedektekiyle değişir.", {"Vazgeç", "Geri yükle"}, [](int c) {
+    if (c != 1) return;
+    String m;
+    backupLoad(m);
+    toast(m);
+  }, 1);
+}
+
 // --- Lua uygulamaları ---
 static int tlLuaFind(const String& w) {
   String want = trLower(w);
@@ -362,6 +421,7 @@ static const Cmd TL_CMDS[] = {
     {"apps", nullptr, CL_USER, 0, 0, cApps, "", "uygulamalar"},
     {"app", "launch", CL_USER, 1, 1, cAppLaunch, "<ad>", "uygulamayı açar"},
     {"storage", nullptr, CL_USER, 0, 0, cStorage, "", "SD kart ve yazılım alanı"},
+    {"logs", "clear", CL_DEV, 0, 0, cLogsClear, "", "sistem günlüğünü siler (onaylı)"},
     {"logs", nullptr, CL_USER, 0, 1, cLogs, "[satır]", "sistem günlüğü"},
     {"wifi", "status", CL_USER, 0, 0, cWifiStatus, "", "bağlı ağın ayrıntıları"},
     {"wifi", "ip", CL_USER, 0, 0, cWifiIp, "", "adres, ağ geçidi, DNS"},
@@ -377,6 +437,9 @@ static const Cmd TL_CMDS[] = {
     {"bluetooth", "scan", CL_USER, 0, 1, cBtScan, "[sn]", "yakındaki BLE cihazları"},
     {"bluetooth", "devices", CL_USER, 0, 0, cBtDevices, "", "son taramanın listesi"},
     {"bluetooth", "info", CL_USER, 1, 1, cBtInfo, "<no>", "cihazın ayrıntıları"},
+    {"dev", nullptr, CL_USER, 0, 1, cDev, "[off]", "geliştirici seviyesi (PIN, 10 dk)"},
+    {"backup", nullptr, CL_USER, 0, 0, cBackup, "", "ayarları SD'ye yedekler (şifresiz)"},
+    {"restore", nullptr, CL_DEV, 0, 0, cRestore, "", "yedekten geri yükler (onaylı)"},
     {"lua", "list", CL_USER, 0, 0, cLuaList, "", "Lua uygulamaları, sürüm, izinler"},
     {"lua", "info", CL_USER, 1, 1, cLuaInfo, "<ad>", "izinler, onay, günlük"},
     {"lua", "log", CL_USER, 1, 2, cLuaLog, "<ad> [satır]", "uygulamanın günlüğü"},
@@ -395,7 +458,7 @@ static CmdOut termExec(const String& line) {
   size_t n;
   const Cmd* t = tlTable(n);
   tlHist.push(line);
-  cmdRun(t, n, line, CL_USER, o);
+  cmdRun(t, n, line, authLevel(), o);
   return o;
 }
 

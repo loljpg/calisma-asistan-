@@ -28,6 +28,8 @@ static void loadConfig() {
   cfg.nightDim = prefs.getBool("ndim", true);
   cfg.autoBright = prefs.getBool("abri", false);
   cfg.ldrInv = prefs.getBool("ldrinv", false);
+  cfg.lockOn = prefs.getBool("lock", false);
+  cfg.rtok = prefs.getString("rtok", "");
   cfg.wCity = prefs.getString("wcity", WEATHER_CITY);
   cfg.wLat = prefs.getFloat("wlat", atof(WEATHER_LAT));
   cfg.wLon = prefs.getFloat("wlon", atof(WEATHER_LON));
@@ -60,7 +62,11 @@ static void saveConfig() {
   prefs.putString("db", cfg.dbUrl);
   prefs.putString("key", cfg.apiKey);
   prefs.putString("mail", cfg.email);
-  prefs.putString("pass", cfg.password);
+  if (cfg.password.length()) prefs.putString("pass", cfg.password);
+  else prefs.remove("pass");
+  if (cfg.rtok.length()) prefs.putString("rtok", cfg.rtok);
+  else prefs.remove("rtok");
+  prefs.putBool("lock", cfg.lockOn);
   prefs.putBool("inv", cfg.invert);
   prefs.putBool("cal", cfg.calibrated);
   prefs.putBool("cswap", cfg.swapXY);
@@ -99,7 +105,7 @@ static void saveOutboxNvs() {
 
 static bool hasCreds() {
   Lock l;
-  return cfg.dbUrl.length() && cfg.apiKey.length() && cfg.email.length() && cfg.password.length();
+  return cfg.dbUrl.length() && cfg.apiKey.length() && cfg.email.length() && (cfg.password.length() || cfg.rtok.length());
 }
 
 static void setNet(const String& msg, bool ok) {

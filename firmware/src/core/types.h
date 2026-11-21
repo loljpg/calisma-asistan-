@@ -59,6 +59,8 @@ struct Config {
   bool ldrInv = false;      // ışık sensörü okuması ters (aydınlıkta yüksek)
   String wCity = WEATHER_CITY;
   float wLat = 40.78f, wLon = 30.40f;
+  bool lockOn = false;      // ekran kilidi (PIN gerekir)
+  String rtok;              // bulut oturumunun yenileme anahtarı (şifre saklanmaz)
   uint16_t worldMask = 0x0141;  // Londra, Tokyo, New York  // Dünya saatleri: seçili şehirler (bit)
 };
 

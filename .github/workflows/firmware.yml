@@ -46,6 +46,8 @@ jobs:
           fi
           echo "Denenecek: $hosts"
           python3 firmware/tools/check_ota_chains.py $hosts
+      - name: Firebase sunucularının zincirleri kartın Google kökleriyle doğrulanıyor mu
+        run: python3 firmware/tools/check_ota_chains.py --ca firmware/certs/google-roots.pem identitytoolkit.googleapis.com securetoken.googleapis.com docs-examples.firebaseio.com
 
   build:
     needs: [test, sertifika]

@@ -78,7 +78,34 @@ def check(host, roots):
     return ok
 
 
+def check_ca_list(host, roots):
+    """setCACert (güven listesi) kipi: mbedTLS önce güven listesinde ebeveyn arar. Yapraktan
+    yukarı her sertifika için, veren adı bir kökün konu adıyla aynı ve imza o kökle doğruysa tamam
+    (sunucunun gönderdiği çapraz imzalı üst sertifika kullanılmaz)."""
+    chain = fetch_chain(host)
+    if not chain:
+        print("%-40s ZİNCİR ALINAMADI" % host)
+        return False
+    cur, seen, root = chain[0], [], None
+    while cur is not None and cur not in seen:
+        seen.append(cur)
+        root = next((r for r in roots if r.subject.public_bytes() == cur.issuer.public_bytes() and sig_ok(cur, r.public_key())), None)
+        if root is not None:
+            break
+        cur = next((c for c in chain[1:] if c.subject.public_bytes() == cur.issuer.public_bytes() and sig_ok(cur, c.public_key())), None)
+    ok = root is not None and name_ok(chain[0], host)
+    names = " → ".join(c.subject.rfc4514_string().split(",")[0] for c in seen)
+    print("%-40s %s  %s  ⇒ kök: %s" % (host, "TAMAM" if ok else "HATA ", names, root.subject.rfc4514_string().split(",")[0] if root else "yok"))
+    return ok
+
+
 def main():
+    if len(sys.argv) > 2 and sys.argv[1] == "--ca":  # --ca <pem> sunucular…: setCACert kipi
+        roots = x509.load_pem_x509_certificates(open(sys.argv[2], "rb").read())
+        results = [check_ca_list(h, roots) for h in sys.argv[3:] if h]
+        if not results or not all(results):
+            sys.exit("Kartın Google kökleri bu sunucuları doğrulayamıyor: certs/google-roots.pem")
+        return
     roots = x509.load_pem_x509_certificates(open(PEM, "rb").read())
     hosts = [h for h in sys.argv[1:] if h]
     if not hosts:

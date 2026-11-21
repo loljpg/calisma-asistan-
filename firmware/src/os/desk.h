@@ -36,6 +36,10 @@ static int deskActs(DeskAct* o) {
 
 // Durum çubuğundaki etkin işler (en fazla 3), sağdan sola; dönüş: kalan en sol x
 static int deskDrawActs(int x) {
+  if (lockActive) {
+    x -= 18;
+    drawIcon(I_LOCK, x, 5, 14, C_TEXT2, C_BG);
+  }
   DeskAct a[5];
   int n = std::min(3, deskActs(a));
   for (int i = 0; i < n; i++) {

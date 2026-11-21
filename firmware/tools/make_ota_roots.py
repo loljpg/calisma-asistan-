@@ -48,16 +48,41 @@ def build():
     return "\n".join(lines) + "\n", len(blob)
 
 
+GPEM = os.path.join(HERE, "..", "certs", "google-roots.pem")
+GOUT = os.path.join(HERE, "..", "src", "sys", "google_roots.h")
+
+
+def build_google():
+    """Google'ın kökleri PEM metni olarak (WiFiClientSecure::setCACert). Kök, güven listesinde
+    olduğu için sunucunun gönderdiği çapraz imzalı (GlobalSign) sertifika da sorun olmaz."""
+    certs = x509.load_pem_x509_certificates(open(GPEM, "rb").read())
+    lines = ["// Bu dosya tools/make_ota_roots.py ile certs/google-roots.pem'den üretildi, elle değiştirme.",
+             "// Firebase (giriş, oturum yenileme, veritabanı) ve diğer Google sunucularının kökleri:"]
+    for c in certs:
+        lines.append("//   %s (geçerlilik sonu %s)" % (c.subject.rfc4514_string(), c.not_valid_after_utc.date()))
+    lines += ["#pragma once", "static const char GOOGLE_ROOTS[] ="]
+    pem = b"".join(c.public_bytes(serialization.Encoding.PEM) for c in certs).decode()
+    for ln in pem.splitlines():
+        lines.append('    "%s\\n"' % ln)
+    lines[-1] += ";"
+    return "\n".join(lines) + "\n"
+
+
 def main():
     text, size = build()
+    gtext = build_google()
     if "--check" in sys.argv:
         cur = open(OUT, encoding="utf-8").read() if os.path.exists(OUT) else ""
         if cur != text:
             sys.exit("src/sys/ota_roots.h certs/ota-roots.pem ile uyuşmuyor: tools/make_ota_roots.py çalıştır")
-        print("ota_roots.h güncel (%d bayt)" % size)
+        gcur = open(GOUT, encoding="utf-8").read() if os.path.exists(GOUT) else ""
+        if gcur != gtext:
+            sys.exit("src/sys/google_roots.h certs/google-roots.pem ile uyuşmuyor: tools/make_ota_roots.py çalıştır")
+        print("ota_roots.h (%d bayt) ve google_roots.h güncel" % size)
         return
     open(OUT, "w", encoding="utf-8").write(text)
-    print("yazıldı: %s (%d bayt)" % (OUT, size))
+    open(GOUT, "w", encoding="utf-8").write(gtext)
+    print("yazıldı: %s (%d bayt), %s" % (OUT, size, GOUT))
 
 
 if __name__ == "__main__":

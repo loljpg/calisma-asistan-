@@ -9,7 +9,7 @@ int main(int argc, char** argv) {
 
   if (want("logo")) {
     fillBg(0, 0, 320, 240);
-    drawLogo(LOGO_L, LOGO_L_W, LOGO_L_H, (320 - LOGO_L_W) / 2, 78);
+    DRAW_LOGO(LOGO_L, (320 - LOGO_L_W) / 2, 78);
     tft.fillRect(130, 176, 60, 2, C_LINE);
     tft.fillRect(130, 176, 24, 2, C_ACC);
     shot("00-acilis");
@@ -125,6 +125,25 @@ int main(int argc, char** argv) {
     shot("47-guncelleme");
     setGo(SP_SYSTEM);
     shot("48-sistem");
+    authSetPin("2468");
+    cfg.lockOn = true;
+    authDevOn();
+    setGo(SP_SECURITY);
+    shot("49-guvenlik");
+    authDevOff();
+    appExit();
+    homeShow();
+    lockNow();
+    shot("49a-kilitli");
+    tap(160, 120);
+    kbm.value = "24";
+    kbm.cur = 2;
+    kbmDraw();
+    shot("49b-kilit-pin");
+    kbm.value = "2468";
+    kbmFinish(true);
+    authClearPin();
+    cfg.lockOn = false;
   }
   if (want("kb")) {
     textInput("Not başlığı", "", nullptr);

@@ -357,7 +357,7 @@ static void webAccountPage() {
   String h = String(FPSTR(WEB_HEAD)) + "<h2>Bulut hesabı</h2><p class=mut>Telefondaki uygulamaya girdiğin Firebase bilgilerinin aynısı.</p>"
              "<form method=post action='/hesap' class=box>" + field("Veritabanı adresi", "db", "text", cfg.dbUrl.length()) +
              field("Web API anahtarı", "key", "password", cfg.apiKey.length()) + field("E-posta", "mail", "text", cfg.email.length()) +
-             field("Şifre", "pass", "password", cfg.password.length()) +
+             field("Şifre", "pass", "password", cfg.password.length() || cfg.rtok.length()) +
              "<button>Kaydet</button></form><p><a href='/'>&#8592; Dosyalar</a></p></main></body></html>";
   web->send(200, "text/html; charset=utf-8", h);
 }
@@ -439,7 +439,7 @@ static bool webStart() {
     key.trim();
     mail.trim();
     accountSet(db.length() ? db : cfg.dbUrl, key.length() ? key : cfg.apiKey, mail.length() ? mail : cfg.email,
-               pass.length() ? pass : cfg.password);
+               pass);  // boşsa saklı oturum (yenileme anahtarı) sürer
     webSetMsg("Hesap bilgileri kaydedildi");
     sysLog("web", "bulut hesabı tarayıcıdan değiştirildi");
     dataDirty = true;

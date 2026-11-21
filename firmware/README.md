@@ -21,6 +21,10 @@ YKS, Notlar, Ayarlar, Uygulamalar.
 Dokunma: dokun, **basılı tut** (bağlam menüsü), kaydır. Ekranın **sol kenarından sağa kaydırmak**
 ve başlıktaki sol ok her uygulamada geri gider.
 
+**Güvenlik:** Ayarlar → Güvenlik'te PIN, ekran kilidi, geliştirici seviyesi (Terminal'in
+yönetim komutları, 10 dk) ve ayar yedeği. Bulut girişi Google'ın kökleriyle doğrulanır, şifre
+saklanmaz. Ayrıntılar ve sınırlar: [docs/guvenlik.md](../docs/guvenlik.md).
+
 **Sistem menüsü:** her ekranda üst kenardan aşağı kaydır ya da ana ekranın durum çubuğuna dokun.
 Saat ve boş bellek; Wi-Fi, telefon, SD kart ve bulut kutucukları (dokununca ilgili ayar sayfası);
 parlaklık; son kullanılan dört uygulama (hızlı geçiş) ve arka planda süren işler; son bildirim
@@ -51,7 +55,7 @@ satıra dokununca ya da BOOT'a basınca kapanır. Menü açıkken alttaki uygula
 | **Sistem** | Sürüm, çip, çalışma süresi, son açılış sebebi (önceki çökme kaydı varsa belirtilir), bellek (boş, en az, en büyük blok), Wi-Fi adresi ve sinyali |
 | **Görevler** | Çekirdeğin süreçleri: servisler ve görevler, işlemci payı, yığın, bellek; görevleri sonlandırma. Wi-Fi, TCP/IP ve Bluetooth sistem görevleri de görünür (yığın ve durum; işlemci payı ölçülemez, "—") |
 | **Ağ** | Bağlı Wi-Fi'nin ayrıntıları (sinyal, BSSID, kanal, adres, ağ geçidi, DNS) ve bağlantı testi (ağ geçidi, DNS, internet); çevredeki erişim noktalarının taranması (her BSSID ayrı, kanal, güvenlik); yakındaki Bluetooth cihazları (yalnız reklam paketleri: ad, adres türü, sinyal, üretici, servisler; dokununca ayrıntı) |
-| **Terminal** | Kendi komut yorumlayıcısı (Linux değil): `help`, `sysinfo`, `memory`, `tasks`, `logs`, `storage`, `apps`, `app launch`, `wifi status/ip/saved/scan/ping/dns/tcp/traceroute/test`, `stop`, `bluetooth status/scan/devices/info`, `lua list/info/log/remove/stop`, `version`, `uptime`, `history`, `clear`, `reboot`. USB seri porttan da (115200) çalışır. Ayrıntılar: [docs/terminal.md](../docs/terminal.md) |
+| **Terminal** | Kendi komut yorumlayıcısı (Linux değil): `help`, `sysinfo`, `memory`, `tasks`, `logs`, `storage`, `apps`, `app launch`, `wifi status/ip/saved/scan/ping/dns/tcp/traceroute/test`, `stop`, `bluetooth status/scan/devices/info`, `lua list/info/log/remove/stop`, `dev`, `backup`, `restore`, `logs clear`, `version`, `uptime`, `history`, `clear`, `reboot`. USB seri porttan da (115200) çalışır. Ayrıntılar: [docs/terminal.md](../docs/terminal.md) |
 
 **Kendi uygulamaların:** SD karttaki `/daxen/uygulamalar/*.lua` dosyaları Uygulamalar ekranında
 görünür. Her biri ayrı bir süreç olarak çalışır; `-- arkaplan: evet` diyen uygulama çıkınca da sürer.

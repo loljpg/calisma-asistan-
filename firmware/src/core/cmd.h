@@ -107,7 +107,7 @@ static void cmdRun(const Cmd* tbl, size_t n, const String& line, uint8_t level, 
     return;
   }
   if (hit->level > level) {
-    o.add("Bu komut geliştirici yetkisi ister");
+    o.add("Bu komut geliştirici yetkisi ister (açmak için: dev)");
     return;
   }
   hit->fn(a, o);

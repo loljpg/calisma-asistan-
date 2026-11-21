@@ -7,6 +7,7 @@
 #include "core/sysapi.h"
 #include "core/migrate.h"
 #include "core/log.h"
+#include "core/auth.h"
 #include "core/netcalc.h"
 #include "core/blecalc.h"
 #include "core/lzss.h"
@@ -17,6 +18,7 @@
 #include "ui/keyboard.h"
 #include "os/kernel.h"
 #include "os/shell.h"
+#include "os/authui.h"
 
 #include "apps/yks.h"
 #include "apps/settings.h"

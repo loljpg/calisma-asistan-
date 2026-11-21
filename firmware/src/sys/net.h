@@ -5,6 +5,19 @@
 // ============================================================================
 // Ağ (çekirdek 0)
 // ============================================================================
+// Sunucunun sertifikası doğrulanır: Google (Firebase giriş, oturum yenileme, veritabanı) kendi
+// kökleriyle (sys/google_roots.h; çapraz imzalı zincir de geçer), diğerleri güncellemenin kök
+// paketiyle (sys/ota_roots.h). Doğrulanamazsa bağlantı kurulmaz.
+static bool isGoogleHost(const String& url) {
+  int e = url.indexOf('/', 8);
+  String host = url.substring(url.indexOf("//") + 2, e < 0 ? url.length() : e);
+  return host.endsWith(".googleapis.com") || host.endsWith(".firebaseio.com") || host.endsWith(".firebasedatabase.app");
+}
+static void tlsTrust(WiFiClientSecure& c, const String& url) {
+  if (isGoogleHost(url)) c.setCACert(GOOGLE_ROOTS);
+  else c.setCACertBundle(OTA_ROOTS);
+}
+
 static String httpsRequest(const char* method, const String& url, const String& body, int& code,
                            const char* contentType = "application/json") {
   // Bellek azsa şifreli bağlantı açılmaz: yetersiz bellekte kütüphane çöküp kartı yeniden başlatıyordu.
@@ -13,7 +26,7 @@ static String httpsRequest(const char* method, const String& url, const String& 
     return String();
   }
   WiFiClientSecure client;
-  client.setInsecure();  // sertifika doğrulaması yok; ev ağı için yeterli
+  tlsTrust(client, url);
   HTTPClient http;
   http.setConnectTimeout(8000);
   http.setTimeout(12000);
@@ -49,14 +62,53 @@ static String authErrorText(const String& resp) {
   return "Buluta giriş yapılamadı";
 }
 
+// Şifre yalnızca ilk girişte kullanılır: giriş başarılı olunca yenileme anahtarı saklanır, şifre
+// silinir. Sonraki girişler anahtarla (securetoken); anahtar geçersizse şifre yeniden istenir.
+static bool fbRefresh(const String& key, const String& rtok) {
+  int code = 0;
+  String resp = httpsRequest("POST", "https://securetoken.googleapis.com/v1/token?key=" + key, "grant_type=refresh_token&refresh_token=" + rtok,
+                             code, "application/x-www-form-urlencoded");
+  JsonDocument r;
+  if (code != 200 || deserializeJson(r, resp)) {
+    if (code == 400) {
+      {
+        Lock l;
+        cfg.rtok = "";
+      }
+      saveConfig();
+      sysLog("bulut", "oturum anahtarı geçersiz; şifre yeniden gerekli");
+      setNet("Bulut oturumu bitti: şifreyi yeniden gir", false);
+    } else {
+      setNet(code < 0 ? String("Buluta bağlanılamadı") : String("Bulut oturumu yenilenemedi"), false);
+    }
+    return false;
+  }
+  idToken = String((const char*)(r["id_token"] | ""));
+  fbUid = String((const char*)(r["user_id"] | ""));
+  String nr = String((const char*)(r["refresh_token"] | ""));
+  if (nr.length() && nr != rtok) {
+    {
+      Lock l;
+      cfg.rtok = nr;
+    }
+    saveConfig();
+  }
+  int exp = String((const char*)(r["expires_in"] | "3600")).toInt();
+  tokenAt = millis();
+  tokenLife = (uint32_t)std::max(300, exp - 300) * 1000UL;
+  return idToken.length() > 0 && fbUid.length() > 0;
+}
+
 static bool fbSignIn() {
-  String key, email, pass;
+  String key, email, pass, rtok;
   {
     Lock l;
     key = cfg.apiKey;
     email = cfg.email;
     pass = cfg.password;
+    rtok = cfg.rtok;
   }
+  if (!pass.length() && rtok.length()) return fbRefresh(key, rtok);
   JsonDocument req;
   req["email"] = email;
   req["password"] = pass;
@@ -76,6 +128,16 @@ static bool fbSignIn() {
   }
   idToken = String((const char*)(r["idToken"] | ""));
   fbUid = String((const char*)(r["localId"] | ""));
+  String rt = String((const char*)(r["refreshToken"] | ""));
+  if (rt.length()) {  // şifre artık saklanmaz
+    {
+      Lock l;
+      cfg.rtok = rt;
+      cfg.password = "";
+    }
+    saveConfig();
+    sysLog("bulut", "giriş yapıldı; şifre silindi, oturum anahtarı saklandı");
+  }
   int exp = String((const char*)(r["expiresIn"] | "3600")).toInt();
   tokenAt = millis();
   tokenLife = (uint32_t)std::max(300, exp - 300) * 1000UL;
@@ -429,7 +491,7 @@ static bool liveConnect() {
       host = host.substring(0, colon);
     }
     WiFiClientSecure* c = new WiFiClientSecure();
-    c->setInsecure();
+    tlsTrust(*c, url);
     if (!c->connect(host.c_str(), port)) {
       delete c;
       break;

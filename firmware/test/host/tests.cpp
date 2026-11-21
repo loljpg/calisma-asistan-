@@ -419,7 +419,7 @@ static void testLua() {
   CHECK(lo.lines[0] == "Ad: Radar" && lo.lines[3] == "İzinler: ekran, wifi, bluetooth" && lo.lines[4] == "Onay: verildi");
   CHECK(termExec("lua info yok").lines[0].startsWith("Böyle bir Lua"));
   CHECK(termExec("lua log izin 1").lines.size() == 1);
-  CHECK(termExec("lua remove radar").lines[0] == "Bu komut geliştirici yetkisi ister");
+  CHECK(termExec("lua remove radar").lines[0] == "Bu komut geliştirici yetkisi ister (açmak için: dev)");
   // kaldırma: onay penceresi, dosya silinir, veri klasörü kalır
   luaScanned = false;
   luaAppCount();
@@ -456,6 +456,32 @@ static void testLua() {
   unsigned short hs = 0;
   CHECK(miniScan("  -42 ve 65535", "%d ve %hu", &sd, &hs) == 2 && sd == -42 && hs == 65535);
   CHECK(miniScan("", "%u", &ma) == 0 && miniScan("12345", "%3u", &ma) == 1 && ma == 123);
+  // saat dilimi çözümlemesi (tzset'in biçimleri): C kütüphanesinin sscanf'iyle aynı sonuç
+  struct TzCase {
+    const char* fmt;
+    const char* in;
+  } tz[] = {{"%10[-+0-9A-Za-z]%n", "+03>-3"},  {"%10[-+0-9A-Za-z]%n", "MESZ+0330>"}, {"%10[A-Za-z]%n", "CET-1CEST"},
+            {"%10[A-Za-z]%n", "ABCDEFGHIJKLM5"}, {"%10[A-Za-z]%n", "5X"},           {"%hu%n:%hu%n:%hu%n", "3"},
+            {"%hu%n:%hu%n:%hu%n", "3:30"},       {"%hu%n:%hu%n:%hu%n", "10:05:59,M3"}, {"M%hu%n.%hu%n.%hu%n", "M3.5.0/3"},
+            {"M%hu%n.%hu%n.%hu%n", "J60"},        {"/%hu%n:%hu%n:%hu%n", "/3,M10"},     {"%hu%n:%hu%n:%hu%n", ""}};
+  bool same = true;
+  for (auto& c : tz) {
+    char b1[16] = {0}, b2[16] = {0};
+    int n1 = -9, n2 = -9, m1 = -9, m2 = -9, k1 = -9, k2 = -9;
+    unsigned short h1[3] = {0}, h2[3] = {0};
+    int r1, r2;
+    if (c.fmt[1] == '1') {  // %10[…]%n
+      r1 = miniScan(c.in, c.fmt, b1, &n1);
+      r2 = sscanf(c.in, c.fmt, b2, &n2);
+    } else {
+      r1 = miniScan(c.in, c.fmt, &h1[0], &n1, &h1[1], &m1, &h1[2], &k1);
+      r2 = sscanf(c.in, c.fmt, &h2[0], &n2, &h2[1], &m2, &h2[2], &k2);
+    }
+    bool ok = (r1 == r2 || (r1 == 0 && r2 == -1)) && !strcmp(b1, b2) && !memcmp(h1, h2, sizeof h1) && n1 == n2 && m1 == m2 && k1 == k2;
+    if (!ok) printf("    fark: \"%s\" \"%s\": %d/%d %s/%s n %d/%d\n", c.fmt, c.in, r1, r2, b1, b2, n1, n2);
+    same &= ok;
+  }
+  CHECK(same);
 
   group("sıkıştırılmış dosyalar");
   CHECK(crc32Upd(0, (const uint8_t*)"123456789", 9) == 0xCBF43926u);
@@ -768,6 +794,127 @@ static BleDev bleOf(const std::vector<uint8_t>& ad, int8_t rssi = -60) {
   return d;
 }
 
+// ---------------------------------------------------------------------------
+// Güvenlik: PIN, bekleme, geliştirici seviyesi, ekran kilidi (core/auth.h, os/authui.h)
+// ---------------------------------------------------------------------------
+static void typePin(const char* v, bool ok = true) {  // açık klavyeye yazıp onaylar
+  kbm.value = v;
+  kbmFinish(ok);
+}
+
+static void testAuth() {
+  group("PIN hesapları");
+  CHECK(authPinValid("1234") && authPinValid("12345678") && !authPinValid("123") && !authPinValid("123456789") && !authPinValid("12a4"));
+  CHECK(authDelayMs(4) == 0 && authDelayMs(5) == 30000 && authDelayMs(6) == 60000 && authDelayMs(9) == 480000 && authDelayMs(10) == 900000 &&
+        authDelayMs(200) == 900000);
+  uint8_t h[32];
+  mbedtls_sha256_ret((const uint8_t*)"abc", 3, h, 0);
+  CHECK(h[0] == 0xba && h[1] == 0x78 && h[31] == 0xad);  // FIPS 180-2 örneği
+  uint8_t s1[16] = {1}, s2[16] = {2}, a[32], b[32];
+  authHash(s1, "1234", a);
+  authHash(s2, "1234", b);
+  CHECK(!authSame(a, b, 32));  // aynı PIN, farklı tuz: farklı özet
+
+  group("PIN saklama ve bekleme");
+  authClearPin();
+  CHECK(!authHasPin() && authCheck("0000") == 1);  // PIN yokken her şey açık
+  CHECK(!authSetPin("12") && authSetPin("2468") && authHasPin());
+  {
+    prefs.begin("cs", true);
+    uint8_t buf[64] = {0};
+    size_t n = prefs.getBytes("pinh", buf, 64);
+    prefs.end();
+    CHECK(n == 32 && memmem(buf, n, "2468", 4) == nullptr);  // düz PIN yok
+  }
+  CHECK(authCheck("1357") == 0 && authCheck("2468") == 1 && authFails == 0);
+  for (int i = 0; i < 5; i++) authCheck("0000");
+  CHECK(authFails == 5 && authWaitSec() == 30 && authCheck("2468") == -1);  // bekleme sürerken denenmez
+  authLoaded = false;
+  authWaitUntil = 0;
+  authLoad();  // yeniden başlatma bekletmeyi sıfırlamaz
+  CHECK(authWaitSec() == 30);
+  g_ms += 31000;
+  CHECK(authCheck("2468") == 1 && authFails == 0 && !authWaitSec());
+
+  group("geliştirici seviyesi");
+  CHECK(authLevel() == CL_USER);
+  CHECK(termExec("lua stop").lines[0].indexOf("geliştirici yetkisi") >= 0);
+  CmdOut d = termExec("dev");
+  CHECK(d.lines[0].startsWith("PIN'i kartın ekranında") && kbm.active && kbm.password);
+  typePin("1111");
+  CHECK(authLevel() == CL_USER);
+  termExec("dev");
+  typePin("2468");
+  CHECK(authLevel() == CL_DEV && authDevLeftMin() == 10);
+  CHECK(termExec("lua stop").lines[0] == "Çalışan Lua uygulaması yok");
+  CHECK(termExec("dev").lines[0].startsWith("Geliştirici seviyesi açık (10 dk"));
+  g_ms += 601000;
+  CHECK(authLevel() == CL_USER);  // 10 dk sonra kendiliğinden kapanır
+  authDevOn();
+  CHECK(termExec("dev off").lines[0] == "Geliştirici seviyesi kapandı" && authLevel() == CL_USER);
+  CHECK(termExec("backup").lines[0].startsWith("Yedeklendi") && g_backups == 1);
+  CHECK(termExec("restore").lines[0].indexOf("geliştirici") >= 0);
+
+  group("ekran kilidi");
+  ov = Overlay();
+  homeShow();
+  cfg.lockOn = true;
+  lastInteract = g_ms;
+  shellTick();
+  CHECK(!lockActive);
+  g_ms += 301000;
+  openApp(AID_CALC);
+  lastInteract = g_ms - 301000;
+  shellTick();  // 5 dk dokunulmadı: kilitlenir, ana ekrana döner
+  CHECK(lockActive && shScreen == SH_HOME);
+  tap(160, 120);  // dokunuş yalnızca PIN'i sorar
+  CHECK(kbm.active && shScreen == SH_HOME);
+  typePin("9999");
+  CHECK(lockActive);
+  tap(160, 10);  // durum çubuğu da sistem menüsünü açmaz
+  CHECK(ov.kind == OV_NONE && kbm.active);
+  typePin("", false);  // vazgeçildi: kilit sürer
+  CHECK(lockActive && !kbm.active);
+  shellBoot(1);  // BOOT ile Ayarlar açılmaz
+  CHECK(curApp != &APP_SETTINGS && kbm.active);
+  typePin("2468");
+  CHECK(!lockActive);
+  cfg.lockOn = false;
+
+  group("Ayarlar → Güvenlik");
+  authClearPin();
+  settingsOpenPage(SP_SECURITY);
+  tap(160, SEC_Y + 10);  // PIN yok: yeni PIN iki kez
+  CHECK(kbm.active && kbm.title.startsWith("Yeni PIN"));
+  typePin("1357");
+  CHECK(kbm.active && kbm.title.indexOf("tekrar") >= 0);
+  typePin("1358");
+  CHECK(!authHasPin());  // aynı değil
+  tap(160, SEC_Y + 10);
+  typePin("1357");
+  typePin("1357");
+  CHECK(authHasPin());
+  tap(160, SEC_Y + SEC_ROW + 10);  // ekran kilidi: PIN ister
+  CHECK(kbm.active);
+  typePin("1357");
+  CHECK(cfg.lockOn);
+  tap(160, SEC_Y + SEC_ROW * 3 + 10);  // yedek: şifresiz mi şifreli mi
+  CHECK(ov.kind == OV_DIALOG && ov.opts.size() == 3);
+  ov.cb(2);  // şifreli: önce PIN
+  ov = Overlay();
+  CHECK(kbm.active);
+  typePin("1357");
+  CHECK(g_backups == 11);
+  tap(160, SEC_Y + 10);  // PIN'i kaldır: kilit de kapanır
+  CHECK(ov.kind == OV_MENU);
+  ov.cb(1);
+  ov = Overlay();
+  typePin("1357");
+  CHECK(!authHasPin() && !cfg.lockOn);
+  appExit();
+  homeShow();
+}
+
 static void testBle() {
   group("BLE reklam çözücü");
   BleDev d = bleOf({2, 1, 6, 5, 9, 'V', 'a', 'n', 'e', 4, 0xFF, 0x4C, 0x00, 7, 3, 2, 0x0F, 0x18, 2, 0x0A, 0xF4, 3, 0x19, 0xC1, 0x00});
@@ -942,6 +1089,7 @@ int main() {
   testCmd();
   testNet();
   testBle();
+  testAuth();
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

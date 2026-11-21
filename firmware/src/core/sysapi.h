@@ -10,6 +10,11 @@ static bool planIsToday(const View& v);
 static bool hasCreds();
 static int queueCount();
 static void saveConfig();
+static void wifiKnownSave();
+#define BACKUP_DIR "/daxen/yedek"
+#define BACKUP_FILE BACKUP_DIR "/ayarlar.json"
+static bool backupSave(bool secrets, String& msg);  // ayar yedeği (sys/backup.h)
+static bool backupLoad(String& msg);
 static void toggleItem(const Item& it);
 static void postponeItem(const Item& it);
 static void startItemTimer(const Item& it);

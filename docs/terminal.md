@@ -39,6 +39,10 @@ USB seri porttan: 115200 baud, her komut bir satır (`\n`). Çıktı aynı porta
 | `bluetooth scan [sn]` | Yakındaki BLE cihazları (3–30 sn, varsayılan 10). Bitince liste yazılır |
 | `bluetooth devices` | Son taramanın listesi: sinyal, adres, ad, üretici (en güçlü sinyal önce) |
 | `bluetooth info <no>` | Listedeki bir cihazın reklamdaki her şeyi: adres türü, sinyal, üretici, servisler, yayın gücü, bağlanabilirlik, paket sayısı |
+| `dev [off]` | Geliştirici seviyesi: PIN kartın ekranında sorulur, 10 dk açık kalır; `dev off` kapatır |
+| `backup` | Ayarları SD karta yedekler (şifresiz; şifreli yedek Ayarlar → Güvenlik'te) |
+| `restore` | Geliştirici: yedekten geri yükler (kartta onay) |
+| `logs clear` | Geliştirici: sistem günlüğünü siler (kartta onay) |
 | `lua list` | Lua uygulamaları: sürüm, izinler, onay durumu |
 | `lua info <ad>` | Dosya, sürüm, izinler, onay, arka plan, çalışıyor mu, günlüğün son satırları |
 | `lua log <ad> [satır]` | Uygulamanın günlüğü (varsayılan 20 satır) |
@@ -65,4 +69,4 @@ Bluetooth taraması yalnızca cihazların herkese açık yayınladığı reklam 
 cihaza bağlanılmaz, hiçbir şey yazılmaz. Uzaklık gösterilmez (sinyal gücünden güvenilir uzaklık
 çıkmaz). Ayrıntılar: [bluetooth.md](bluetooth.md#yakındaki-cihazlar-tarama).
 
-Sonraki aşama: geliştirici komutları (PIN ile).
+Geliştirici seviyesi PIN'le açılır (`dev`, 10 dk); ayrıntılar: [guvenlik.md](guvenlik.md).

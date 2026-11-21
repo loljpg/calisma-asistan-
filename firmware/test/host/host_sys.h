@@ -40,6 +40,17 @@ static bool planIsToday(const View& v) { return v.valid && v.date == todayStr();
 static bool hasCreds() { return cfg.dbUrl.length() > 0; }
 static int queueCount() { return 3; }
 static void saveConfig() {}
+static void wifiKnownSave() {}
+static int g_backups = 0;
+static bool backupSave(bool secrets, String& m) {
+  g_backups += secrets ? 10 : 1;
+  m = "Yedeklendi: " BACKUP_FILE;
+  return true;
+}
+static bool backupLoad(String& m) {
+  m = "Geri yüklendi";
+  return true;
+}
 static void toggleItem(const Item& it) {
   for (auto& x : view.items)
     if (x.id == it.id) x.durum = x.durum == "tamam" ? "bekliyor" : "tamam";

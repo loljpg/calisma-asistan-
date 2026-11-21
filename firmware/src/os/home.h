@@ -437,6 +437,16 @@ static void shellTouch(bool t, int x, int y) {
     }
     return;
   }
+  if (lockActive && !kbm.active) {  // kilitli: dokunuş yalnızca PIN'i sorar (bırakınca)
+    static bool ldown = false;
+    if (t) ldown = true;
+    else if (ldown && ms - gs.lastSeen > 40) {
+      ldown = false;
+      lockAsk();
+    }
+    return;
+  }
+
   if (t && !gs.down) {
     gs = Gesture();
     gs.down = true;
@@ -491,6 +501,11 @@ static void settingsOpenPage(uint8_t p);
 static void shellBoot(int stage) {
   if (kbm.active) kbmFinish(false);
   ov = Overlay();
+  if (lockActive) {  // kilitliyken BOOT yalnızca PIN'i sorar
+    homeShow();
+    lockAsk();
+    return;
+  }
   if (stage == 0) homeShow();
   else if (stage == 1) {
     appFromHome = true;
@@ -505,6 +520,7 @@ static void shellBoot(int stage) {
 static void shellTick() {
   uint32_t ms = millis();
   clockBgTick();
+  if (cfg.lockOn && !lockActive && !ringOn && ms - lastInteract > 300000UL) lockNow();  // 5 dk dokunulmadı
   if (ringOn) return;
   if (kbm.active) {
     kbmTick();

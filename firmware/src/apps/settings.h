@@ -4,12 +4,12 @@
 #include "../os/shell.h"
 #include <SD.h>
 
-enum SetPage : uint8_t { SP_MAIN, SP_WIFI, SP_BT, SP_DISPLAY, SP_ACCOUNT, SP_STORAGE, SP_UPDATE, SP_SYSTEM };
+enum SetPage : uint8_t { SP_MAIN, SP_WIFI, SP_BT, SP_DISPLAY, SP_ACCOUNT, SP_STORAGE, SP_UPDATE, SP_SYSTEM, SP_SECURITY };
 static uint8_t setPage = SP_MAIN;
 static bool setDirect = false;  // doğrudan bir sayfadan açıldı (geri: uygulamadan çık)
 static int wifiFirst = 0;
-static const int SET_ROW = 30;
-static const char* const SET_TITLES[] = {"Ayarlar", "Wi-Fi", "Bluetooth", "Ekran", "Bulut hesabı", "Depolama", "Güncelleme", "Sistem"};
+static const int SET_ROW = 26;
+static const char* const SET_TITLES[] = {"Ayarlar", "Wi-Fi", "Bluetooth", "Ekran", "Bulut hesabı", "Depolama", "Güncelleme", "Sistem", "Güvenlik"};
 
 // --- Ana liste ---
 struct SetRow {
@@ -17,7 +17,7 @@ struct SetRow {
   const char* title;
 };
 static const SetRow SET_MAIN[] = {{I_WIFI, "Wi-Fi"},       {I_BT, "Bluetooth"},      {I_DISPLAY, "Ekran"}, {I_CLOUD, "Bulut hesabı"},
-                                  {I_SD, "Depolama"},      {I_UPDATE, "Güncelleme"}, {I_CHIP, "Sistem"}};
+                                  {I_SD, "Depolama"},      {I_UPDATE, "Güncelleme"}, {I_CHIP, "Sistem"},  {I_LOCK, "Güvenlik"}};
 
 static String setMainValue(int i) {
   switch (i) {
@@ -34,12 +34,13 @@ static String setMainValue(int i) {
     }
     case 4: return sdOk ? String("SD kart takılı") : String("SD kart yok");
     case 5: return "fw-" + String(FW_BUILD);
+    case 7: return !authHasPin() ? String("PIN yok") : cfg.lockOn ? String("Kilit açık") : String("PIN var");
     default: return "";
   }
 }
 
 static void setDrawMain() {
-  for (int i = 0; i < 7; i++) listRow(HDR_H + i * SET_ROW, SET_ROW, SET_MAIN[i].icon, SET_MAIN[i].title, "", setMainValue(i), true);
+  for (int i = 0; i < 8; i++) listRow(HDR_H + i * SET_ROW, SET_ROW, SET_MAIN[i].icon, SET_MAIN[i].title, "", setMainValue(i), true);
 }
 
 // --- Wi-Fi ---
@@ -208,7 +209,7 @@ static void setDrawAccount() {
   String rows[4][2] = {{"Veritabanı", db.length() ? db : String("—")},
                        {"API anahtarı", cfg.apiKey.length() ? String("••••") + cfg.apiKey.substring(std::max(0, (int)cfg.apiKey.length() - 4)) : String("—")},
                        {"E-posta", cfg.email.length() ? cfg.email : String("—")},
-                       {"Şifre", cfg.password.length() ? String("••••••••") : String("—")}};
+                       {"Şifre", cfg.rtok.length() ? String("saklanmıyor, oturum açık") : cfg.password.length() ? String("••••••••") : String("—")}};
   for (int i = 0; i < 4; i++) {
     int y = HDR_H + 50 + i * 32;
     hline(12, y, 296);
@@ -223,7 +224,7 @@ static void setEditAccount(int i) {
   const char* titles[] = {"Veritabanı adresi", "Web API anahtarı", "E-posta", "Şifre"};
   String cur = i == 0 ? cfg.dbUrl : (i == 1 ? cfg.apiKey : (i == 2 ? cfg.email : String("")));
   textInput(titles[i], cur, [i](const String& v) {
-    String db = cfg.dbUrl, key = cfg.apiKey, mail = cfg.email, pass = cfg.password;
+    String db = cfg.dbUrl, key = cfg.apiKey, mail = cfg.email, pass;
     String t = v;
     t.trim();
     if (i == 0) db = normalizeDbUrl(t);
@@ -290,7 +291,7 @@ static String bootShort() {
 }
 static void setDrawSystem() {
   fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
-  drawLogo(LOGO_S, LOGO_S_W, LOGO_S_H, 12, HDR_H + 10);
+  DRAW_LOGO(LOGO_S, 12, HDR_H + 10);
   text("fw-" + String(FW_BUILD) + " · " FW_VARIANT, 308, HDR_H + 14, F_XS, C_TEXT2, C_BG, TR_DATUM);
   text(sysChipText(), 308, HDR_H + 30, F_XS, C_TEXT3, C_BG, TR_DATUM);
   String rows[5][2] = {
@@ -309,6 +310,88 @@ static void setDrawSystem() {
   button(12, 206, 296, 30, "Yeniden başlat", B_NORMAL, I_POWER);
 }
 
+// --- Güvenlik: PIN, ekran kilidi, geliştirici seviyesi, ayar yedeği ---
+static const int SEC_Y = HDR_H + 4, SEC_ROW = 34;
+static void setDrawSecurity() {
+  fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
+  bool pin = authHasPin();
+  uint32_t dev = authDevLeftMin();
+  listRow(SEC_Y, SEC_ROW, I_LOCK, "PIN", pin ? "Değiştir ya da kaldır" : "4–8 rakam", pin ? "Belirlendi" : "Yok", true);
+  listRow(SEC_Y + SEC_ROW, SEC_ROW, I_EYE, "Ekran kilidi", "Açılışta ve 5 dk dokunulmayınca", "", false);
+  toggleSw(266, SEC_Y + SEC_ROW + 8, cfg.lockOn && pin, C_BG);
+  listRow(SEC_Y + SEC_ROW * 2, SEC_ROW, I_TERMINAL, "Geliştirici", "Terminal komutları, 10 dk", dev ? "Açık · " + String(dev) + " dk" : String("Kapalı"), true);
+  listRow(SEC_Y + SEC_ROW * 3, SEC_ROW, I_SD, "Ayarları yedekle", BACKUP_FILE, "", true);
+  listRow(SEC_Y + SEC_ROW * 4, SEC_ROW, I_REFRESH, "Yedekten geri yükle", "Ekran, hava, Wi-Fi, bulut", "", true);
+  text("PIN yalnız özet olarak saklanır. USB ile karta", 12, SEC_Y + SEC_ROW * 5 + 8, F_XS, C_TEXT3, C_BG);
+  text("erişen birine karşı koruma değildir.", 12, SEC_Y + SEC_ROW * 5 + 22, F_XS, C_TEXT3, C_BG);
+}
+
+static void setSecNeedPin() { toast("Önce PIN belirle"); }
+
+static void setTapSecurity(int y) {
+  int i = (y - SEC_Y) / SEC_ROW;
+  auto redraw = []() { shellRedraw(true); };
+  bool pin = authHasPin();
+  if (i == 0) {
+    if (!pin) {
+      authNewPin(redraw);
+      return;
+    }
+    menu("PIN", {"Değiştir", "Kaldır"}, [redraw](int c) {
+      if (c == 0) authAsk("Şu anki PIN", [redraw]() { authNewPin(redraw); });
+      else if (c == 1)
+        authAsk("Şu anki PIN", [redraw]() {
+          authClearPin();
+          cfg.lockOn = false;
+          saveConfig();
+          toast("PIN kaldırıldı, ekran kilidi kapandı");
+          redraw();
+        });
+    });
+  } else if (i == 1) {
+    if (!pin) return setSecNeedPin();
+    authAsk(cfg.lockOn ? "Kilidi kapatmak için PIN" : "Kilidi açmak için PIN", [redraw]() {
+      cfg.lockOn = !cfg.lockOn;
+      saveConfig();
+      sysLog("güvenlik", cfg.lockOn ? "ekran kilidi açıldı" : "ekran kilidi kapandı");
+      redraw();
+    });
+  } else if (i == 2) {
+    if (authLevel() == CL_DEV) {
+      authDevOff();
+      redraw();
+    } else if (!pin) {
+      setSecNeedPin();
+    } else {
+      authAsk("Geliştirici seviyesi için PIN", [redraw]() {
+        authDevOn();
+        toast("Geliştirici seviyesi 10 dk açık");
+        redraw();
+      });
+    }
+  } else if (i == 3) {
+    dialog("Ayarlar yedeklensin mi?", "SD karta yazılır. Wi-Fi şifreleri, API ve oturum anahtarı da girsin mi?", {"Vazgeç", "Şifresiz", "Şifreli"}, [](int c) {
+      if (!c) return;
+      auto go = [c]() {
+        String m;
+        backupSave(c == 2, m);
+        toast(m);
+      };
+      if (c == 2) authAsk("Şifreli yedek için PIN", go);
+      else go();
+    });
+  } else if (i == 4) {
+    authAsk("Geri yükleme için PIN", []() {
+      dialog("Yedekten geri yüklensin mi?", "Ekran, hava, Wi-Fi ve bulut ayarları yedektekiyle değişir.", {"Vazgeç", "Geri yükle"}, [](int c) {
+        if (c != 1) return;
+        String m;
+        backupLoad(m);
+        toast(m);
+      }, 1);
+    });
+  }
+}
+
 static void setDrawPage() {
   switch (setPage) {
     case SP_MAIN: setDrawMain(); break;
@@ -319,6 +402,7 @@ static void setDrawPage() {
     case SP_STORAGE: setDrawStorage(); break;
     case SP_UPDATE: setDrawUpdate(); break;
     case SP_SYSTEM: setDrawSystem(); break;
+    case SP_SECURITY: setDrawSecurity(); break;
   }
 }
 
@@ -349,8 +433,8 @@ static void setTap(int x, int y) {
   switch (setPage) {
     case SP_MAIN: {
       int i = (y - HDR_H) / SET_ROW;
-      const uint8_t pages[] = {SP_WIFI, SP_BT, SP_DISPLAY, SP_ACCOUNT, SP_STORAGE, SP_UPDATE, SP_SYSTEM};
-      if (i >= 0 && i < 7) setGo(pages[i]);
+      const uint8_t pages[] = {SP_WIFI, SP_BT, SP_DISPLAY, SP_ACCOUNT, SP_STORAGE, SP_UPDATE, SP_SYSTEM, SP_SECURITY};
+      if (i >= 0 && i < 8) setGo(pages[i]);
       break;
     }
     case SP_WIFI: {
@@ -453,6 +537,9 @@ static void setTap(int x, int y) {
                {"Vazgeç", "Denetle"}, [](int c) {
                  if (c == 1) sysRequestOta();
                });
+      break;
+    case SP_SECURITY:
+      setTapSecurity(y);
       break;
     case SP_SYSTEM:
       if (y >= 202)

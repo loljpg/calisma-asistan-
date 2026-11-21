@@ -1,12 +1,27 @@
 #pragma once
-// Küçük sscanf (bilgisayarda test edilir; sys/libtrim.h bağlayıcıda sscanf'in yerine koyar).
-// Desteklenen: boşluk, düz karakterler, %u %d %i %x (ondalık; %x onaltılık), genişlik (%2x) ve
-// uzunluk ekleri hh (8 bit), h (16 bit), l (long). Ondalıklı sayı, dizgi ve %n yok: yazılımda
-// sscanf'i yalnızca Bluetooth denetleyicisinin sürüm okuması ("v%u.%u.%u") kullanıyor.
+// Küçük sscanf (bilgisayarda C kütüphanesinin sscanf'iyle karşılaştırılarak test edilir;
+// sys/libtrim.h bağlayıcıda sscanf ve siscanf'in yerine koyar). Desteklenen: boşluk, düz
+// karakterler, %u %d %i %x (%x onaltılık), %[küme] (^ değil, a-z aralık), %n, genişlik (%2x,
+// %10[…]) ve uzunluk ekleri hh (8 bit), h (16 bit), l (long). Ondalıklı sayı ve %s yok.
+// Yazılımda kullananlar: Bluetooth denetleyicisinin sürüm okuması ("%u.%u.%u") ve saat dilimi
+// çözümlemesi (tzset: "%10[-+0-9A-Za-z]%n", "%hu%n:%hu%n:%hu%n", "M%hu%n.%hu%n.%hu%n" …).
 #include <stdarg.h>
 #include <stdint.h>
 
+static bool miniInSet(const char* p, const char* e, char c) {
+  for (; p < e; p++) {
+    if (p + 2 < e && p[1] == '-') {
+      if (c >= p[0] && c <= p[2]) return true;
+      p += 2;
+    } else if (*p == c) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static int miniVscan(const char* s, const char* f, va_list ap) {
+  const char* s0 = s;
   int n = 0;
   while (*f) {
     if (*f == ' ' || *f == '\t' || *f == '\n') {
@@ -26,6 +41,26 @@ static int miniVscan(const char* s, const char* f, va_list ap) {
     if (*f == 'h') len = *++f == 'h' ? (f++, 2) : 1;
     else if (*f == 'l') len = 3, f++;
     char c = *f++;
+    if (c == 'n') {  // şimdiye kadar okunan karakter (sayıma girmez)
+      *va_arg(ap, int*) = (int)(s - s0);
+      continue;
+    }
+    if (c == '[') {
+      bool neg = *f == '^';
+      if (neg) f++;
+      const char* set = f;
+      if (*f == ']') f++;
+      while (*f && *f != ']') f++;
+      const char* end = f;
+      if (*f) f++;
+      char* out = va_arg(ap, char*);
+      int k = 0;
+      while (*s && (!w || k < w) && miniInSet(set, end, *s) != neg) out[k++] = *s++;
+      if (!k) break;
+      out[k] = 0;
+      n++;
+      continue;
+    }
     if (c != 'u' && c != 'd' && c != 'i' && c != 'x') break;
     while (*s == ' ' || *s == '\t' || *s == '\n') s++;
     const char* st = s;

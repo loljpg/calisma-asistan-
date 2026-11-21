@@ -203,16 +203,25 @@ static void bigText(const String& s, int x, int y, int w, int h, uint16_t fg, ui
 
 // --- Logo (açılış ekranı, Sistem sayfası) ---
 // 4 bitlik parlaklık; siyah ile kaynağın gümüşü arasında karıştırılır, renk tonu korunur.
-static void drawLogo(const uint8_t* bmp, int w, int h, int x, int y, uint16_t bg = C_BG, float level = 1.f) {
+// Veri LZSS ile sıkıştırılmış (ui/logo.h): çizerken geçici olarak açılır (büyüğü 7,3 KB).
+static void drawLogo(const uint8_t* bmp, size_t plen, size_t len, int w, int h, int x, int y, uint16_t bg = C_BG, float level = 1.f) {
+  uint8_t* px = (uint8_t*)malloc(len);
+  if (!px) return;
+  if (lzUnpack(bmp, plen, px, len) != len) {
+    free(px);
+    return;
+  }
   uint16_t lut[16];
   for (int i = 0; i < 16; i++) lut[i] = i ? grayn((uint8_t)(i * LOGO_PEAK / 15 * level)) : bg;
   int stride = (w + 1) / 2;
   uint16_t row[LOGO_L_W + 1];
   for (int j = 0; j < h; j++) {
     for (int i = 0; i < w; i++) {
-      uint8_t b = pgm_read_byte(bmp + j * stride + i / 2);
+      uint8_t b = px[j * stride + i / 2];
       row[i] = lut[i & 1 ? (b & 15) : (b >> 4)];
     }
     tft.pushImage(x, y + j, w, 1, row);
   }
+  free(px);
 }
+#define DRAW_LOGO(N, x, y, ...) drawLogo(N, sizeof(N), N##_LEN, N##_W, N##_H, x, y, ##__VA_ARGS__)
