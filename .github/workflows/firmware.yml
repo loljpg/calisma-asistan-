@@ -20,8 +20,33 @@ jobs:
       - name: Birim testleri ve bütün ekran senaryoları
         run: firmware/test/host/run.sh test
 
+  sertifika:
+    name: Güncelleme sunucularının sertifikaları
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install cryptography
+      - name: Kök paketi (sys/ota_roots.h) certs/ota-roots.pem ile aynı mı
+        run: python3 firmware/tools/make_ota_roots.py --check
+      - name: GitHub'ın gerçek zincirleri kartın kökleriyle doğrulanıyor mu
+        run: |
+          # Kartın indirdiği dosyanın yönlendirildiği sunucu (son fw sürümünden öğrenilir)
+          last=$(curl -fsS "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/fw-v" | grep -o 'refs/tags/fw-v[0-9]*' | sed 's/.*fw-v//' | sort -n | tail -n 1)
+          hosts="api.github.com github.com"
+          if [ -n "$last" ]; then
+            loc=$(curl -sSI "https://github.com/${GITHUB_REPOSITORY}/releases/download/fw-v$last/firmware-cyd.bin" | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}' | head -n 1)
+            dl=$(echo "$loc" | sed -E 's#^https?://([^/]+)/.*#\1#')
+            [ -n "$dl" ] || { echo "indirme sunucusu bulunamadı"; exit 1; }
+            hosts="$hosts $dl"
+          fi
+          echo "Denenecek: $hosts"
+          python3 firmware/tools/check_ota_chains.py $hosts
+
   build:
-    needs: test
+    needs: [test, sertifika]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

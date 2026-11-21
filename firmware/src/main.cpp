@@ -47,6 +47,7 @@ static const char FW_MARKER[] = "CSFW:" FW_VARIANT ":" STR(FW_BUILD) ";";
 #include "sys/store.h"
 #include "sys/sdlog.h"
 #include "sys/diag.h"
+#include "sys/ota_roots.h"
 #include "sys/net.h"
 #include "sys/sdupdate.h"
 #include "sys/events.h"

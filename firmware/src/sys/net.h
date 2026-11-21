@@ -688,11 +688,20 @@ static bool otaInSetup = false;  // açılıştaki denetimde ilerleme doğrudan 
 
 // Sürüm listesinin tamamı (her sürümle büyüyor, 70 KB'ı geçti) yerine yalnızca fw-v etiketleri
 // sorulur (birkaç KB); dosya sürümün sabit adresinden indirilir. false: denetlenemedi.
+// Sunucu sertifikaları sys/ota_roots.h'deki köklerle doğrulanır (CI her derlemede GitHub'ın gerçek
+// zincirlerini aynı köklerle dener: tools/check_ota_chains.py). Doğrulanamazsa güncelleme kurulmaz;
+// SD karttan güncelleme yolu her zaman açıktır. Kart saati denetlenmez (mbedTLS tarih denetimi kapalı).
+static String tlsError(WiFiClientSecure& c) {
+  char e[80] = "";
+  c.lastError(e, sizeof e);
+  return e;
+}
+
 static bool checkOta(bool manual) {
   int best = 0;
   {
     WiFiClientSecure client;
-    client.setInsecure();
+    client.setCACertBundle(OTA_ROOTS);
     HTTPClient http;
     http.useHTTP10(true);
     http.setTimeout(15000);
@@ -702,7 +711,7 @@ static bool checkOta(bool manual) {
     int code = http.GET();
     if (code != 200) {
       http.end();
-      sysLog("güncelleme", "sürüm bilgisi alınamadı (" + String(code) + ")");
+      sysLog("güncelleme", "sürüm bilgisi alınamadı (" + String(code) + (code < 0 ? ", " + tlsError(client) : String("")) + ")");
       if (manual) setOtaMsg("Güncelleme bilgisi alınamadı (" + String(code) + ")");
       return false;
     }
@@ -729,7 +738,7 @@ static bool checkOta(bool manual) {
   otaProgress = 0;
   dataDirty = true;
   WiFiClientSecure dl;
-  dl.setInsecure();
+  dl.setCACertBundle(OTA_ROOTS);
   httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
   httpUpdate.rebootOnUpdate(false);
   httpUpdate.onProgress([](int cur, int total) {

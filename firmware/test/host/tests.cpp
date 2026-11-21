@@ -2,6 +2,7 @@
 // ./run.sh test bunları AddressSanitizer ve UndefinedBehaviorSanitizer ile derleyip çalıştırır.
 #include "host_sys.h"
 #include "core/calib.h"
+#include "sys/ota_roots.h"
 
 #include <cmath>
 #include <cstdio>
@@ -429,6 +430,49 @@ static void testLog() {
   CHECK(r.used == LOG_RING && r.lines == 503);
 }
 
+// ---------------------------------------------------------------------------
+// Güncelleme kök paketi (sys/ota_roots.h): kartın ikili aramasıyla her kök bulunmalı
+// ---------------------------------------------------------------------------
+static void testOtaRoots() {
+  group("güncelleme kök paketi");
+  const uint8_t* b = OTA_ROOTS;
+  size_t n = (b[0] << 8) | b[1];
+  CHECK(n == OTA_ROOTS_N && n >= 6);
+  std::vector<const uint8_t*> crts;  // esp_crt_bundle_init ile aynı ayrıştırma
+  const uint8_t* cur = b + 2;
+  for (size_t i = 0; i < n; i++) {
+    crts.push_back(cur);
+    size_t nl = cur[0] << 8 | cur[1], kl = cur[2] << 8 | cur[3];
+    cur += 4 + nl + kl;
+  }
+  CHECK((size_t)(cur - b) == sizeof(OTA_ROOTS));  // artık bayt yok
+  bool sorted = true, found = true;
+  for (size_t i = 0; i + 1 < n; i++) {
+    size_t a = crts[i][0] << 8 | crts[i][1], c = crts[i + 1][0] << 8 | crts[i + 1][1];
+    int r = memcmp(crts[i] + 4, crts[i + 1] + 4, std::min(a, c));
+    sorted = sorted && (r < 0 || (r == 0 && a < c));
+  }
+  for (size_t k = 0; k < n; k++) {  // esp_crt_verify_callback'teki ikili arama
+    const uint8_t* issuer = crts[k] + 4;
+    int start = 0, end = (int)n - 1, middle = (end - start) / 2;
+    bool hit = false;
+    while (start <= end) {
+      size_t nl = crts[middle][0] << 8 | crts[middle][1];
+      int cmp = memcmp(issuer, crts[middle] + 4, nl);
+      if (cmp == 0) {
+        hit = (size_t)middle == k;
+        break;
+      }
+      if (cmp < 0) end = middle - 1;
+      else start = middle + 1;
+      middle = (start + end) / 2;
+    }
+    found = found && hit;
+  }
+  CHECK(sorted);
+  CHECK(found);
+}
+
 int main() {
   setupState();
   testCalib();
@@ -440,6 +484,7 @@ int main() {
   testKernel();
   testMigrate();
   testLog();
+  testOtaRoots();
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }
