@@ -51,6 +51,15 @@ int main(int argc, char** argv) {
     toast("Telefonla eşleşti");
     shot("13-ana-balon");
     toastUntil = 0;
+    // sistem menüsü: son kullanılanlar, arka planda Aktarım, bildirim
+    openApp(AID_WEATHER); openApp(AID_FILES); openApp(AID_TERMINAL); openApp(AID_NOTES);
+    webStart();
+    homeShow();
+    shot("15-ana-sistem-alani");
+    drag(160, 8, 160, 140);
+    shot("16-sistem-menusu");
+    webStop();
+    ov = Overlay();
     // Müzikten kalan modül dosyası bir kez sorulur; "Sil" dosyayı siler, sonra bir daha sorulmaz
     homeShow();
     fOfferOldMusicModule();

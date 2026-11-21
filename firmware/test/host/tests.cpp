@@ -873,6 +873,39 @@ static void testBle() {
   x.mfr = 0x7777;
   CHECK(bleSub(x) == "üretici 0x7777 · 00:00:00:00:00:09" && bleRow(3, x) == "3. -66 dBm  00:00:00:00:00:09  (adsız) · 0x7777");
 
+  group("masaüstü: sistem menüsü ve hızlı geçiş");
+  homeShow();
+  openApp(AID_CALC);
+  openApp(AID_CLOCK);
+  openApp(AID_CALC);
+  openApp(AID_NOTIFS);  // bildirimler listeye girmez
+  CHECK(deskRecent[0] == &APP_CALC && deskRecent[1] == &APP_CLOCK);
+  drag(160, 10, 160, 150);  // başlıktan aşağı: menü açılır, uygulama kapanmaz
+  CHECK(ov.kind == OV_PANEL && curApp == &APP_NOTIFS);
+  drag(160, 150, 160, 20);  // yukarı: kapanır
+  CHECK(ov.kind == OV_NONE && curApp == &APP_NOTIFS);
+  drag(160, 120, 160, 220);  // ortadan aşağı kaydırma menüyü açmaz
+  CHECK(ov.kind == OV_NONE);
+  sysMenuOpen();
+  tap(6 + 78 + 30, SM_APP_Y + 30);  // ikinci son kullanılan: Saat
+  CHECK(ov.kind == OV_NONE && curApp == &APP_CLOCK);
+  sysMenuOpen();
+  tap(6 + 78 * 2 + 30, SM_TILE_Y + 20);  // SD kutucuğu: Ayarlar → Depolama
+  CHECK(ov.kind == OV_NONE && curApp == &APP_SETTINGS);
+  sysMenuOpen();
+  cfg.bright = 128;
+  int br = cfg.bright;
+  tap(300, SM_BRI_Y + 10);  // parlaklık sağa: menü açık kalır
+  CHECK(ov.kind == OV_PANEL && cfg.bright > br);
+  tap(260, SM_BTN_Y + 15);  // yeniden başlat: önce onay
+  CHECK(ov.kind == OV_DIALOG);
+  ov = Overlay();
+  homeShow();
+  tap(100, 10);  // ana ekranın durum çubuğu
+  CHECK(ov.kind == OV_PANEL);
+  ov = Overlay();
+  homeShow();
+
   group("terminal bluetooth komutları");
   CmdOut t = termExec("bluetooth scan 2");
   CHECK(t.lines.size() == 1 && t.lines[0] == "Süre 3–30 sn olmalı");

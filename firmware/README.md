@@ -12,12 +12,20 @@ yap* açıksa telefonda çalan şarkının kapağı vurgu rengini belirler.
 
 ## Ana ekran
 
-Üstte tarih, bildirim sayısı, Bluetooth ve Wi-Fi. Ortada saat ve hava durumu, altında YKS'ye kalan
+Üstte tarih ve sistem alanı: bildirim sayısı, Bluetooth, Wi-Fi ve arka planda süren işler
+(Aktarım, arka plandaki Lua uygulaması, ağ ya da Bluetooth taraması, kronometre, telefondaki
+medya). Ortada saat ve hava durumu, altında YKS'ye kalan
 gün ve seri (alev), topuyla oynayan kedi, şimdiki ya da sıradaki oturum kartı ve alt çubuk:
 YKS, Notlar, Ayarlar, Uygulamalar.
 
 Dokunma: dokun, **basılı tut** (bağlam menüsü), kaydır. Ekranın **sol kenarından sağa kaydırmak**
 ve başlıktaki sol ok her uygulamada geri gider.
+
+**Sistem menüsü:** her ekranda üst kenardan aşağı kaydır ya da ana ekranın durum çubuğuna dokun.
+Saat ve boş bellek; Wi-Fi, telefon, SD kart ve bulut kutucukları (dokununca ilgili ayar sayfası);
+parlaklık; son kullanılan dört uygulama (hızlı geçiş) ve arka planda süren işler; son bildirim
+(dokununca Bildirimler); Terminal, Görevler ve onaylı yeniden başlatma. Yukarı kaydırınca, üst
+satıra dokununca ya da BOOT'a basınca kapanır. Menü açıkken alttaki uygulama çalışmaya devam eder.
 
 ## Uygulamalar
 

@@ -61,7 +61,7 @@ static void toast(const String& msg) {
 // ============================================================================
 // İletişim kutusu ve seçenek menüsü (ekranın üstünde)
 // ============================================================================
-enum OverlayKind : uint8_t { OV_NONE, OV_DIALOG, OV_MENU };
+enum OverlayKind : uint8_t { OV_NONE, OV_DIALOG, OV_MENU, OV_PANEL };  // OV_PANEL: tam ekran (sistem menüsü)
 struct Overlay {
   uint8_t kind = OV_NONE;
   String title, msg;
@@ -69,11 +69,15 @@ struct Overlay {
   int primary = -1;
   int x = 0, y = 0, w = 0, h = 0;
   std::function<void(int)> cb;
+  void (*pdraw)() = nullptr;          // OV_PANEL
+  void (*ptap)(int x, int y) = nullptr;
 };
 static Overlay ov;
 
 static void ovDraw() {
-  if (ov.kind == OV_DIALOG) {
+  if (ov.kind == OV_PANEL) {
+    if (ov.pdraw) ov.pdraw();
+  } else if (ov.kind == OV_DIALOG) {
     auto ls = wrapText(ov.msg, F_SM, 252, 5);
     ov.w = 280;
     ov.h = 52 + ls.size() * 19 + 50;
@@ -136,6 +140,10 @@ static void alertBox(const String& title, const String& msg) {
 }
 
 static void ovTap(int x, int y) {
+  if (ov.kind == OV_PANEL) {
+    if (ov.ptap) ov.ptap(x, y);
+    return;
+  }
   int choice = -1;
   if (ov.kind == OV_DIALOG) {
     int n = ov.opts.size(), bw = (ov.w - 28 - (n - 1) * 8) / std::max(1, n);

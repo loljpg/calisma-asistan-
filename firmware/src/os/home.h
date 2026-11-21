@@ -8,6 +8,9 @@ static String luaAppLabel(int i);
 static uint8_t luaAppIcon(int i);
 static void luaAppOpen(int i);
 static void closeStack();
+static void deskNoteOpen(const App* a);  // os/desk.h
+static int deskDrawActs(int x);
+static void sysMenuOpen();
 
 // ============================================================================
 // Ana ekran
@@ -31,6 +34,7 @@ static void homeDrawStatus() {
     x -= 20;
     drawIcon(I_BT, x, 4, 16, pairing ? C_ACC : (bleLinked ? C_TEXT2 : C_TEXT3), C_BG);
   }
+  x = deskDrawActs(x);  // arka planda süren işler (sistem alanı)
   if (!notifs.empty()) {
     String n = String(notifs.size());
     int w = textW(n, F_XS);
@@ -112,8 +116,8 @@ static void homeDraw(bool full) {
 }
 
 static void homeTap(int x, int y) {
-  if (y < 24) {
-    if (x > 200) openApp(AID_NOTIFS);
+  if (y < 24) {  // durum çubuğu: sistem menüsü
+    sysMenuOpen();
     return;
   }
   if (y < 100) {
@@ -258,6 +262,7 @@ static void homeShow() {
 }
 
 static void appOpen(const App* a, bool fromHome) {
+  deskNoteOpen(a);
   if (curApp && curApp != a && curApp->close) curApp->close();
   closeStack();
   appFromHome = fromHome || shScreen == SH_HOME;
@@ -386,11 +391,19 @@ static void gestureUp() {
     }
     return;
   }
-  if (ov.kind) return;
   int dir = -1;
   if (adx > 40 && adx > ady * 3 / 2) dir = dx < 0 ? SW_LEFT : SW_RIGHT;
   else if (ady > 30 && ady > adx * 3 / 2) dir = dy < 0 ? SW_UP : SW_DOWN;
-  if (dir < 0) return;
+  if (ov.kind == OV_PANEL && dir == SW_UP) {  // sistem menüsü yukarı kaydırınca kapanır
+    ov = Overlay();
+    shellRedraw(true);
+    return;
+  }
+  if (ov.kind || dir < 0) return;
+  if (dir == SW_DOWN && gs.sy < HDR_H) {  // üst kenardan aşağı: sistem menüsü
+    sysMenuOpen();
+    return;
+  }
   if (shScreen == SH_APP && dir == SW_RIGHT && gs.sx < 24) {  // soldan kaydırma: geri
     appBack();
     return;
@@ -580,3 +593,5 @@ static void uiDataChanged() {
     if (curApp == appTable()[AID_YKS] || curApp == appTable()[AID_SETTINGS] || curApp == appTable()[AID_WEATHER]) curApp->draw(false);
   }
 }
+
+#include "desk.h"
