@@ -951,6 +951,10 @@ static void netTask(void*) {
       // Plan, kronometre ve olaylar Bluetooth'tan gidip gelir; bulut akışı bellek için kapatılır.
       if (live.c) liveClose();
       setNet("Telefon üzerinden (Bluetooth)", true);
+    } else if (bleHasToken && millis() < NET_BLE_GRACE_MS) {
+      // Eşleşmiş telefon açılıştan hemen sonra bağlanır; o arada buluta şifreli bağlantı açılıp telefon
+      // gelince hemen kapatılmasın (her şifreli bağlantı on binlerce bayt bellek ister).
+      setNet("Telefon bekleniyor", true);
     } else if (hasCreds()) {
       if (ensureAuth()) {
         fbPushTimer();

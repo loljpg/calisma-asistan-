@@ -60,6 +60,7 @@
 #define TIMER_POLL_MS 10000UL      // canlı bağlantı yokken ortak kronometre bu aralıkla okunur
 #define VIEW_POLL_LIVE_MS (5UL * 60UL * 1000UL)  // canlı bağlantı varken plan yine de ara sıra okunur
 #define LONG_PRESS_MS 650
+#define NET_BLE_GRACE_MS 30000UL   // eşleşmiş telefon varsa açılışta bulut işleri bu kadar bekler
 
 // ---------- Bluetooth (docs/bluetooth.md) ----------
 #define BLE_NAME "CalismaSaati"

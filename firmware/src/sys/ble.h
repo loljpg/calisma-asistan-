@@ -63,7 +63,6 @@ static void bleTokenSave(const String& t) {
 
 static void bleBegin() {
   bleRx.reserve(BLE_RX_CAP);
-  if (!artPx) artPx = (uint16_t*)malloc(ART_PX * ART_PX * 2);
   bleHasToken = bleTokenLoad().length() > 0;
   NimBLEDevice::init(BLE_NAME);
   NimBLEDevice::setMTU(247);
@@ -238,7 +237,11 @@ static void bleImage(char type, const uint8_t* p, size_t len) {
     ic->id = id;
     ic->used = millis();
     memcpy(ic->px, p + 8, ICON_PX * ICON_PX * 2);
-  } else if (type == 'A' && w == ART_PX && h == ART_PX && artPx) {
+  } else if (type == 'A' && w == ART_PX && h == ART_PX) {
+    // Kapak tamponu ilk kapak geldiğinde ayrılır (telefonda müzik hiç çalmıyorsa 12,8 KB boş kalır);
+    // ayrıldıktan sonra bırakılmaz, tekrar tekrar alıp vermek belleği parçalar. Yer yoksa kapak gösterilmez.
+    if (!artPx) artPx = (uint16_t*)malloc(ART_PX * ART_PX * 2);
+    if (!artPx) return;
     memcpy(artPx, p + 8, ART_PX * ART_PX * 2);
     artId = id;
     artPending = true;  // çizim kilit dışında yapılır

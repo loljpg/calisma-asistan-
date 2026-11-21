@@ -335,6 +335,9 @@ static void webStop() {
   delete web;
   web = nullptr;
   webPid = -1;
+  free(webBuf);  // yükleme tamponu yalnızca sunucu açıkken tutulur
+  webBuf = nullptr;
+  webBufN = 0;
 }
 
 static bool webRunning() { return web != nullptr; }
