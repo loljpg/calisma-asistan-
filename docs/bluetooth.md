@@ -57,3 +57,27 @@ Masa saati → telefon
 
 Bluetooth bağlıyken masa saati bulut akışını kapatır, olayları ve kronometreyi telefona verir.
 Telefon uygulaması bunları işler ve buluta yazar. Bağlantı koparsa masa saati Wi-Fi varsa buluta döner.
+
+## Yakındaki cihazlar (tarama)
+
+Kart telefon için çevre birimidir; Ağ uygulamasının Bluetooth sekmesi ve Terminal'deki
+`bluetooth scan` için aynı anda gözlemci rolünde de çalışır. Merkezi rol kapalıdır: kart hiçbir
+cihaza bağlanmaz, servis keşfi yapmaz, hiçbir şey yazmaz. Yalnızca cihazların herkese açık reklam
+paketleri okunur.
+
+- **Tarama:** etkin tarama, 100 ms aralıkla; telefon bağlıyken 20 ms, değilse 50 ms dinlenir ki
+  telefonun bağlantı olaylarına yer kalsın. Çoğu cihaz adını tarama yanıtında verdiği için kart,
+  her BLE taramasında olduğu gibi tarama isteği gönderir. Süre 10 sn (Terminal'de 3–30 sn).
+- **Liste:** en fazla 30 cihaz. Doluysa yeni bir cihaz yalnızca listedeki en zayıftan güçlüyse
+  onun yerine geçer; alınamayanlar sayılır. Liste tarama ve ekran süresince bellekte durur
+  (yaklaşık 1,7 KB), Terminal'den yapılan taramanın listesi 5 dk sonra bırakılır.
+- **Gösterilenler:** ad (tam ya da kısaltılmış), adres ve türü (genel, rastgele sabit, değişen
+  gizlilik adresi), anlık ve en güçlü sinyal, üretici (Bluetooth SIG numarası; bilinen adlar
+  listede), 16 bit servisler ve 128 bit servis sayısı, görünüm, yayın gücü, bağlanabilirlik,
+  paket sayısı, ilk ve son görülme. Aynı servis kimliğini (6e3a0001-…) yayınlayan başka bir DAXEN
+  kartı ayrıca belirtilir.
+- **Gösterilmeyenler:** uzaklık (sinyal gücünden güvenilir uzaklık çıkmaz), cihazın gerçek kimliği
+  (telefonların çoğu birkaç dakikada değişen gizlilik adresi kullanır).
+
+Tarama NimBLE'nin kendi işleviyle yapılır; NimBLE-Arduino'nun tarama sınıfı kullanılmaz ve
+derlemeye girmez (`platformio.ini`'deki `--wrap` açıklaması `sys/blescan.h`'de).

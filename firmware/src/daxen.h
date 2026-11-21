@@ -8,6 +8,7 @@
 #include "core/migrate.h"
 #include "core/log.h"
 #include "core/netcalc.h"
+#include "core/blecalc.h"
 #include "ui/theme.h"
 #include "ui/icons.h"
 #include "ui/widgets.h"

@@ -207,16 +207,61 @@ static void cWifiTcp(const std::vector<String>& a, CmdOut& o) {
 static void cWifiTrace(const std::vector<String>& a, CmdOut& o) { tlStartJob(ND_TRACE, a[0], 0, o); }
 static void cWifiTest(const std::vector<String>&, CmdOut& o) { tlStartJob(ND_TEST, "", 0, o); }
 static void cStop(const std::vector<String>&, CmdOut& o) {
-  if (!ndBusy()) {
-    o.add("Süren ağ işi yok");
+  if (!ndBusy() && !bsBusy()) {
+    o.add("Süren ağ ya da Bluetooth işi yok");
     return;
   }
-  ndCancel();
+  if (ndBusy()) ndCancel();
+  if (bsBusy()) bsStop();
   o.add("Durduruluyor…");
 }
 
-static void cBtStatus(const std::vector<String>&, CmdOut& o) {
-  o.kv("Telefon", bleLinked ? "bağlı" : (bleHasToken ? "eşleşmiş, bağlı değil" : "eşleşme yok"));
+static void cBtStatus(const std::vector<String>&, CmdOut& o) { bsInfo(o.lines); }
+
+static bool tlBtSerial = false;  // Bluetooth taraması seri porttan mı başlatıldı
+static void tlBtList(std::vector<String>& o) {
+  int n = bsCount();
+  uint32_t pk;
+  uint16_t dr;
+  bsStats(pk, dr);
+  if (!n) {
+    o.push_back(bsBusy() ? "Henüz cihaz yok" : "Liste boş (önce: bluetooth scan)");
+    return;
+  }
+  blePush(o, "%d cihaz, %u paket (en güçlü sinyal önce):", n, (unsigned)pk);
+  BleDev d[4];
+  for (int i = 0; i < n; i += 4) {
+    int got = bsGet(i, d, 4);
+    for (int k = 0; k < got; k++) o.push_back("  " + bleRow(i + k + 1, d[k]));
+  }
+  if (dr) blePush(o, "  Liste dolu: %u zayıf cihaz alınmadı", (unsigned)dr);
+  o.push_back("Ayrıntı: bluetooth info <no>");
+}
+
+static void cBtScan(const std::vector<String>& a, CmdOut& o) {
+  int s = a.size() ? a[0].toInt() : 10;
+  if (s < 3 || s > 30) {
+    o.add("Süre 3–30 sn olmalı");
+    return;
+  }
+  if (!bsStart(s * 1000UL, true)) {
+    o.add(bsError());
+    return;
+  }
+  tlBtSerial = tlFromSerial;
+  blePush(o.lines, "Taranıyor (%d sn). %s", s, BLE_ONLY_ADS);
+}
+
+static void cBtDevices(const std::vector<String>&, CmdOut& o) { tlBtList(o.lines); }
+
+static void cBtInfo(const std::vector<String>& a, CmdOut& o) {
+  BleDev d;
+  int no = a[0].toInt();
+  if (no < 1 || bsGet(no - 1, &d, 1) != 1) {
+    o.add("Listede böyle bir cihaz yok (liste: bluetooth devices)");
+    return;
+  }
+  bleDetail(d, millis(), o.lines);
 }
 
 static const Cmd TL_CMDS[] = {
@@ -241,8 +286,11 @@ static const Cmd TL_CMDS[] = {
     {"wifi", "tcp", CL_USER, 2, 2, cWifiTcp, "<adres> <port>", "TCP bağlantı testi"},
     {"wifi", "traceroute", CL_USER, 1, 1, cWifiTrace, "<adres>", "yol üzerindeki yönlendiriciler"},
     {"wifi", "test", CL_USER, 0, 0, cWifiTest, "", "ağ geçidi, DNS ve internet testi"},
-    {"stop", nullptr, CL_USER, 0, 0, cStop, "", "süren ağ işini durdurur"},
-    {"bluetooth", "status", CL_USER, 0, 0, cBtStatus, "", "telefon bağlantısı"},
+    {"stop", nullptr, CL_USER, 0, 0, cStop, "", "süren ağ ya da Bluetooth işini durdurur"},
+    {"bluetooth", "status", CL_USER, 0, 0, cBtStatus, "", "telefon, kartın adresi, tarama"},
+    {"bluetooth", "scan", CL_USER, 0, 1, cBtScan, "[sn]", "yakındaki BLE cihazları"},
+    {"bluetooth", "devices", CL_USER, 0, 0, cBtDevices, "", "son taramanın listesi"},
+    {"bluetooth", "info", CL_USER, 1, 1, cBtInfo, "<no>", "cihazın ayrıntıları"},
     {"reboot", nullptr, CL_USER, 0, 0, cReboot, "", "yeniden başlatır (onaylı)"},
 };
 static const Cmd* tlTable(size_t& n) {
@@ -306,6 +354,10 @@ static void tlRun(const String& line) {
 
 static void tlOpen() {
   tlVisible = true;
+  if (!ndToSerial) {  // başka ekrandan kalmış ağ çıktısı gösterilmez
+    std::vector<String> drop;
+    ndDrain(drop);
+  }
   tlOut.clear();
   tlTop = 0;
   tlHistPos = -1;
@@ -347,10 +399,11 @@ static void tlTap(int x, int y) {
 // Ağ aracının çıktısı geldikçe ekrana eklenir
 static void tlTick() {
   static uint32_t at = 0;
-  if (ndToSerial || millis() - at < 150) return;
+  if (millis() - at < 150) return;
   at = millis();
   std::vector<String> l;
-  ndDrain(l);
+  if (!ndToSerial) ndDrain(l);
+  if (!tlBtSerial && bsTakeDone()) tlBtList(l);
   if (l.empty()) return;
   for (auto& s : l) tlAppend(s, false);
   tlTop = 0;
@@ -368,6 +421,7 @@ static void tlSwipe(int dir) {
 static void tlClose() {
   tlVisible = false;
   if (!ndToSerial) ndCancel();  // ekrandan başlatılan ağ işi ekranla biter
+  if (!tlBtSerial) bsRelease(true);
   tlOut.clear();
   tlOut.shrink_to_fit();
 }
@@ -393,11 +447,10 @@ static void termSerialPoll() {
       buf += c;
     }
   }
-  if (ndToSerial) {
-    std::vector<String> l;
-    ndDrain(l);
-    for (auto& s : l) Serial.println(s);
-  }
+  std::vector<String> l;
+  if (ndToSerial) ndDrain(l);
+  if (tlBtSerial && bsTakeDone()) tlBtList(l);
+  for (auto& s : l) Serial.println(s);
 #endif
 }
 

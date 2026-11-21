@@ -396,10 +396,21 @@ int main(int argc, char** argv) {
     nwTap(160, 215);  // bağlantıyı test et
     nwTick();
     shot("e8-ag-test");
-    nwTap(240, HDR_H + 12);  // tarama sekmesi
+    nwTap(160, HDR_H + 12);  // Wi-Fi sekmesi
     nwTap(160, 215);
     nwTick();
     shot("e9-ag-tarama");
+    nwTap(264, HDR_H + 12);  // Bluetooth sekmesi
+    nwTap(160, 215);         // tara
+    nwTick();
+    shot("e10-ag-bluetooth");
+    nwTap(160, NW_Y + NW_AP_H * 2 + 10);  // üçüncü cihaz: ayrıntı
+    shot("e11-ag-bt-ayrinti");
+    appOpen(&APP_TERMINAL);
+    tlRun("bluetooth scan 5");
+    g_ms += 200;
+    tlTick();
+    shot("e12-terminal-bt");
     ov = Overlay();
     // satranç motoru süreçte: insan hamlesi → düşünme → yanıt
     appOpen(&APP_GAMES);

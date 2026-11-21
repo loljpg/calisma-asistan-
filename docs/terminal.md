@@ -34,8 +34,11 @@ USB seri porttan: 115200 baud, her komut bir satır (`\n`). Çıktı aynı porta
 | `wifi tcp <adres> <port>` | TCP bağlantı testi (4 sn zaman aşımı) |
 | `wifi traceroute <adres>` | Artan TTL'li ICMP ile yoldaki yönlendiriciler (en fazla 20 adım; yanıt vermeyen adım `*`) |
 | `wifi test` | Ağ geçidi (ping), DNS ve internet (TCP 443) testi |
-| `stop` | Süren ağ işini durdurur |
-| `bluetooth status` | Telefon bağlantısı |
+| `stop` | Süren ağ işini ya da Bluetooth taramasını durdurur |
+| `bluetooth status` | Telefon bağlantısı (ve MTU), kartın Bluetooth adresi, reklamın açık olup olmadığı, son tarama |
+| `bluetooth scan [sn]` | Yakındaki BLE cihazları (3–30 sn, varsayılan 10). Bitince liste yazılır |
+| `bluetooth devices` | Son taramanın listesi: sinyal, adres, ad, üretici (en güçlü sinyal önce) |
+| `bluetooth info <no>` | Listedeki bir cihazın reklamdaki her şeyi: adres türü, sinyal, üretici, servisler, yayın gücü, bağlanabilirlik, paket sayısı |
 | `reboot` | Kartta onay penceresi açar, onaylanırsa yeniden başlatır |
 
 Sınırlar: satır en fazla 96 karakter, en fazla 6 argüman, çift tırnak içi tek argüman. Çıktı ve
@@ -46,9 +49,15 @@ bağlantılarını, güncellemeleri, web sunucusunu ve en düşük boş belleği
 RAM'de son 2 KB tutulur; SD varsa `/daxen/sys/gunluk.txt` dosyasına da eklenir. Şifre, PIN ya da
 giriş kodu günlüğe yazılmaz.
 
-Ağ araçları ayrı bir süreçte (`ağ-araç`, 8 KB yığın) çalışır, çıktı geldikçe yazılır ve iş bitince
-süreç kapanır. Boş bellek 18 KB tabanını koruyacak kadar değilse araç başlamaz ve nedenini söyler.
+Ağ araçları ayrı bir süreçte (`ağ-araç`, 6 KB yığın) çalışır, çıktı geldikçe yazılır ve iş bitince
+süreç kapanır; `wifi scan` süreç açmaz, ağ görevine yaptırılır. Boş bellek 18 KB tabanını koruyacak
+kadar değilse bulutun canlı akışı geçici olarak duraklatılır, bellek açılınca araç başlar (en fazla
+8 sn beklenir, açılmazsa nedeni yazılır) ve iş bitince akış geri gelir.
 Açılıştan sonraki ilk kullanımda kartın ekranında onay istenir: bu araçlar yalnızca kullanma iznin olan
 ağlarda teşhis içindir; tarama pasiftir, ağa müdahale eden hiçbir şey (parola deneme, trafik bozma) yoktur.
 
-Sonraki aşamalar: `bluetooth scan`, geliştirici komutları (PIN ile).
+Bluetooth taraması yalnızca cihazların herkese açık yayınladığı reklam paketlerini okur; hiçbir
+cihaza bağlanılmaz, hiçbir şey yazılmaz. Uzaklık gösterilmez (sinyal gücünden güvenilir uzaklık
+çıkmaz). Ayrıntılar: [bluetooth.md](bluetooth.md#yakındaki-cihazlar-tarama).
+
+Sonraki aşama: geliştirici komutları (PIN ile).

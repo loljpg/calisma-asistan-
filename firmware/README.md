@@ -42,8 +42,8 @@ ve başlıktaki sol ok her uygulamada geri gider.
 | **Aktarım** | Tarayıcıdan SD karta dosya yükleme ve indirme (aynı Wi-Fi ağında, ekrandaki adresi aç ve ekrandaki 6 haneli kodla gir); sayfada ilerleme çubuğu, yükleme sürerken saat donmaz |
 | **Sistem** | Sürüm, çip, çalışma süresi, son açılış sebebi (önceki çökme kaydı varsa belirtilir), bellek (boş, en az, en büyük blok), Wi-Fi adresi ve sinyali |
 | **Görevler** | Çekirdeğin süreçleri: servisler ve görevler, işlemci payı, yığın, bellek; görevleri sonlandırma. Wi-Fi, TCP/IP ve Bluetooth sistem görevleri de görünür (yığın ve durum; işlemci payı ölçülemez, "—") |
-| **Ağ** | Bağlı Wi-Fi'nin ayrıntıları (sinyal, BSSID, kanal, adres, ağ geçidi, DNS) ve bağlantı testi (ağ geçidi, DNS, internet); çevredeki erişim noktalarının taranması (her BSSID ayrı, kanal, güvenlik) |
-| **Terminal** | Kendi komut yorumlayıcısı (Linux değil): `help`, `sysinfo`, `memory`, `tasks`, `logs`, `storage`, `apps`, `app launch`, `wifi status/ip/saved/scan/ping/dns/tcp/traceroute/test`, `stop`, `bluetooth status`, `version`, `uptime`, `history`, `clear`, `reboot`. USB seri porttan da (115200) çalışır. Ayrıntılar: [docs/terminal.md](../docs/terminal.md) |
+| **Ağ** | Bağlı Wi-Fi'nin ayrıntıları (sinyal, BSSID, kanal, adres, ağ geçidi, DNS) ve bağlantı testi (ağ geçidi, DNS, internet); çevredeki erişim noktalarının taranması (her BSSID ayrı, kanal, güvenlik); yakındaki Bluetooth cihazları (yalnız reklam paketleri: ad, adres türü, sinyal, üretici, servisler; dokununca ayrıntı) |
+| **Terminal** | Kendi komut yorumlayıcısı (Linux değil): `help`, `sysinfo`, `memory`, `tasks`, `logs`, `storage`, `apps`, `app launch`, `wifi status/ip/saved/scan/ping/dns/tcp/traceroute/test`, `stop`, `bluetooth status/scan/devices/info`, `version`, `uptime`, `history`, `clear`, `reboot`. USB seri porttan da (115200) çalışır. Ayrıntılar: [docs/terminal.md](../docs/terminal.md) |
 
 **Kendi uygulamaların:** SD karttaki `/daxen/uygulamalar/*.lua` dosyaları Uygulamalar ekranında
 görünür. Her biri ayrı bir süreç olarak çalışır; `-- arkaplan: evet` diyen uygulama çıkınca da sürer.

@@ -52,6 +52,7 @@ static const char FW_MARKER[] = "CSFW:" FW_VARIANT ":" STR(FW_BUILD) ";";
 #include "sys/sdupdate.h"
 #include "sys/events.h"
 #include "sys/ble.h"
+#include "sys/blescan.h"
 #include "os/calibrate.h"  // dokunmatik ayarı (9 nokta, doğrulama)
 #include "sys/web.h"
 #include "sys/netdiag.h"
@@ -284,6 +285,7 @@ static void svcClock() {  // 200 ms: dakika işleri, Pomodoro, bakım, tanı
   diagTick();
   termSerialPoll();  // USB seri porttan terminal komutları (apps/terminal.h)
   ndPoll();          // ağ aracı: bekleyen işi başlat, biteni kapat (sys/netdiag.h)
+  bsPoll();          // Bluetooth taraması: biteni işaretle, kullanılmayan listeyi bırak (sys/blescan.h)
   if (!markedValid && millis() > 45000) {
     markedValid = true;
     esp_ota_mark_app_valid_cancel_rollback();

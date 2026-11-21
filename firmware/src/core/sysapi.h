@@ -75,7 +75,22 @@ static String ndError();
 static void ndPoll();  // bekleyen işi başlatır, biteni kapatır (saat servisi ve ekranlar çağırır)
 static bool netLiveOpen();  // bulutun canlı akışı açık mı
 static void ndConnInfo(std::vector<String>& out);  // bağlı ağın ayrıntıları (anında)
-static void ndSaved(std::vector<String>& out);     // kayıtlı ağlar  // tarayıcının giriş kodu (sunucu kapalıysa boş)
+static void ndSaved(std::vector<String>& out);     // kayıtlı ağlar
+
+// --- Bluetooth keşfi (sys/blescan.h): yalnızca yayınlar okunur, hiçbir cihaza bağlanılmaz ---
+struct BleDev;
+static bool bsStart(uint32_t ms, bool report);  // report: bitince bsTakeDone() bir kez true döner
+static void bsStop();
+static bool bsBusy();
+static String bsError();
+static int bsCount();
+static int bsGet(int first, BleDev* out, int max);  // güç sırasıyla kopyalar, dönüş: kopyalanan
+static bool bsFind(const uint8_t* addr, uint8_t type, BleDev& out);
+static void bsStats(uint32_t& packets, uint16_t& dropped);
+static bool bsTakeDone();
+static void bsRelease(bool force);  // ekran kapandı: tarama durur, liste bırakılır (force: Terminal raporu beklese de)
+static void bsInfo(std::vector<String>& out);  // kartın Bluetooth durumu
+static void bsPoll();
 
 // --- Arayüz kancaları ---
 static void uiToast(const String& msg);

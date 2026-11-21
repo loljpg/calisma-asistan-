@@ -610,8 +610,145 @@ static void testNet() {
   CHECK(termExec("wifi tcp github.com 70000").lines[0].startsWith("Port"));
   CHECK(termExec("wifi status").lines.size() == 7);
   CHECK(termExec("wifi ip").lines.size() == 3);
-  CHECK(termExec("stop").lines[0] == "Süren ağ işi yok");
+  CHECK(termExec("stop").lines[0] == "Süren ağ ya da Bluetooth işi yok");
   ndDrain(drop);
+}
+
+// ---------------------------------------------------------------------------
+// Bluetooth keşfi (core/blecalc.h) ve terminalin bluetooth komutları
+// ---------------------------------------------------------------------------
+static BleDev bleOf(const std::vector<uint8_t>& ad, int8_t rssi = -60) {
+  BleDev d;
+  bleDevInit(d);
+  d.rssi = rssi;
+  bleParseAd(ad.data(), ad.size(), d);
+  return d;
+}
+
+static void testBle() {
+  group("BLE reklam çözücü");
+  BleDev d = bleOf({2, 1, 6, 5, 9, 'V', 'a', 'n', 'e', 4, 0xFF, 0x4C, 0x00, 7, 3, 2, 0x0F, 0x18, 2, 0x0A, 0xF4, 3, 0x19, 0xC1, 0x00});
+  CHECK(String(d.name) == "Vane" && d.mfr == 0x004C && d.tx == -12 && d.appear == 0x00C1);
+  CHECK(d.nSvc == 1 && d.svc[0] == 0x180F && String(bleCompany(d.mfr)) == "Apple");
+  CHECK(String(bleAppear(0x00C1)) == "Kol saati" && String(bleAppear(0x0941)) == "Kulaklık" && String(bleAppear(0x0A41)) == "İşitme cihazı");
+  CHECK(bleAppear(0x0AC0) == nullptr && String(bleAppear(0x0040)) == "Telefon");
+  CHECK(bleAppear(0x0C40) == nullptr && bleAppear(0x0001) == nullptr);
+  CHECK(bleCompany(0xFFFE) == nullptr && String(bleSvcName(0xFEAA)) == "Eddystone" && bleSvcName(0x1234) == nullptr);
+  // bozuk alanlar: sıfır uzunluk durdurur, taşan alan okunmaz
+  BleDev z = bleOf({2, 1, 6, 0, 9, 'X'});
+  CHECK(!z.name[0]);
+  BleDev o = bleOf({2, 1, 6, 20, 9, 'A', 'B'});
+  CHECK(!o.name[0] && o.mfr == 0xFFFF && o.tx == BD_NO_TX);
+  BleDev s1 = bleOf({4, 0xFF, 0x4C});  // üretici verisi tek bayt: alınmaz
+  CHECK(s1.mfr == 0xFFFF);
+  // kısaltılmış ad yalnız tam ad yoksa; tam ad önceliklidir
+  CHECK(String(bleOf({4, 8, 'A', 'B', 'C', 6, 9, 'A', 'B', 'C', 'D', 'E'}).name) == "ABCDE");
+  CHECK(String(bleOf({6, 9, 'A', 'B', 'C', 'D', 'E', 4, 8, 'A', 'B', 'C'}).name) == "ABCDE");
+  // ad: 20 bayt sınırı, UTF-8 karakter ortasından kesilmez, denetim karakterleri atılır
+  std::vector<uint8_t> nm = {22, 9};
+  const char* tr = "Çalışma ışığı 12345";  // 19 harf, 24 bayt
+  for (const char* c = tr; *c; c++) nm.push_back((uint8_t)*c);
+  nm[0] = nm.size() - 1;
+  BleDev u = bleOf(nm);
+  CHECK(strlen(u.name) <= 20 && String(u.name) == "Çalışma ışığ");
+  CHECK(String(bleOf({5, 9, 'a', 0, 'b', '\n'}).name) == "ab");
+  CHECK(String(bleOf({4, 9, 'a', 0xC3, 'b'}).name) == "a");  // bozuk UTF-8: orada kesilir
+  // DAXEN servis kimliği (128 bit, küçük uçlu)
+  std::vector<uint8_t> dx = {17, 7};
+  const uint8_t svcLe[16] = {0xde, 0xc0, 0xa7, 0xa5, 0x41, 0x0c, 0x8e, 0x9b, 0x2d, 0x4c, 0x17, 0x5a, 0x01, 0x00, 0x3a, 0x6e};
+  dx.insert(dx.end(), svcLe, svcLe + 16);
+  BleDev dv = bleOf(dx);
+  CHECK((dv.flags & BD_DAXEN) && dv.n128 == 1 && String(bleTitle(dv)) == "DAXEN VANE");
+  dx[2] ^= 1;
+  CHECK(!(bleOf(dx).flags & BD_DAXEN) && bleOf(dx).n128 == 1);
+  // servis verisi (0x16) 16 bit kimlik olarak, en fazla 3, tekrar yok
+  BleDev sv = bleOf({7, 3, 0x0F, 0x18, 0x0F, 0x18, 0x0D, 0x18, 3, 0x16, 0xAA, 0xFE, 3, 3, 0x0A, 0x18});
+  CHECK(sv.nSvc == 3 && sv.svc[0] == 0x180F && sv.svc[1] == 0x180D && sv.svc[2] == 0xFEAA);
+
+  group("BLE adres türü ve liste");
+  BleDev a;
+  bleDevInit(a);
+  uint8_t ad1[6] = {0xC8, 1, 2, 3, 4, 5};
+  memcpy(a.addr, ad1, 6);
+  CHECK(String(bleAddrKind(a)) == "genel adres");
+  a.addrType = 1;
+  CHECK(String(bleAddrKind(a)) == "rastgele, sabit");
+  a.addr[0] = 0x5E;
+  CHECK(String(bleAddrKind(a)) == "gizlilik adresi (değişir)");
+  a.addr[0] = 0x12;
+  CHECK(String(bleAddrKind(a)) == "rastgele, çözülemez");
+
+  BleDev L[3];
+  int n = 0;
+  uint16_t drop = 0;
+  auto mk = [](uint8_t last, int8_t rssi) {
+    BleDev x;
+    bleDevInit(x);
+    x.addr[5] = last;
+    x.rssi = rssi;
+    return x;
+  };
+  CHECK(bleMerge(L, n, 3, mk(1, -70), 1000, drop) == 0 && n == 1 && L[0].seen == 1 && L[0].rssiMax == -70);
+  BleDev upd = mk(1, -60);
+  strcpy(upd.name, "Saat");
+  upd.mfr = 0x0075;
+  upd.flags = BD_CONN;
+  CHECK(bleMerge(L, n, 3, upd, 2000, drop) == 0 && n == 1 && L[0].seen == 2 && L[0].rssi == -60 && L[0].rssiMax == -60);
+  CHECK(String(L[0].name) == "Saat" && L[0].mfr == 0x0075 && L[0].first == 1000 && L[0].last == 2000 && (L[0].flags & BD_CONN));
+  BleDev weaker = mk(1, -80);  // adsız tarama yanıtı: ad ve üretici silinmez, en güçlü değer kalır
+  CHECK(bleMerge(L, n, 3, weaker, 3000, drop) == 0 && String(L[0].name) == "Saat" && L[0].mfr == 0x0075 && L[0].rssi == -80 && L[0].rssiMax == -60);
+  BleDev other = mk(1, -70);
+  other.addrType = 1;  // aynı baytlar, başka adres türü: ayrı cihaz
+  CHECK(bleMerge(L, n, 3, other, 3000, drop) == 1 && n == 2);
+  CHECK(bleMerge(L, n, 3, mk(3, -90), 3000, drop) == 2 && n == 3);
+  CHECK(bleMerge(L, n, 3, mk(4, -95), 3000, drop) == -1 && drop == 1 && n == 3);  // dolu, daha zayıf
+  CHECK(bleMerge(L, n, 3, mk(5, -50), 3000, drop) == 2 && drop == 2 && L[2].addr[5] == 5);  // en zayıfın yerine
+  uint8_t idx[3];
+  bleOrder(L, n, idx);
+  CHECK(L[idx[0]].addr[5] == 5 && L[idx[1]].addr[5] == 1 && L[idx[1]].addrType == 0 && L[idx[2]].addrType == 1);
+
+  group("BLE ayrıntı satırları");
+  BleDev x = mk(9, -66);
+  x.rssiMax = -61;
+  x.mfr = 0x038F;
+  x.svc[0] = 0x180F, x.svc[1] = 0xFEE0, x.nSvc = 2, x.n128 = 1;
+  x.flags = BD_NOCONN;
+  x.seen = 12, x.first = 1000, x.last = 9500;
+  std::vector<String> det;
+  bleDetail(x, 10000, det);
+  CHECK(det.size() == 7 && det[0] == "Ad: reklamda yok" && det[1] == "Adres: 00:00:00:00:00:09 · genel adres");
+  CHECK(det[2] == "Sinyal: -66 dBm (orta) · en güçlü -61 dBm" && det[3] == "Üretici: Xiaomi (0x038F)");
+  CHECK(det[4] == "Servisler: Pil 0x180F, 0xFEE0, 1 adet 128 bit" && det[5] == "Bağlanabilir: hayır");
+  CHECK(det[6] == "Paket: 12 · ilk 9 sn önce · son şimdi");
+  x.appear = 0x0C41;  // adı listede olmayan kategori
+  det.clear();
+  bleDetail(x, 10000, det);
+  CHECK(det[4] == "Görünüm: listede yok (0x0C41)" && bleSub(x) == "Xiaomi · 00:00:00:00:00:09");
+  x.appear = 0;
+  x.mfr = 0xFFFF;
+  CHECK(bleSub(x) == "Pil · 00:00:00:00:00:09");  // üretici yoksa bilinen ilk servis
+  x.mfr = 0x7777;
+  CHECK(bleSub(x) == "üretici 0x7777 · 00:00:00:00:00:09" && bleRow(3, x) == "3. -66 dBm  00:00:00:00:00:09  (adsız) · 0x7777");
+
+  group("terminal bluetooth komutları");
+  CmdOut t = termExec("bluetooth scan 2");
+  CHECK(t.lines.size() == 1 && t.lines[0] == "Süre 3–30 sn olmalı");
+  t = termExec("bluetooth scan");
+  CHECK(t.lines.size() == 1 && t.lines[0].startsWith("Taranıyor (10 sn)"));
+  std::vector<String> rep;
+  CHECK(bsTakeDone() && !bsTakeDone());
+  tlBtList(rep);
+  CHECK(rep.size() == 6 && rep[0] == "4 cihaz, 6 paket (en güçlü sinyal önce):" && rep.back() == "Ayrıntı: bluetooth info <no>");
+  CHECK(rep[1] == "  1. -58 dBm  C8:0F:10:4A:22:91  Mi Band 7 · Huami");
+  CHECK(rep[2].indexOf("5E:33:A1:07:9C:4B  (adsız) · Apple") >= 0 && rep[3].indexOf("JBL Tune 520") >= 0);
+  t = termExec("bluetooth info 3");
+  CHECK(t.lines.size() >= 8 && t.lines[0] == "Ad: JBL Tune 520" && t.lines[4] == "Görünüm: Kulaklık (0x0941)");
+  CHECK(t.lines[5] == "Servisler: Pil 0x180F" && t.lines[6] == "Yayın gücü: -8 dBm" && t.lines[7] == "Bağlanabilir: evet");
+  CHECK(termExec("bluetooth info 9").lines[0].startsWith("Listede böyle bir cihaz yok"));
+  CHECK(termExec("bluetooth info x").lines[0].startsWith("Listede böyle bir cihaz yok"));
+  CHECK(termExec("bluetooth devices").lines.size() == 6 && termExec("bluetooth status").lines.size() == 4);
+  bsRelease(true);
+  CHECK(termExec("bluetooth devices").lines[0] == "Liste boş (önce: bluetooth scan)");
 }
 
 int main() {
@@ -628,6 +765,7 @@ int main() {
   testOtaRoots();
   testCmd();
   testNet();
+  testBle();
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

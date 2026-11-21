@@ -194,6 +194,69 @@ static void ndConnInfo(std::vector<String>& o) {
   o.push_back("Kartın MAC'i: 24:6F:28:AA:BB:CC");
 }
 static void ndSaved(std::vector<String>& o) { o.push_back("  EvAgi  (şifreli)"); }
+// Bluetooth keşfi: gerçek radyo yok; tarama anında biter ve aşağıdaki reklam paketleri gerçek
+// biçimleriyle çözücüden (core/blecalc.h) geçirilir
+static BleDev g_bs[BLE_LIST_CAP];
+static int g_bsN = 0;
+static uint16_t g_bsDrop = 0;
+static uint32_t g_bsPk = 0;
+static bool g_bsBusy = false, g_bsDone = false, g_bsOk = true;
+static void bsFeed(const char* mac, uint8_t type, int8_t rssi, uint8_t evt, const std::vector<uint8_t>& ad) {
+  BleDev d;
+  bleDevInit(d);
+  d.addrType = type;
+  for (int i = 0; i < 6; i++) d.addr[i] = strtol(mac + i * 3, nullptr, 16);
+  d.rssi = rssi;
+  d.flags |= evt <= 1 ? BD_CONN : evt <= 3 ? BD_NOCONN : 0;
+  bleParseAd(ad.data(), ad.size(), d);
+  bleMerge(g_bs, g_bsN, BLE_LIST_CAP, d, millis(), g_bsDrop);
+  g_bsPk++;
+}
+static void bsSample() {
+  g_bsN = 0, g_bsDrop = 0, g_bsPk = 0;
+  // Mi Band: ad, Huami üretici verisi, 0xFEE0 servis
+  bsFeed("C8:0F:10:4A:22:91", 0, -58, 0, {2, 1, 6, 10, 9, 'M', 'i', ' ', 'B', 'a', 'n', 'd', ' ', '7', 5, 0xFF, 0x57, 0x01, 1, 2, 3, 3, 0xE0, 0xFE});
+  // iPhone: yalnız Apple üretici verisi, gizlilik adresi
+  bsFeed("5E:33:A1:07:9C:4B", 1, -67, 0, {2, 1, 0x1A, 7, 0xFF, 0x4C, 0x00, 0x10, 0x05, 0x01, 0x18});
+  bsFeed("5E:33:A1:07:9C:4B", 1, -63, 0, {2, 1, 0x1A, 7, 0xFF, 0x4C, 0x00, 0x10, 0x05, 0x01, 0x18});
+  // Kulaklık: ad tarama yanıtında, görünüm "Kulaklık"
+  bsFeed("F4:4E:FD:12:34:56", 0, -71, 0, {2, 1, 6, 3, 0x19, 0x41, 0x09, 3, 3, 0x0F, 0x18});
+  bsFeed("F4:4E:FD:12:34:56", 0, -70, 4, {13, 9, 'J', 'B', 'L', ' ', 'T', 'u', 'n', 'e', ' ', '5', '2', '0', 2, 0x0A, 0xF8});
+  // Eddystone işaretçi (bağlanamaz, servis verisi)
+  bsFeed("D1:22:33:44:55:66", 1, -84, 3, {2, 1, 6, 3, 3, 0xAA, 0xFE, 6, 0x16, 0xAA, 0xFE, 0x10, 0xF4, 0x00});
+}
+static bool bsStart(uint32_t, bool report) {
+  if (!g_bsOk) return false;
+  bsSample();
+  g_bsDone = report;
+  return true;
+}
+static void bsStop() { g_bsBusy = false; }
+static bool bsBusy() { return g_bsBusy; }
+static String bsError() { return "Bluetooth hazır değil"; }
+static int bsCount() { return g_bsN; }
+static int bsGet(int first, BleDev* out, int max) {
+  uint8_t idx[BLE_LIST_CAP];
+  bleOrder(g_bs, g_bsN, idx);
+  int got = 0;
+  for (int i = first; i >= 0 && i < g_bsN && got < max; i++) out[got++] = g_bs[idx[i]];
+  return got;
+}
+static bool bsFind(const uint8_t* a, uint8_t t, BleDev& out) {
+  for (int i = 0; i < g_bsN; i++)
+    if (g_bs[i].addrType == t && !memcmp(g_bs[i].addr, a, 6)) return out = g_bs[i], true;
+  return false;
+}
+static void bsStats(uint32_t& p, uint16_t& d) { p = g_bsPk, d = g_bsDrop; }
+static bool bsTakeDone() { return g_bsDone ? (g_bsDone = false, true) : false; }
+static void bsRelease(bool) { g_bsN = 0, g_bsBusy = false; }
+static void bsInfo(std::vector<String>& o) {
+  o.push_back("Telefon: bağlı · MTU 247");
+  o.push_back("Kartın adresi: 24:6F:28:AA:BB:CE · ad " BLE_NAME);
+  o.push_back("Reklam: kapalı");
+  o.push_back("Tarama: yok (bluetooth scan)");
+}
+static void bsPoll() {}
 static bool weatherSearch(const String& q, std::vector<GeoHit>& out) {
   out.push_back({"İstanbul", "İstanbul, Türkiye", 41.01f, 28.97f});
   out.push_back({"Istanbul", "Ohio, ABD", 40.f, -83.f});

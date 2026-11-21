@@ -157,6 +157,7 @@ static void setDrawBt() {
   text(fit(sub, F_XS, 262), 46, HDR_H + 49, F_XS, C_TEXT2, C_BG);
   button(12, HDR_H + 72, 144, 32, pairing ? "Eşleşme açık" : "Eşleşme kipi", pairing ? B_ON : (bleLinked ? B_DISABLED : B_PRIMARY), I_BT);
   button(164, HDR_H + 72, 144, 32, "Eşleşmeyi sil", bleHasToken ? B_NORMAL : B_DISABLED, I_TRASH);
+  text("Yakındaki cihazlar: Ağ uygulaması → Bluetooth", 12, HDR_H + 118, F_XS, C_TEXT3, C_BG);
 }
 
 // --- Ekran ---
