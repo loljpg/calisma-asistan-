@@ -34,6 +34,7 @@ enum Icon : uint8_t {
   I_LOCK, I_SEARCH, I_PHONE, I_FLAME, I_CHART, I_NOTE, I_GLOBE, I_FLAG, I_MINE, I_SNAKE,
   I_TILES, I_GRID, I_ROOK, I_BLOCKS, I_EYE, I_TEXT, I_PASTE, I_POWER, I_UPDATE,
   I_DISPLAY, I_LIST, I_STOPWATCH, I_ALARM, I_DICE, I_SPEAKER_OFF, I_PULSE, I_TERMINAL,
+  I_LINE, I_RECT, I_OVAL, I_RECTF, I_OVALF, I_DROPPER, I_REDO, I_MIRROR, I_MORE,
   I_COUNT
 };
 
@@ -135,6 +136,18 @@ static const int8_t ICD_DICE[] = {R_ 8, 8, 32, 32, D_ 16, 16, 3, D_ 32, 32, 3, D
 static const int8_t ICD_TERMINAL[] = {R_ 5, 8, 38, 32, L_ 5, 15, 43, 15, P_ 3, 12, 21, 17, 26, 12, 31, L_ 21, 31, 31, 31, E_};
 static const int8_t ICD_PULSE[] = {R_ 5, 7, 38, 34, P_ 7, 9, 26, 16, 26, 20, 15, 26, 35, 31, 21, 34, 26, 39, 26, E_};
 
+// Çizim araçları
+static const int8_t ICD_LINE[] = {L_ 11, 37, 37, 11, D_ 11, 37, 3, D_ 37, 11, 3, E_};
+static const int8_t ICD_RECT[] = {R_ 7, 12, 34, 24, E_};
+static const int8_t ICD_OVAL[] = {C_ 24, 24, 16, E_};
+static const int8_t ICD_RECTF[] = {F_ 7, 12, 35, 25, E_};
+static const int8_t ICD_OVALF[] = {D_ 24, 24, 16, E_};
+static const int8_t ICD_DROPPER[] = {Q_ 4, 13, 31, 27, 17, 31, 21, 17, 35, L_ 13, 31, 7, 41, L_ 24, 14, 34, 24, D_ 35, 13, 6, E_};
+static const int8_t ICD_REDO[] = {P_ 3, 32, 11, 38, 17, 32, 23, L_ 38, 17, 19, 17, A_ 19, 27, 10, 0, 36, L_ 19, 37, 32, 37, E_};
+static const int8_t ICD_MIRROR[] = {L_ 24, 5, 24, 11, L_ 24, 18, 24, 30, L_ 24, 37, 24, 43, Q_ 3, 18, 14, 18, 36, 6, 36,
+                                    Q_ 3, 30, 14, 30, 36, 42, 36, E_};
+static const int8_t ICD_MORE[] = {D_ 11, 24, 3, D_ 24, 24, 3, D_ 37, 24, 3, E_};
+
 static const int8_t* const ICON_DEFS[I_COUNT] = {
     nullptr, ICD_APPS, ICD_SETTINGS, ICD_WIFI, ICD_WIFI_OFF, ICD_BT, ICD_SD, ICD_CHIP, ICD_CODE, ICD_NOTES, ICD_FOLDER,
     ICD_FILE, ICD_TARGET, ICD_HEADPHONES, ICD_REMOTE, ICD_BELL, ICD_CALC, ICD_CLOCK, ICD_CLOUD, ICD_SUN, ICD_PARTLY,
@@ -144,6 +157,7 @@ static const int8_t* const ICON_DEFS[I_COUNT] = {
     ICD_LOCK, ICD_SEARCH, ICD_PHONE, ICD_FLAME, ICD_CHART, ICD_NOTE, ICD_GLOBE, ICD_FLAG, ICD_MINE, ICD_SNAKE,
     ICD_TILES, ICD_GRID, ICD_ROOK, ICD_BLOCKS, ICD_EYE, ICD_TEXT, ICD_PASTE, ICD_POWER, ICD_UPDATE,
     ICD_DISPLAY, ICD_LIST, ICD_STOPWATCH, ICD_ALARM, ICD_DICE, ICD_SPEAKER_OFF, ICD_PULSE, ICD_TERMINAL,
+    ICD_LINE, ICD_RECT, ICD_OVAL, ICD_RECTF, ICD_OVALF, ICD_DROPPER, ICD_REDO, ICD_MIRROR, ICD_MORE,
 };
 
 #undef L_

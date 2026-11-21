@@ -44,8 +44,14 @@ class TFT_eSPI {
 
   virtual void drawPixel(int32_t x, int32_t y, uint32_t c) {
     if (x < 0 || y < 0 || x >= _w || y >= _h) return;
+    if (_vp && (x < _vx0 || y < _vy0 || x >= _vx1 || y >= _vy1)) return;
     _buf[y * _w + x] = (uint16_t)c;
   }
+  // Kırpma penceresi (TFT_eSPI gibi; vpDatum=false: koordinatlar ekranınki)
+  void setViewport(int32_t x, int32_t y, int32_t w, int32_t h, bool = true) {
+    _vp = true, _vx0 = x, _vy0 = y, _vx1 = x + w, _vy1 = y + h;
+  }
+  void resetViewport() { _vp = false; }
   virtual uint16_t readPixel(int32_t x, int32_t y) {
     if (x < 0 || y < 0 || x >= _w || y >= _h) return 0;
     return _buf[y * _w + x];
@@ -356,6 +362,8 @@ class TFT_eSPI {
   bool _fontLoaded = false;
   uint16_t _fg = 0xFFFF, _bg = 0;
   uint8_t _datum = 0, _tsize = 1;
+  bool _vp = false;
+  int32_t _vx0 = 0, _vy0 = 0, _vx1 = 0, _vy1 = 0;
 };
 
 class TFT_eSprite : public TFT_eSPI {

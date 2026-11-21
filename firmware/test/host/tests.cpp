@@ -1024,6 +1024,149 @@ static void testMem() {
   luaCur = -1;
 }
 
+// ---------------------------------------------------------------------------
+// Çizim (core/drawcalc.h, apps/draw.h)
+// ---------------------------------------------------------------------------
+static void testDraw() {
+  group("çizim hesapları");
+  {
+    int16_t line[22];
+    for (int i = 0; i <= 10; i++) line[2 * i] = i * 10, line[2 * i + 1] = (i % 2) ? 0 : 0;
+    line[7] = 0;
+    CHECK(drSimplify(line, 11, 0.6f) == 2 && line[2] == 100);
+    int16_t corner[] = {0, 0, 10, 0, 20, 0, 20, 10, 20, 20};
+    CHECK(drSimplify(corner, 5, 0.6f) == 3 && corner[2] == 20 && corner[3] == 0);
+    int bx = 100, by = 5;
+    drSnap45(0, 0, bx, by);
+    CHECK(bx == 100 && by == 0);
+    bx = 70, by = 66;
+    drSnap45(0, 0, bx, by);
+    CHECK(bx == by && bx > 60);
+    bx = 70, by = 40;  // 30°: dokunulmaz
+    drSnap45(0, 0, bx, by);
+    CHECK(bx == 70 && by == 40);
+    CHECK(drGridSnap(29, 20, 0) == 20 && drGridSnap(31, 20, 30) == 30 && drGridSnap(-11, 20, 0) == -20 && drGridSnap(41, 20, 30) == 50);
+    int16_t tp[2 * 20];
+    const char* t = "Çizim · ğüş";
+    drTextPack(tp, 5, 40, 1, t, strlen(t));
+    char out[DR_TEXT_MAX + 1];
+    CHECK(drTextUnpack(tp, drTextPts(strlen(t)), out) == (int)strlen(t) && !strcmp(out, t) && tp[0] == 5 && tp[3] == 1);
+    CHECK(drTextUnpack(tp, 2, out) == 0);  // nokta sayısı yazıya yetmiyor: bozuk sayılır
+    CHECK(drSegDist(5, 5, 0, 0, 10, 0) == 5.f && drSegDist(-3, 4, 0, 0, 10, 0) == 5.f);
+  }
+
+  group("çizim düzenleyici");
+  appOpen(&APP_DRAW);
+  SD.remove(DRAW_DIR "/Test.cizim");
+  drEdit(DRAW_DIR "/Test.cizim");
+  CHECK(drEditing && drDoc.it.empty());
+  drTool = DT_PEN, drSize = 4, drColor = 6, drMirror = false;
+  drRaw(TE_DOWN, 20, 100);
+  for (int i = 1; i <= 40; i++) drRaw(TE_MOVE, 20 + i * 5, 100);
+  drRaw(TE_UP, 220, 100);
+  CHECK(drDoc.it.size() == 1 && drDoc.it[0].n <= 3 && drDoc.it[0].col == DR_COLS[6]);  // düz çizgi seyreltildi
+  CHECK(tft.readPixel(120, 100) == DR_COLS[6]);
+  drUndo();
+  CHECK(drDoc.it[0].hid && tft.readPixel(120, 100) == drDoc.paper);
+  drRedo();
+  CHECK(!drDoc.it[0].hid && tft.readPixel(120, 100) == DR_COLS[6] && drOpPos == 1);
+  // dikdörtgen + ayna: iki öğe, tek adım
+  drMirror = true;
+  drTool = DT_RECTF;
+  drRaw(TE_DOWN, 20, 150);
+  g_ms += 50;
+  drRaw(TE_MOVE, 50, 170);
+  g_ms += 50;
+  drRaw(TE_UP, 60, 180);
+  drMirror = false;
+  CHECK(drDoc.it.size() == 3 && drDoc.it[2].kind == DK_RECTF && drDoc.pts[drDoc.it[2].start * 2] == SCR_W - 1 - 20);
+  CHECK(tft.readPixel(40, 165) == DR_COLS[6] && tft.readPixel(SCR_W - 1 - 40, 165) == DR_COLS[6]);
+  drUndo();
+  CHECK(drDoc.it[1].hid && drDoc.it[2].hid);
+  drRedo();
+  // silgi: dokunulan öğe gider, geri alınınca döner
+  drTool = DT_ERASER;
+  drRaw(TE_DOWN, 40, 165);
+  drRaw(TE_UP, 40, 165);
+  CHECK(drDoc.it[1].hid && !drDoc.it[2].hid && tft.readPixel(40, 165) == drDoc.paper);
+  drUndo();
+  CHECK(!drDoc.it[1].hid);
+  // yeni iş yinelenebilecekleri siler (geri alınmış dikdörtgenler gizli kalır)
+  drUndo();
+  int before = drOpPos;
+  drTool = DT_LINE;
+  drRaw(TE_DOWN, 100, 200);
+  g_ms += 50;
+  drRaw(TE_UP, 160, 203);  // 45°'ye yaslanır: yatay
+  CHECK((int)drOps.size() == before + 1 && drOpPos == (int)drOps.size() && drDoc.it[1].hid && drDoc.it.back().kind == DK_LINE &&
+        drDoc.pts[drDoc.it.back().start * 2 + 3] == 200);
+  drColor = 0;
+  drSize = 12;
+  drAddText(30, 60, "Ölçü 1:2");
+  CHECK(drDoc.it.back().kind == DK_TEXT && drDoc.it.back().w == 2);
+  // damlalık
+  drTool = DT_PICK;
+  drDrawTool = DT_PEN;
+  drColor = 0;
+  tap(120, 100);
+  CHECK(drColor == 6 && drTool == DT_PEN);
+  // kaydet, yeniden aç
+  drDoc.flags |= DRF_GRID;
+  drDoc.paper = DR_PAPERS[2];
+  drDirty = true;
+  int visible = 0;
+  for (auto& it : drDoc.it) visible += !it.hid;
+  CHECK(drSave());
+  DrDoc d;
+  CHECK(drLoad(DRAW_DIR "/Test.cizim", d) && (int)d.it.size() == visible && d.paper == DR_PAPERS[2] && (d.flags & DRF_GRID));
+  CHECK(d.it.back().kind == DK_TEXT && d.it[0].kind == DK_PEN);
+  // resim olarak kaydet
+  String out;
+  CHECK(drExport(d, "Test", out) && out == DR_EXPORT_DIR "/Test.bmp");
+  {
+    File f = SD.open(out);
+    CHECK(f && f.size() == 54 + 320 * 3 * 210);
+    uint8_t px[3];
+    f.seek(54 + (209 - (100 - DR_CY)) * 960 + 120 * 3);  // aşağıdan yukarı: (120, 100)
+    f.read(px, 3);
+    uint16_t c = DR_COLS[6];
+    CHECK(px[2] >> 3 == (c >> 11) && px[1] >> 2 == ((c >> 5) & 63) && px[0] >> 3 == (c & 31));
+    f.close();
+    SD.remove(out);
+  }
+  // sayfa sınırı
+  drCompact();
+  CHECK(drOps.empty() && drOpPos == 0);
+  CHECK(!drRoom(DR_MAXPTS));
+  // temizle + geri al
+  std::vector<uint16_t> ids;
+  for (size_t i = 0; i < drDoc.it.size(); i++) drDoc.it[i].hid = true, ids.push_back(i);
+  drPushOp(false, ids);
+  drUndo();
+  int vis2 = 0;
+  for (auto& it : drDoc.it) vis2 += !it.hid;
+  CHECK(vis2 == visible);
+  drBack();
+  CHECK(!drEditing && SD.exists(DRAW_DIR "/Test.cizim"));
+  // eski (sürüm 2) dosya açılır
+  {
+    File f = SD.open(DRAW_DIR "/Eski.cizim", FILE_WRITE);
+    uint8_t h[7] = {'D', 'X', 'E', 'L', 2, 1, 0};
+    f.write(h, 7);
+    uint8_t s0[5] = {3, 2, 0, 0x1F, 0};
+    f.write(s0, 5);
+    int16_t pp[4] = {10, 50, 60, 90};
+    f.write((uint8_t*)pp, 8);
+    f.close();
+    DrDoc e;
+    CHECK(drLoad(DRAW_DIR "/Eski.cizim", e) && e.it.size() == 1 && e.it[0].kind == DK_PEN && e.it[0].col == 0x1F && e.it[0].n == 2 &&
+          e.paper == C_BG);
+    SD.remove(DRAW_DIR "/Eski.cizim");
+  }
+  SD.remove(DRAW_DIR "/Test.cizim");
+  appExit();
+}
+
 static void testGizli() {
   group("gizli özellikler");
   homeShow();
@@ -1263,6 +1406,7 @@ int main() {
   testAuth();
   testGizli();
   testMem();
+  testDraw();
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

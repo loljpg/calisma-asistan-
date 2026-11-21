@@ -317,11 +317,53 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 60; i++) { g_ldr = 1800 + 900 * sin(i / 8.0); g_ms += 520; lmTick(); }
     shot("b6-isik");
     appOpen(&APP_DRAW);
-    drEdit("/tmp-cizim.cizim");
-    for (int k = 0; k < 4; k++) { drColor = k * 2; drRaw(TE_DOWN, 40 + k * 60, 120); for (int i = 1; i < 25; i++) drRaw(TE_MOVE, 40 + k * 60 + i * 2, 120 + (int)(30 * sin(i / 4.0))); }
-    drPalette = true; drToolbar();
-    shot("b7-cizim");
-    drPalette = false; drEditing = false; drSt.clear(); drPts.clear(); drCol.clear();
+    {
+      auto drag = [](int tool, int x0, int y0, int x1, int y1, int steps) {
+        drTool = tool;
+        drRaw(TE_DOWN, x0, y0);
+        for (int i = 1; i <= steps; i++) {
+          g_ms += 40;
+          drRaw(TE_MOVE, x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps);
+        }
+        g_ms += 40;
+        drRaw(TE_UP, x1, y1);
+      };
+      drEdit("/daxen/cizim/Manzara.cizim");
+      drDoc.flags |= DRF_GRID;
+      drSize = 1; drColor = 14; drag(DT_RECTF, 0, 160, 320, 240, 3);       // deniz
+      drColor = 8; drag(DT_OVALF, 230, 50, 290, 110, 3);                     // güneş
+      drSize = 3; drColor = 7; drag(DT_OVAL, 220, 40, 300, 120, 3);
+      drColor = 10; drSize = 4; drTool = DT_PEN;                             // tepe
+      drRaw(TE_DOWN, 10, 160);
+      for (int i = 1; i <= 60; i++) drRaw(TE_MOVE, 10 + i * 3, 160 - (int)(45 * sin(i / 19.0)));
+      drRaw(TE_UP, 190, 160);
+      drColor = 0; drSize = 2; drag(DT_LINE, 40, 60, 100, 61, 4);            // 45°'ye yaslanır
+      drag(DT_RECT, 120, 120, 180, 158, 3);                                  // ev
+      drColor = 6; drag(DT_LINE, 120, 120, 150, 96, 2);
+      drag(DT_LINE, 150, 96, 180, 120, 2);
+      drMirror = true; drColor = 17; drSize = 6; drTool = DT_PEN;           // ayna: iki kuş
+      drRaw(TE_DOWN, 40, 200);
+      for (int i = 1; i <= 20; i++) drRaw(TE_MOVE, 40 + i * 2, 200 - (int)(10 * sin(i / 6.0)));
+      drRaw(TE_UP, 80, 200);
+      drMirror = false;
+      drColor = 0; drSize = 6; drAddText(20, 100, "Merhaba DAXEN");
+      drToolbar(); drPaintAll();
+      shot("b7-cizim");
+      drPanel = 1; drToolbar();
+      shot("b7a-cizim-araclar");
+      drClosePanel(); drPanel = 2; drToolbar();
+      shot("b7b-cizim-renk");
+      drClosePanel();
+      String out;
+      drExport(drDoc, "Manzara", out);
+      drBack();
+      drEdit("/daxen/cizim/Not.cizim");
+      drDoc.paper = DR_PAPERS[2]; drColor = 4; drSize = 3;
+      drag(DT_RECT, 30, 50, 290, 220, 2);
+      drAddText(40, 70, "Alışveriş: süt, ekmek");
+      drBack();
+      shot("b7c-cizim-liste");
+    }
     appOpen(&APP_PHOTOS);
     shot("b8-foto-liste");
     phIdx = 0; phShow(); phBar = true; phDrawBar();

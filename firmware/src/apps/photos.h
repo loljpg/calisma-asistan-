@@ -148,23 +148,12 @@ static bool phDrawBmp(File& f) {
   return true;
 }
 
-// --- Çizim dosyası (.cizim) ---
+// --- Çizim dosyası (.cizim): Çizim uygulamasının kendi çizdiricisiyle (apps/draw.h) ---
+static bool drShowFile(const String& path);
 static bool phDrawSketch(const String& path) {
-  std::vector<HwStroke> st;
-  std::vector<int16_t> pts;
-  std::vector<uint16_t> cols;
-  if (!hwLoadFile(path, st, pts, &cols)) {
-    phErr = "Çizim açılamadı";
-    return false;
-  }
-  for (size_t k = 0; k < st.size(); k++) {
-    const HwStroke& s = st[k];
-    const int16_t* p = &pts[s.start * 2];
-    uint16_t col = k < cols.size() ? cols[k] : C_TEXT;
-    if (s.n == 1) tft.fillCircle(p[0], p[1], std::max(1, s.w / 2), col);
-    for (int i = 1; i < s.n; i++) tft.drawWideLine(p[i * 2 - 2], p[i * 2 - 1], p[i * 2], p[i * 2 + 1], s.w, col, C_BG);
-  }
-  return true;
+  if (drShowFile(path)) return true;
+  phErr = "Çizim açılamadı";
+  return false;
 }
 
 static void phDrawBar() {
