@@ -58,6 +58,7 @@ static String webEsc(const String& s) {
     else if (c == '>') o += "&gt;";
     else if (c == '&') o += "&amp;";
     else if (c == '"') o += "&quot;";
+    else if (c == '\'') o += "&#39;";  // tek tırnaklı özniteliklerde de güvenli
     else o += c;
   }
   return o;
