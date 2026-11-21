@@ -10,7 +10,6 @@
 #include "core/auth.h"
 #include "core/netcalc.h"
 #include "core/blecalc.h"
-#include "core/lzss.h"
 #include "core/miniscan.h"
 #include "ui/theme.h"
 #include "ui/icons.h"
@@ -41,5 +40,6 @@
 #include "apps/terminal.h"
 #include "apps/network.h"
 
+#include "os/membudget.h"  // ağır işlerin bellek bütçesi (uygulamaların durumunu okur)
 #include "os/home.h"
 #include "os/registry.h"

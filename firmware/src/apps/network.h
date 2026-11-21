@@ -270,4 +270,11 @@ static void nwClose() {
   nwLines.shrink_to_fit();
 }
 
-static const App APP_NETWORK = {"Ağ", "Ağ", I_GLOBE, nwOpen, nwDraw, nwTap, nullptr, nwSwipe, nullptr, nwTick, nullptr, nwClose};
+// Dark Radar (gizli): Bluetooth sekmesinin adına uzun basış
+static bool nwHold(int x, int y) {
+  if (y < HDR_H || y >= HDR_H + 28 || x < 212) return false;
+  gizliAc("radar.lua");
+  return true;
+}
+
+static const App APP_NETWORK = {"Ağ", "Ağ", I_GLOBE, nwOpen, nwDraw, nwTap, nwHold, nwSwipe, nullptr, nwTick, nullptr, nwClose};

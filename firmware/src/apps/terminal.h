@@ -34,7 +34,8 @@ static void cHelp(const std::vector<String>&, CmdOut& o) {
   const Cmd* t = tlTable(n);
   o.add("Komutlar (bu bir Linux kabuğu değil):");
   for (size_t i = 0; i < n; i++)
-    o.add(String("  ") + t[i].name + (t[i].sub ? String(" ") + t[i].sub : String("")) + (t[i].args[0] ? String(" ") + t[i].args : String("")) +
+    if (t[i].help[0])  // yardımı boş olanlar gizli
+      o.add(String("  ") + t[i].name + (t[i].sub ? String(" ") + t[i].sub : String("")) + (t[i].args[0] ? String(" ") + t[i].args : String("")) +
           " — " + t[i].help);
 }
 
@@ -287,6 +288,7 @@ static void cDev(const std::vector<String>& a, CmdOut& o) {
   authAsk("Geliştirici seviyesi için PIN", []() {
     authDevOn();
     toast("Geliştirici seviyesi 10 dk açık");
+    gizliDevFirst();
   });
 }
 
@@ -322,6 +324,14 @@ static void cRestore(const std::vector<String>&, CmdOut& o) {
     toast(m);
   }, 1);
 }
+
+// --- Gizli özellikler (yardımda görünmez; docs/gizli.md) ---
+static void cGhost(const std::vector<String>&, CmdOut& o) {
+  o.add("...");
+  gizliAc("hayalet.lua");
+}
+static void cRadar(const std::vector<String>&, CmdOut&) { gizliAc("radar.lua"); }
+static void cAwaken(const std::vector<String>&, CmdOut&) { gizliAc("uyanis.lua"); }
 
 // --- Lua uygulamaları ---
 static int tlLuaFind(const String& w) {
@@ -438,6 +448,9 @@ static const Cmd TL_CMDS[] = {
     {"bluetooth", "devices", CL_USER, 0, 0, cBtDevices, "", "son taramanın listesi"},
     {"bluetooth", "info", CL_USER, 1, 1, cBtInfo, "<no>", "cihazın ayrıntıları"},
     {"dev", nullptr, CL_USER, 0, 1, cDev, "[off]", "geliştirici seviyesi (PIN, 10 dk)"},
+    {"ghost", nullptr, CL_USER, 0, 0, cGhost, "", ""},
+    {"radar", nullptr, CL_USER, 0, 0, cRadar, "", ""},
+    {"awaken", nullptr, CL_DEV, 0, 0, cAwaken, "", ""},
     {"backup", nullptr, CL_USER, 0, 0, cBackup, "", "ayarları SD'ye yedekler (şifresiz)"},
     {"restore", nullptr, CL_DEV, 0, 0, cRestore, "", "yedekten geri yükler (onaylı)"},
     {"lua", "list", CL_USER, 0, 0, cLuaList, "", "Lua uygulamaları, sürüm, izinler"},

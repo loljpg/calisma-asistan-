@@ -44,7 +44,7 @@ static uint32_t rdLoadPos(const String& p) {
 
 // Bir sayfayı çizer (ya da yalnızca ölçer); bir sonraki sayfanın başını döner.
 static uint32_t rdPage(uint32_t start, bool draw) {
-  const uint8_t* f = rdBig ? F_MD : F_SM;
+  Font f = rdBig ? F_MD : F_SM;
   int lh = rdBig ? 22 : 18, top = 8, bottom = SCR_H - 18, maxW = SCR_W - 24;
   int lines = (bottom - top) / lh;
   rdFile.seek(start);

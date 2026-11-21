@@ -2,7 +2,6 @@
 // DAXEN VANE tasarım sistemi: renkler, yazı tipleri, yazı ve temel şekiller.
 // Obsidyen siyah zemin, grafit yüzeyler, gümüş yazı; tek vurgu rengi çelik mavisi.
 #include <TFT_eSPI.h>
-#include "../fonts.h"
 #include "logo.h"
 
 // --- RGB565 dönüşümü ---
@@ -80,36 +79,41 @@ static uint16_t dersCol(const String& d) {
 
 // --- Ekran ---
 static TFT_eSPI tft;
-static TFT_eSprite spr(&tft);  // titremesiz çizim için ara bellek (büyük rakamlar, kedi)
+// Titremesiz çizim için ara bellek (büyük rakamlar, kedi): 4 bit, 16 renkli palet. 264×52 →
+// 6,9 KB (16 bit olsaydı 27,5 KB, sürekli). Büyük rakamların 16 saydamlık düzeyi paletin 16 rengi
+// olur, görüntü 16 bitlikle aynıdır; kedi 12 renk kullanır. Çizimden önce palet kurulur.
+static TFT_eSprite spr(&tft);
 static bool sprOk = false;
 static const int SPR_W = 264, SPR_H = 52;
+static uint16_t sprPal[16];
+static uint8_t sprPalN = 0;
+static void sprInit() {
+  spr.setColorDepth(4);
+  sprOk = spr.createSprite(SPR_W, SPR_H) != nullptr;
+  if (sprOk) spr.createPalette(sprPal, 16);
+}
+static void sprPalBegin() { sprPalN = 0; }
+// Rengin paletteki yeri (yoksa eklenir; palet doluysa 0 = ilk renk)
+static uint8_t sprC(uint16_t c) {
+  for (uint8_t i = 0; i < sprPalN; i++)
+    if (sprPal[i] == c) return i;
+  if (sprPalN >= 16) return 0;
+  sprPal[sprPalN] = c;
+  spr.setPaletteColor(sprPalN, c);
+  return sprPalN++;
+}
+#include "font.h"  // yazı tipleri ve logo SD'deki varlık paketinden
 
-// --- Yazı ---
-// F_XS 12 px (durum, etiket), F_SM 15 px (ikincil), F_MD 18 px (ana metin, başlık),
-// F_LG 26 px (yalnızca rakam ve işaret), F_XL 64 px ince (saat ve kronometre rakamları)
-static const uint8_t* curFont = nullptr;
-static void useFont(const uint8_t* f) {
-  if (curFont == f) return;
-  if (curFont) tft.unloadFont();
-  tft.loadFont(f);
-  curFont = f;
+// --- Yazı (ui/font.h) ---
+static void text(const String& s, int x, int y, Font f, uint16_t fg, uint16_t bg, uint8_t datum = TL_DATUM) {
+  fontDraw(tft, f, s, x, y, fg, bg, datum);
 }
 
-static void text(const String& s, int x, int y, const uint8_t* f, uint16_t fg, uint16_t bg, uint8_t datum = TL_DATUM) {
-  useFont(f);
-  tft.setTextColor(fg, bg);
-  tft.setTextDatum(datum);
-  tft.drawString(s, x, y);
-}
-
-static int textW(const String& s, const uint8_t* f) {
-  useFont(f);
-  return tft.textWidth(s);
-}
+static int textW(const String& s, Font f) { return fontWidth(f, s.c_str()); }
 
 
 // Sığmazsa sonuna "…" koyarak kısaltır.
-static String fit(const String& s, const uint8_t* f, int maxW) {
+static String fit(const String& s, Font f, int maxW) {
   if (maxW <= 0) return "";
   if (textW(s, f) <= maxW) return s;
   String t = s;
@@ -119,7 +123,7 @@ static String fit(const String& s, const uint8_t* f, int maxW) {
 }
 
 // Sözcük kaydırma: en fazla maxLines satır; taşan son satır "…" ile biter.
-static std::vector<String> wrapText(const String& s, const uint8_t* f, int maxW, int maxLines = 99) {
+static std::vector<String> wrapText(const String& s, Font f, int maxW, int maxLines = 99) {
   std::vector<String> out;
   String line, word;
   auto flushWord = [&]() {
@@ -182,10 +186,7 @@ static void progress(int x, int y, int w, int h, int pct, uint16_t col, uint16_t
 }
 
 // Büyük ince rakamlar ara bellekte çizilir (saat değişirken titremesin).
-static int bigW(const String& s) {
-  if (!sprOk) return textW(s, F_XL);
-  return spr.textWidth(s);
-}
+static int bigW(const String& s) { return textW(s, F_XL); }
 static void bigText(const String& s, int x, int y, int w, int h, uint16_t fg, uint16_t bg, uint8_t align) {
   if (!sprOk) {
     tft.fillRect(x, y, w, h, bg);
@@ -194,34 +195,38 @@ static void bigText(const String& s, int x, int y, int w, int h, uint16_t fg, ui
   }
   w = std::min(w, SPR_W);
   h = std::min(h, SPR_H);
-  spr.fillRect(0, 0, w, h, bg);
-  spr.setTextColor(fg, bg);
-  spr.setTextDatum(align);
-  spr.drawString(s, align == TC_DATUM ? w / 2 : (align == TR_DATUM ? w : 0), 0);
+  // palet: 0 arka plan, 15 yazı rengi, aradakiler harf kenarlarının karışımları (ui/font.h ile aynı)
+  sprPalN = 16;
+  for (int i = 0; i < 16; i++) {
+    sprPal[i] = i == 15 ? fg : fontBlend(i * 17, fg, bg);
+    spr.setPaletteColor(i, sprPal[i]);
+  }
+  spr.fillRect(0, 0, w, h, 0);
+  fontDraw<TFT_eSprite, true>(spr, F_XL, s, align == TC_DATUM ? w / 2 : (align == TR_DATUM ? w : 0), 0, 15, 0, align);
   spr.pushSprite(x, y, 0, 0, w, h);
 }
 
 // --- Logo (açılış ekranı, Sistem sayfası) ---
 // 4 bitlik parlaklık; siyah ile kaynağın gümüşü arasında karıştırılır, renk tonu korunur.
-// Veri LZSS ile sıkıştırılmış (ui/logo.h): çizerken geçici olarak açılır (büyüğü 7,3 KB).
-static void drawLogo(const uint8_t* bmp, size_t plen, size_t len, int w, int h, int x, int y, uint16_t bg = C_BG, float level = 1.f) {
-  uint8_t* px = (uint8_t*)malloc(len);
-  if (!px) return;
-  if (lzUnpack(bmp, plen, px, len) != len) {
-    free(px);
+// Görüntü SD'deki varlık paketinden satır satır okunur; paket yoksa yalnızca ad yazılır.
+static void drawLogo(const char* name, int w, int h, int x, int y, uint16_t bg = C_BG, float level = 1.f) {
+  PackLock l;  // paket bu arada değişmesin (ui/font.h)
+  uint32_t off, len;
+  int stride = (w + 1) / 2;
+  if (w > LOGO_L_W || !packFind(name, off, len) || len < (uint32_t)(stride * h)) {
+    text("DAXEN VANE", x + w / 2, y + h / 2, F_MD, C_TEXT, bg, MC_DATUM);
     return;
   }
   uint16_t lut[16];
   for (int i = 0; i < 16; i++) lut[i] = i ? grayn((uint8_t)(i * LOGO_PEAK / 15 * level)) : bg;
-  int stride = (w + 1) / 2;
+  uint8_t b[(LOGO_L_W + 1) / 2];
   uint16_t row[LOGO_L_W + 1];
   for (int j = 0; j < h; j++) {
-    for (int i = 0; i < w; i++) {
-      uint8_t b = px[j * stride + i / 2];
-      row[i] = lut[i & 1 ? (b & 15) : (b >> 4)];
-    }
+    if (!packRead(off + j * stride, b, stride)) return;
+    for (int i = 0; i < w; i++) row[i] = lut[i & 1 ? (b[i / 2] & 15) : (b[i / 2] >> 4)];
     tft.pushImage(x, y + j, w, 1, row);
   }
-  free(px);
 }
-#define DRAW_LOGO(N, x, y, ...) drawLogo(N, sizeof(N), N##_LEN, N##_W, N##_H, x, y, ##__VA_ARGS__)
+#define LOGO_L_PK "logo/l"
+#define LOGO_S_PK "logo/s"
+#define DRAW_LOGO(N, x, y, ...) drawLogo(N##_PK, N##_W, N##_H, x, y, ##__VA_ARGS__)

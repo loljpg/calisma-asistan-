@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Sıkıştırılmış Lua dosyaları (src/apps/luapack.h) firmware/lua/ ile aynı mı
-        run: python3 firmware/tools/pack_lua.py --check
+      - name: Varlık paketi (yazı tipleri, logo, Lua dosyaları) src/core/varlik.h ile aynı mı
+        run: python3 firmware/tools/make_assets.py --check
       - name: Birim testleri ve bütün ekran senaryoları
         run: firmware/test/host/run.sh test
 
@@ -89,6 +89,9 @@ jobs:
               0x1000 "$B/bootloader.bin" 0x8000 "$B/partitions.bin" \
               0xe000 "$BOOT_APP0" 0x10000 "$B/firmware.bin"
           done
+          # Yazı tipleri, logo ve Lua dosyaları: kart SD'ye bu sürümün sayfasından indirir (sys/assets.h)
+          python3 tools/make_assets.py --check
+          python3 tools/make_assets.py --out ../dist/varlik.bin
           ls -la ../dist
 
       - name: Yayınla
@@ -107,4 +110,7 @@ jobs:
 
             Sonraki sürümler kart Wi-Fi'ye bağlıyken kendiliğinden yüklenir
             (`firmware-*.bin` dosyaları bunun içindir, elle yüklemene gerek yok).
+
+            `varlik.bin`: yazı tipleri, logo ve Lua dosyaları. Kart bunu SD karta (`/daxen/sys/`) kendisi
+            indirir; SD kart takılı olmalı.
           files: dist/*.bin

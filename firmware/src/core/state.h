@@ -32,6 +32,7 @@ static bool outTimerPending = false, remoteTimerDirty = false;
 static long long timerRevSeen = 0;
 
 static bool sdOk = false;
+static volatile bool assetsFresh = false;  // varlık paketi yeni indi: ekran baştan çizilsin (sys/assets.h)
 static Preferences prefs;
 
 // Bluetooth: bağlıyken telefon buluta aracılık eder, kart kendi bulut işlerini durdurur.

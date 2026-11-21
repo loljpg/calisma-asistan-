@@ -367,6 +367,7 @@ static void setTapSecurity(int y) {
         authDevOn();
         toast("Geliştirici seviyesi 10 dk açık");
         redraw();
+        gizliDevFirst();
       });
     }
   } else if (i == 3) {
@@ -542,6 +543,17 @@ static void setTap(int x, int y) {
       setTapSecurity(y);
       break;
     case SP_SYSTEM:
+      if (y < HDR_H + 44 && x < 130) {  // Project VANE: logoya 5 kez dokun
+        static uint8_t n = 0;
+        static uint32_t at = 0;
+        n = millis() - at < 1500 ? n + 1 : 1;
+        at = millis();
+        if (n >= 5) {
+          n = 0;
+          gizliAc("vane.lua");
+        }
+        break;
+      }
       if (y >= 202)
         dialog("Yeniden başlatılsın mı?", "Kronometre ve kayıtlar korunur.", {"Vazgeç", "Başlat"}, [](int c) {
           if (c == 1) sysRestart();

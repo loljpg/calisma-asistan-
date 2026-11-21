@@ -60,7 +60,7 @@ static void g2DrawTile(int i) {
   tft.fillRect(x, y, G2_T, G2_T, c);
   if (!v) return;
   String s = String(1UL << v);
-  const uint8_t* f = s.length() >= 4 ? F_SM : (s.length() == 3 ? F_MD : F_LG);
+  Font f = s.length() >= 4 ? F_SM : (s.length() == 3 ? F_MD : F_LG);
   text(s, x + G2_T / 2, y + G2_T / 2 + 1, f, v >= 7 ? C_BG : C_TEXT, c, MC_DATUM);
 }
 

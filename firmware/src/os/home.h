@@ -126,7 +126,9 @@ static void homeTap(int x, int y) {
     return;
   }
   if (y < NOW_Y - 2) {
-    catPet(x);
+    struct tm t;
+    if (localNow(t) && t.tm_hour == 3) gizliAc("bilinmeyen.lua");  // The Unknown: gece 3'te kedi
+    else catPet(x);
     return;
   }
   if (y < DOCK_Y) {
@@ -520,6 +522,12 @@ static void shellBoot(int stage) {
 static void shellTick() {
   uint32_t ms = millis();
   clockBgTick();
+  if (assetsFresh) {  // varlık paketi indi: yazı tipleriyle baştan çiz
+    assetsFresh = false;
+    luaScanned = false;
+    shellRedraw(true);
+    toast("Yazı tipleri ve dosyalar indi");
+  }
   if (cfg.lockOn && !lockActive && !ringOn && ms - lastInteract > 300000UL) lockNow();  // 5 dk dokunulmadı
   if (ringOn) return;
   if (kbm.active) {

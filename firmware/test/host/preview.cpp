@@ -376,6 +376,19 @@ int main(int argc, char** argv) {
     shot("d7-lua-zamanlayici");
     appExit();
   }
+  if (want("gizli")) {  // gizli özellikler (docs/gizli.md)
+    const char* f[] = {"vane.lua", "uyanis.lua", "hayalet.lua", "radar.lua", "bilinmeyen.lua"};
+    const char* n[] = {"g1-project-vane", "g2-developer-awakening", "g3-ghost-protocol", "g4-dark-radar", "g5-the-unknown"};
+    const int ms[] = {9000, 8000, 2000, 6200, 9000};
+    for (int i = 0; i < 5; i++) {
+      homeShow();
+      gizliAc(f[i]);
+      step(ms[i]);
+      shot(n[i]);
+      appExit();
+    }
+    homeShow();
+  }
   if (want("kal")) {
     calScreen(CAL_PX[0], CAL_PY[0], "Dokunmatik ayarı", "Artının tam ortasına dokun, kısa bir an tut", 0, 9, "");
     shot("f0-kalibrasyon-1");

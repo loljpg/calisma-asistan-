@@ -65,7 +65,7 @@ static void button(int x, int y, int w, int h, const String& label, BtnStyle st 
   panel(x, y, w, h, fill, border);
   int iw = icon ? (h >= 34 ? 20 : 16) : 0;
   int lw = label.length() ? textW(label, h >= 34 ? F_MD : F_SM) : 0;
-  const uint8_t* f = h >= 34 ? F_MD : F_SM;
+  Font f = h >= 34 ? F_MD : F_SM;
   int total = iw + (iw && lw ? 6 : 0) + lw;
   if (total > w - 12) {
     lw = w - 12 - iw - (iw ? 6 : 0);
@@ -126,6 +126,7 @@ static void listRow(int y, int h, uint8_t icon, const String& title, const Strin
                     bool sel = false, uint16_t titleCol = C_TEXT) {
   uint16_t bg = sel ? C_PRESS : C_BG;
   tft.fillRect(0, y, SCR_W, h - 1, bg);
+  tft.fillRect(0, y + h - 1, icon ? 44 : 12, 1, C_BG);  // ayırıcının solu: önceki ekrandan iz kalmasın
   hline(icon ? 44 : 12, y + h - 1, SCR_W - (icon ? 44 : 12));
   int x = 12;
   if (icon) {

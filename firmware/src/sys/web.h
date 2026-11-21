@@ -36,6 +36,9 @@ static char webTok[33] = "";          // geçerli oturum (boşsa kimse girmemiş
 static uint8_t webFails = 0;          // art arda yanlış kod
 static uint32_t webLockUntil = 0;     // giriş kilidi (millis)
 static bool webUpDenied = false;      // süren yükleme yetkisiz: baytlar yok sayılır
+static String webErr;                 // sunucu açılamadıysa neden (bellek bütçesi)
+static volatile uint32_t webLastReq = 0;  // son istek (millis): boşta kalan sunucu kapatılır
+#define WEB_IDLE_MS (10UL * 60UL * 1000UL)
 
 static const char WEB_HEAD[] PROGMEM = R"(<!doctype html><html lang=tr><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>DAXEN VANE</title><style>
@@ -100,6 +103,7 @@ static void webRedirect(const String& to);
 
 // Oturum çerezi geçerli mi (sabit süreli karşılaştırma)
 static bool webAuthed() {
+  webLastReq = millis();
   if (!webTok[0]) return false;
   String c = web->header("Cookie");
   int i = c.indexOf("dv=");
@@ -110,6 +114,7 @@ static bool webAuthed() {
 }
 
 static void webLoginPage(const String& msg) {
+  webLastReq = millis();
   String next = web->uri() == "/giris" ? String("/") : web->uri();
   if (next == "/" && web->hasArg("d")) next += "?d=" + webUrlEnc(webSafePath(web->arg("d")));
   web->send(web->uri() == "/giris" ? 200 : 401, "text/html; charset=utf-8",
@@ -379,12 +384,14 @@ static void webProc(Proc* p) {
 static bool webStart() {
   if (web) return true;
   if (WiFi.status() != WL_CONNECTED) return false;
-  // Süreç yığını (10 KB) + yükleme tamponu (4 KB) + sunucu; 18 KB taban korunur. Yetmezse bulutun
+  // Süreç yığını (10 KB) + yükleme tamponu (4 KB) + sunucu (os/membudget.h). Bellek yetmezse bulutun
   // canlı akışı duraklatılır (netHold), ekran birkaç saniye sonra yeniden dener.
-  if (sysHeapFree() < (10 + 4 + 4 + 18) * 1024 || sysHeapMaxAlloc() < 11 * 1024) {
-    netHold |= HOLD_WEB;
+  if (!memAsk(MJ_WEB, (10 + 4 + 4) * 1024, 10 * 1024, &webErr)) {
+    if (memDecide(sysHeapFree(), sysHeapMaxAlloc(), 18 * 1024, 10 * 1024, 0, MJ_WEB) != MV_OK) netHold |= HOLD_WEB;
     return false;
   }
+  webErr = "";
+  webLastReq = millis();
   web = new (std::nothrow) WebServer(80);
   if (!web) return false;
   const char* hdrs[] = {"Content-Length", "Cookie"};
@@ -479,6 +486,22 @@ static void webStop() {
 }
 
 static bool webRunning() { return web != nullptr; }
+static String webError() { return webErr; }
+
+// Saat servisinden: Aktarım açık değilken 10 dakika istek gelmeyen sunucu kapatılır (yığını,
+// tamponu ve bağlantıları serbest kalır, bulutun canlı akışı geri gelir). Yükleme sürerken kapanmaz.
+static void webIdleTick() {
+  if (!web) return;
+  if (curApp == &APP_TRANSFER || webUpFile) {
+    webLastReq = millis();
+    return;
+  }
+  if (millis() - webLastReq < WEB_IDLE_MS) return;
+  webStop();
+  if (web) return;  // süreç bitmedi; bir dahaki turda
+  sysLog("web", "10 dk kullanılmadı, kapatıldı");
+  toast("Aktarım 10 dk kullanılmadı, kapatıldı");
+}
 static String webCode() { return web ? String(webCodeStr) : String(); }
 
 static String webStatus() {

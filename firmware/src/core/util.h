@@ -209,3 +209,13 @@ static String joinPath(const String& dir, const String& name) {
   if (dir.endsWith("/")) return dir + name;
   return dir + "/" + name;
 }
+
+// CRC32 (IEEE, yansıtılmış): c = crc32Upd(0, …) ile başlanır, parça parça sürdürülebilir
+static uint32_t crc32Upd(uint32_t c, const uint8_t* p, size_t n) {
+  c = ~c;
+  while (n--) {
+    c ^= *p++;
+    for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1)));
+  }
+  return ~c;
+}

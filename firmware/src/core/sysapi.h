@@ -15,6 +15,8 @@ static void wifiKnownSave();
 #define BACKUP_FILE BACKUP_DIR "/ayarlar.json"
 static bool backupSave(bool secrets, String& msg);  // ayar yedeği (sys/backup.h)
 static bool backupLoad(String& msg);
+static void gizliAc(const char* file);  // gizli özellikler (apps/lua.h, docs/gizli.md)
+static void gizliDevFirst();
 static void toggleItem(const Item& it);
 static void postponeItem(const Item& it);
 static void startItemTimer(const Item& it);
@@ -65,8 +67,11 @@ static void accountSet(const String& db, const String& key, const String& mail, 
 
 // --- Web sunucusu (dosya aktarımı ve hesap sayfası) ---
 static bool webStart();
+#include "memcalc.h"  // ağır işlerin bellek bütçesi (MJ_*, memDecide)
+static bool memAsk(uint8_t job, uint32_t need, uint32_t block, String* why);  // os/membudget.h
 static void webStop();
 static bool webRunning();
+static String webError();  // sunucu açılamadıysa nedeni
 static String webStatus();
 static int webProgress();  // yükleme sürüyorsa yüzde, yoksa -1
 static int webUploadCount();

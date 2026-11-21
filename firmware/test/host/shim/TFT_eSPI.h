@@ -248,6 +248,10 @@ class TFT_eSPI {
     _fontLoaded = true;
   }
   void unloadFont() { _fontLoaded = false; }
+  // Yerleşik GLCD yazı tipi (6x8 hücre): yalnız boyu sayılır, çizimde her harf için içi dolu
+  // olmayan bir kutu (varlık paketi yokken düşülen yolu sınamak için yeterli)
+  void setTextFont(uint8_t) { _fontLoaded = false; }
+  void setTextSize(uint8_t s) { _tsize = s ? s : 1; }
   void setTextColor(uint16_t fg) { _fg = _bg = fg; }
   void setTextColor(uint16_t fg, uint16_t bg, bool = false) { _fg = fg; _bg = bg; }
   void setTextDatum(uint8_t d) { _datum = d; }
@@ -267,7 +271,7 @@ class TFT_eSPI {
   }
   int16_t textWidth(const String& s) { return textWidth(s.c_str()); }
   int16_t textWidth(const char* s) {
-    if (!_fontLoaded) return strlen(s) * 6;
+    if (!_fontLoaded) return strlen(s) * 6 * _tsize;
     int w = 0;
     while (*s) {
       uint32_t u = _utf8(s);
@@ -284,8 +288,22 @@ class TFT_eSPI {
   }
   int16_t drawString(const String& s, int32_t x, int32_t y) { return drawString(s.c_str(), x, y); }
   int16_t drawString(const char* s, int32_t x, int32_t y) {
-    if (!_fontLoaded) return 0;
-    int cw = textWidth(s), ch = fontHeight();
+    int cw = textWidth(s), ch = _fontLoaded ? fontHeight() : 8 * _tsize;
+    if (!_fontLoaded) {
+      switch (_datum) {
+        case TC_DATUM: x -= cw / 2; break;
+        case TR_DATUM: x -= cw; break;
+        case ML_DATUM: case L_BASELINE: y -= ch / 2; break;
+        case MC_DATUM: case C_BASELINE: x -= cw / 2; y -= ch / 2; break;
+        case MR_DATUM: case R_BASELINE: x -= cw; y -= ch / 2; break;
+        case BL_DATUM: y -= ch; break;
+        case BC_DATUM: x -= cw / 2; y -= ch; break;
+        case BR_DATUM: x -= cw; y -= ch; break;
+      }
+      for (size_t i = 0; s[i]; i++)
+        if (s[i] != ' ') drawRect(x + i * 6 * _tsize, y, 5 * _tsize, 7 * _tsize, _fg);
+      return cw;
+    }
     switch (_datum) {
       case TC_DATUM: x -= cw / 2; break;
       case TR_DATUM: x -= cw; break;
@@ -337,35 +355,46 @@ class TFT_eSPI {
   uint32_t _ascent = 0, _descent = 0, _maxAscent = 0, _maxDescent = 0, _space = 4;
   bool _fontLoaded = false;
   uint16_t _fg = 0xFFFF, _bg = 0;
-  uint8_t _datum = 0;
+  uint8_t _datum = 0, _tsize = 1;
 };
 
 class TFT_eSprite : public TFT_eSPI {
  public:
   explicit TFT_eSprite(TFT_eSPI* t) : TFT_eSPI(0, 0), _tft(t) {}
-  void setColorDepth(int) {}
+  // 4 bit: pikseller palet sırası (0..15) olarak saklanır, ekrana basarken renge çevrilir
+  void setColorDepth(int d) { _depth = d; }
   void* createSprite(int16_t w, int16_t h) {
     _alloc(w, h);
     return _buf.data();
   }
+  void createPalette(const uint16_t* m, uint8_t n = 16) {
+    for (int i = 0; i < 16; i++) _pal[i] = i < n ? m[i] : 0;
+  }
+  void setPaletteColor(uint8_t i, uint16_t c) {
+    if (i < 16) _pal[i] = c;
+  }
   void deleteSprite() { _buf.clear(); _w = _h = 0; }
   bool created() { return !_buf.empty(); }
   void fillSprite(uint32_t c) { fillRect(0, 0, _w, _h, c); }
+  void drawPixel(int32_t x, int32_t y, uint32_t c) override { TFT_eSPI::drawPixel(x, y, _depth == 4 ? (c & 15) : c); }
   void pushSprite(int32_t x, int32_t y) {
     for (int j = 0; j < _h; j++)
-      for (int i = 0; i < _w; i++) _tft->drawPixel(x + i, y + j, _buf[j * _w + i]);
+      for (int i = 0; i < _w; i++) _tft->drawPixel(x + i, y + j, _col(_buf[j * _w + i]));
   }
   void pushSprite(int32_t x, int32_t y, uint16_t transp) {
     for (int j = 0; j < _h; j++)
       for (int i = 0; i < _w; i++)
-        if (_buf[j * _w + i] != transp) _tft->drawPixel(x + i, y + j, _buf[j * _w + i]);
+        if (_buf[j * _w + i] != transp) _tft->drawPixel(x + i, y + j, _col(_buf[j * _w + i]));
   }
   bool pushSprite(int32_t tx, int32_t ty, int32_t sx, int32_t sy, int32_t sw, int32_t sh) {
     for (int j = 0; j < sh; j++)
-      for (int i = 0; i < sw; i++) _tft->drawPixel(tx + i, ty + j, readPixel(sx + i, sy + j));
+      for (int i = 0; i < sw; i++) _tft->drawPixel(tx + i, ty + j, _col(readPixel(sx + i, sy + j)));
     return true;
   }
 
  private:
+  uint16_t _col(uint16_t v) { return _depth == 4 ? _pal[v & 15] : v; }
   TFT_eSPI* _tft;
+  int _depth = 16;
+  uint16_t _pal[16] = {0};
 };

@@ -6,3 +6,4 @@ app/www/vendor/
 firmware/.pio/
 firmware/test/host/build/
 firmware/test/host/out/
+__pycache__/

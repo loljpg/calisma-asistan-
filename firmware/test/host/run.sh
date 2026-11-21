@@ -54,6 +54,7 @@ for t in "Barış Manço - Gülpembe" "MFÖ - Ele Güne Karşı" "Tarkan - Kuzu 
 for t in Firuze Gidiyorum "Hadi Bakalım" "Yalnızlık Senfonisi"; do : >"$SD/Muzik/Sezen Aksu/$t.mp3"; done
 printf 'süt, ekmek\n' >"$SD/daxen/notlar/alisveris.txt"
 mkdir -p "$SD/daxen/sys" && truncate -s 1382048 "$SD/daxen/sys/muzik-cyd_st7789.bin"  # müzikten kalan eski modül
+python3 "$HERE/../../tools/make_assets.py" --out "$SD/daxen/sys/varlik.bin" >/dev/null  # yazı tipleri, logo, Lua dosyaları
 printf 'Türev | Değişim oranı\nİntegral | Alan\n' >"$SD/daxen/kartlar/ornek.txt"
 : >"$SD/foto.jpg"
 export DAXEN_SD="$SD" DAXEN_OUT="$OUT"

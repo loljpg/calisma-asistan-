@@ -16,12 +16,14 @@ static const int QUEUE_MAX_SD = 3000, QUEUE_MAX_NVS = 40;
 static int sdQueueCount = 0;
 static SPIClass sdSPI(VSPI);
 
+// Aynı anda açık dosya sınırı 5: biri varlık paketi (sürekli açık, ui/font.h), dördü günlük, yükleme,
+// Lua ve uygulamalar için (her yuva yaklaşık 550 bayt bellek ayırır).
 static bool sdBegin() {
   sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-  bool ok = SD.begin(SD_CS, sdSPI, 10000000, "/sd", 4);
+  bool ok = SD.begin(SD_CS, sdSPI, 10000000, "/sd", 5);
   if (!ok) {
     SD.end();
-    ok = SD.begin(SD_CS, sdSPI, 4000000, "/sd", 4);
+    ok = SD.begin(SD_CS, sdSPI, 4000000, "/sd", 5);
   }
   if (!ok || SD.cardType() == CARD_NONE) {
     SD.end();

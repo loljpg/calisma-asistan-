@@ -3,19 +3,17 @@
 Kaynak: tools/daxen-logo.png (siyah zemin üstünde gümüş serif yazı). Yazının biçimi, DAXEN ile
 VANE arasındaki boyut farkı, hizası ve gümüş tonları olduğu gibi korunur; yalnızca küçültülür.
 Her piksel 0-15 arası parlaklıktır (ekranda siyah ile kaynağın en parlak gümüşü arasında).
-Veri LZSS ile sıkıştırılır (pack_lua.py ile aynı biçim; kartta core/lzss.h açar): ~9 KB yerine ~3,5 KB.
+Görüntü yazılıma gömülmez: assets/logo/<ad>.bin (ham 4 bit) olarak yazılır, tools/make_assets.py
+SD karttaki varlık paketine koyar; src/ui/logo.h yalnızca boyutları tutar.
 """
-import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pack_lua import lz, unlz  # noqa: E402
-
 SRC = Path(__file__).resolve().parent / "daxen-logo.png"
 OUT = Path(__file__).resolve().parent.parent / "src" / "ui" / "logo.h"
+BIN = Path(__file__).resolve().parent.parent / "assets" / "logo"
 SIZES = [("LOGO_L", 236), ("LOGO_S", 112)]
 
 
@@ -28,10 +26,9 @@ def main():
     peak = int(np.array(crop).max())
     lines = [
         "// Bu dosya tools/make_logo.py ile üretildi, elle değiştirme.",
-        "// DAXEN VANE logosu: satır satır, piksel başına 4 bit (üst yarım bayt önce), 0 siyah, 15 en parlak gümüş;",
-        "// LZSS ile sıkıştırılmış (core/lzss.h), açılmış boyu <AD>_LEN.",
+        "// DAXEN VANE logosunun boyutları. Görüntü SD karttaki varlık paketinde (logo/l, logo/s):",
+        "// satır satır, piksel başına 4 bit (üst yarım bayt önce), 0 siyah, 15 en parlak gümüş.",
         "#pragma once",
-        "#include <Arduino.h>",
         "",
         f"#define LOGO_PEAK {peak}  // kaynaktaki en parlak gümüş (0-255)",
     ]
@@ -45,15 +42,10 @@ def main():
         for row in q:
             for i in range(0, len(row), 2):
                 packed.append((row[i] << 4) | row[i + 1])
-        c = lz(bytes(packed))
-        assert unlz(c) == bytes(packed)
+        BIN.mkdir(parents=True, exist_ok=True)
+        (BIN / f"{name}.bin").write_bytes(bytes(packed))
         lines.append(f"#define {name}_W {w}")
         lines.append(f"#define {name}_H {h}")
-        lines.append(f"#define {name}_LEN {len(packed)}")
-        lines.append(f"const uint8_t {name}[] PROGMEM = {{  // {len(c)} bayt")
-        for i in range(0, len(c), 24):
-            lines.append("  " + ",".join(f"0x{b:02X}" for b in c[i:i + 24]) + ",")
-        lines.append("};")
         lines.append("")
         prev = Image.fromarray((q * peak / 15).astype(np.uint8))
         prev.save(f"/tmp/{name}.png")

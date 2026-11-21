@@ -12,7 +12,6 @@
 #include <SD.h>
 #include <deque>
 #include "lua.hpp"
-#include "luapack.h"
 
 #define LUA_APPS_DIR "/daxen/uygulamalar"
 
@@ -68,10 +67,12 @@ static void luaParseHeader(LuaAppInfo& a, const String& line) {
 }
 static std::vector<LuaAppInfo> luaApps;
 static bool luaScanned = false;
-static int luaCur = -1;
+static int luaCur = -1;  // luaApps içindeki yer; -2: gizli özellik (luaExtra)
+static LuaAppInfo luaExtra;
 
 // Süreç durumu (LS yalnızca Lua sürecine aittir)
 static lua_State* LS = nullptr;
+static const uint32_t LUA_STACK = 14 * 1024;  // süreç yığını
 static size_t luaMem = 0, luaMemMax = 0;
 static uint32_t luaCallStart = 0, luaLastStep = 0, luaSlice = 0;
 static Proc* luaProcP = nullptr;
@@ -237,7 +238,7 @@ static void luaLog(const String& m) {
   f.close();
 }
 
-static const uint8_t* luaFont(int s) {
+static Font luaFont(int s) {
   switch (s) {
     case 1: return F_XS;
     case 3: return F_MD;
@@ -316,7 +317,7 @@ static int l_yazi(lua_State* L) {
   lua_pop(L, 1);
   int x = lnum(L, 2), y = lnum(L, 3);
   uint16_t c = lcol(L, 4, C_TEXT);
-  const uint8_t* f = luaFont(lopt(L, 5, 2));
+  Font f = luaFont(lopt(L, 5, 2));
   String al = luaL_optstring(L, 6, "sol");
   uint16_t bg = lcol(L, 7, C_BG);
   uint8_t d = al == "orta" ? TC_DATUM : (al == "sag" ? TR_DATUM : TL_DATUM);
@@ -331,7 +332,7 @@ static int l_yazi(lua_State* L) {
 }
 static int l_genislik(lua_State* L) {
   String str = luaL_checkstring(L, 1);
-  const uint8_t* f = luaFont(lopt(L, 2, 2));
+  Font f = luaFont(lopt(L, 2, 2));
   int w;
   {
     Gfx g;
@@ -514,6 +515,17 @@ static void luaSetStr(lua_State* L, const char* k, const char* v) {
   lua_setfield(L, -2, k);
 }
 
+// Salt okunur sistem bilgisi (gerçek değerler)
+static int l_bilgi(lua_State* L) {
+  lua_createtable(L, 0, 5);
+  luaSetField(L, "surum", FW_BUILD);
+  luaSetStr(L, "cip", sysChipText().c_str());
+  luaSetField(L, "bos", sysHeapFree());
+  luaSetField(L, "enaz", sysHeapMin());
+  luaSetField(L, "calisma", millis() / 1000);
+  return 1;
+}
+
 static int l_gunluk(lua_State* L) {
   luaLog(String("uygulama: ") + luaL_checkstring(L, 1));
   return 0;
@@ -651,7 +663,8 @@ static void luaOpenApi(lua_State* L) {
   static const LuaFn ayar[] = {{"al", l_ayar_al, LP_DOSYA}, {"kaydet", l_ayar_kaydet, LP_DOSYA}};
   LUA_LIB(L, ayar, "ayar");
   static const LuaFn sistem[] = {{"bildir", l_bildir, LP_BILDIRIM}, {"cikis", l_cikis, 0}, {"isik", l_isik, 0},
-                                 {"led", l_led, LP_LED},            {"bellek", l_bellek, 0}, {"gunluk", l_gunluk, 0}};
+                                 {"led", l_led, LP_LED},            {"bellek", l_bellek, 0}, {"gunluk", l_gunluk, 0},
+                                 {"bilgi", l_bilgi, 0}};
   LUA_LIB(L, sistem, "sistem");
   static const LuaFn wifi[] = {{"durum", l_wifi_durum, LP_WIFI}};
   LUA_LIB(L, wifi, "wifi");
@@ -916,8 +929,14 @@ static void luaTick() {
 #endif
 }
 
+static const LuaAppInfo* luaCurInfo() {
+  if (luaCur == -2) return &luaExtra;
+  return luaCur >= 0 && luaCur < (int)luaApps.size() ? &luaApps[luaCur] : nullptr;
+}
+
 static void luaOpenFn() {
-  String path = luaCur >= 0 && luaCur < (int)luaApps.size() ? luaApps[luaCur].path : String("");
+  const LuaAppInfo* ci = luaCurInfo();
+  String path = ci ? ci->path : String("");
   if (kAlive(luaPid) && path == luaRunPath) {  // arka plandaki süreç öne alınır
     luaFg = true;
     luaExitReq = false;
@@ -938,12 +957,18 @@ static void luaOpenFn() {
     luaQ.clear();
   }
   luaRunPath = path;
-  luaRunName = luaCur >= 0 && luaCur < (int)luaApps.size() ? luaApps[luaCur].name : String("Uygulama");
-  luaRunBg = luaCur >= 0 && luaCur < (int)luaApps.size() && luaApps[luaCur].bg;
-  luaRunPerm = luaCur >= 0 && luaCur < (int)luaApps.size() ? luaApps[luaCur].perm : LP_ESKI;
+  luaRunName = ci ? ci->name : String("Uygulama");
+  luaRunBg = ci && ci->bg;
+  luaRunPerm = ci ? ci->perm : LP_ESKI;
   luaBtUsed = false;
   luaErrNew = luaDrawReq = luaExitReq = luaRawInput = luaHasStep = luaQuit = luaErrPending = false;
   luaFg = true;
+  // Süreç yığını + en az 16 KB Lua belleği (os/membudget.h; fazlası boş belleğe göre verilir)
+  String why;
+  if (!memAsk(MJ_LUA, LUA_STACK + 16 * 1024, LUA_STACK, &why)) {
+    luaSetError(why);
+    return;
+  }
 #ifdef HOST
   luaProcP = nullptr;
   luaProcInit();
@@ -951,7 +976,7 @@ static void luaOpenFn() {
   String stem = baseName(path);
   stem = stem.substring(0, stem.lastIndexOf('.'));
   String n = "lua:" + stem;
-  luaPid = kSpawn(n.c_str(), luaProcMain, 14 * 1024, true);
+  luaPid = kSpawn(n.c_str(), luaProcMain, LUA_STACK, true);
   if (luaPid < 0) luaSetError("Süreç başlatılamadı: bellek yetmedi");
 #endif
 }
@@ -1043,6 +1068,62 @@ static void luaAppOpen(int i) {
   }, 1);
 }
 
+// --- Gizli özellikler (docs/gizli.md): ekranları SD varlık paketindeki Lua (ui/font.h);
+// tetiklenince /daxen/gizli/'ye açılıp yerleşik uygulama olarak çalışır (izin sorulmaz, izinleri
+// dosyanın kendi satırında). Hiçbiri arka planda çalışmaz. SD kart gerekir.
+#define LUA_GIZLI_DIR "/daxen/gizli"
+static void gizliAc(const char* file) {
+  String src = String("gizli/") + file, path = joinPath(LUA_GIZLI_DIR, file);
+  uint32_t off, len;
+  if (!sdOk || !packFind(src.c_str(), off, len)) {
+    toast(sdOk ? "Varlık paketi henüz inmedi" : "Bunun için SD kart gerekiyor");
+    return;
+  }
+  File f = SD.open(path);
+  bool ok = f && f.size() == len;
+  if (f) f.close();
+  if (!ok) {
+    if (!SD.exists("/daxen")) SD.mkdir("/daxen");
+    if (!SD.exists(LUA_GIZLI_DIR)) SD.mkdir(LUA_GIZLI_DIR);
+    if (!packCopy(src.c_str(), path)) {
+      toast("Yazılamadı");
+      return;
+    }
+  }
+  if (kAlive(luaPid) && luaRunPath != path && !luaStopProc()) {
+    toast("Önceki uygulama kapanıyor, biraz bekle");
+    return;
+  }
+  luaExtra = LuaAppInfo();
+  luaExtra.path = path;
+  luaExtra.name = file;
+  File h = SD.open(path);
+  for (int li = 0; h && li < 10 && h.available(); li++) {
+    String ln = h.readStringUntil('\n');
+    ln.trim();
+    if (!ln.startsWith("--")) break;
+    luaParseHeader(luaExtra, ln);
+  }
+  if (h) h.close();
+  luaExtra.bg = false;
+  luaCur = -2;
+  sysLog("gizli", luaExtra.name);
+  appOpen(&APP_LUA);
+}
+
+// Developer Awakening: geliştirici seviyesi ilk kez açılınca bir kez
+static void gizliDevFirst() {
+  bool seen;
+  {
+    Lock l;
+    prefs.begin("cs", false);
+    seen = prefs.getBool("gzdev", false);
+    if (!seen) prefs.putBool("gzdev", true);
+    prefs.end();
+  }
+  if (!seen) gizliAc("uyanis.lua");
+}
+
 // --- Yönetim: kaldırma (onaylı; veri klasörü kalır) ve Dosyalar'dan yükleme ---
 static void luaRemoveAsk(int i) {
   if (i < 0 || i >= (int)luaApps.size()) return;
@@ -1084,23 +1165,9 @@ static void luaInstall(const String& from) {
 }
 
 // ============================================================================
-// Örnek uygulamalar ve rehber: sıkıştırılmış olarak flash'ta (apps/luapack.h, kaynakları
-// firmware/lua/), klasör yoksa bir kez SD'ye açılır. Rehber yeni sürümde bir kez yenilenir.
+// Örnek uygulamalar ve rehber: SD'deki varlık paketinden (ui/font.h, kaynakları firmware/lua/),
+// klasör yoksa bir kez kopyalanır. Rehber yeni sürümde bir kez yenilenir.
 // ============================================================================
-static bool lpWrite(const LuaPackFile& p, const String& dir) {
-  uint8_t* b = (uint8_t*)malloc(p.len);
-  if (!b) return false;
-  bool ok = lzUnpack(p.data, p.plen, b, p.len) == p.len;
-  File f;
-  if (ok) f = SD.open(joinPath(dir, p.name), FILE_WRITE);
-  if (f) {
-    ok = f.write(b, p.len) == p.len;
-    f.close();
-  }
-  free(b);
-  return ok && f;
-}
-
 static void luaWriteFile(const char* path, const char* data) {
   File f = SD.open(path, FILE_WRITE);
   if (!f) return;
@@ -1108,7 +1175,10 @@ static void luaWriteFile(const char* path, const char* data) {
   f.close();
 }
 
+static const char* const LUA_EXAMPLES[] = {"merhaba.lua", "zar.lua", "sayac.lua", "top.lua", "zamanlayici.lua", "REHBER.txt"};
+
 static void luaEnsureExamples() {
+  if (!packOk) return;  // paket inince yapılır
   bool fresh = !SD.exists(LUA_APPS_DIR);
   if (fresh) {
     if (!SD.exists("/daxen")) SD.mkdir("/daxen");
@@ -1116,8 +1186,8 @@ static void luaEnsureExamples() {
   }
   if (!fresh && SD.exists(LUA_APPS_DIR "/veri/.surum3")) return;
   // ilk kez: bütün örnekler; güncellemede yalnız rehber (silinen örnekler geri gelmesin)
-  for (auto& p : LUA_PACK)
-    if (p.group == 0 && (fresh || !strcmp(p.name, "REHBER.txt"))) lpWrite(p, LUA_APPS_DIR);
+  for (const char* n : LUA_EXAMPLES)
+    if (fresh || !strcmp(n, "REHBER.txt")) packCopy((String("lua/") + n).c_str(), joinPath(LUA_APPS_DIR, n));
   if (!SD.exists(LUA_APPS_DIR "/veri")) SD.mkdir(LUA_APPS_DIR "/veri");
   luaWriteFile(LUA_APPS_DIR "/veri/.surum3", "3");
 }

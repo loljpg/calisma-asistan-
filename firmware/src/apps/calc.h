@@ -217,7 +217,7 @@ static void calcDrawDisplay() {
     text("Hata", 308, HDR_H + 34, F_MD, C_ACC, C_BG, TR_DATUM);
   } else if (calcHasResult) {
     String r = calcFmt(calcResult);
-    const uint8_t* f = textW(r, F_LG) <= 296 ? F_LG : F_MD;
+    Font f = textW(r, F_LG) <= 296 ? F_LG : F_MD;
     text((calcDone ? "" : "= ") + r, 308, HDR_H + 30, f, calcDone ? C_TEXT : C_TEXT3, C_BG, TR_DATUM);
   }
   hline(0, CALC_KY - 3, SCR_W);

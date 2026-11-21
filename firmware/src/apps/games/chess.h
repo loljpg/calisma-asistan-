@@ -556,9 +556,10 @@ static void chThink() {
   chAiNoise = chLevel == 0 ? 60 : 8;
   chNodeLimit = chLevel == 0 ? 4000 : (chLevel == 1 ? 20000 : 60000);
   chAiAbort = chAiDone = false;
-  chAiBusy = true;
-  chAiPid = kSpawn("satranç", chAiProc, 10 * 1024, true);
-  if (chAiPid < 0) {  // süreç açılamadıysa (bellek) burada düşünülür
+  // Ayrı süreç (10 KB yığın) bellek bütçesine sığmıyorsa ya da açılamadıysa burada düşünülür
+  chAiPid = memAsk(MJ_CHESS, 10 * 1024, 10 * 1024, nullptr) ? kSpawn("satranç", chAiProc, 10 * 1024, true) : -1;
+  chAiBusy = chAiPid >= 0;
+  if (chAiPid < 0) {
     chAiBusy = false;
     ChMove m;
     if (chBest(chP, chAiDepth, chAiNoise, m)) chApply(m);

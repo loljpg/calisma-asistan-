@@ -77,13 +77,18 @@ hesap yaparken saat, dokunma ve alarmlar donmaz.
 | ışık | servis | 50 ms | RGB ışık ve ekran parlaklığı |
 | ağ | görev, çekirdek 0 | — | Wi-Fi, bulut, hava, güncelleme |
 | wifi, tcp/ip, bt-host, bt-denetleyici | sistem görevi | — | ESP-IDF ve NimBLE'nin kendi görevleri (yalnızca izlenir) |
-| web | görev, çekirdek 1 | — | Aktarım ve hesap sayfası sunucusu, yalnızca o ekran açıkken |
+| web | görev, çekirdek 1 | — | Aktarım ve hesap sayfası sunucusu; Aktarım kapalıyken 10 dk istek gelmezse kapanır |
+| ağ-araç | görev, çekirdek 1 | — | Terminal ağ araçları (ping, dns, tcp, traceroute, test), iş bitince kapanır |
 | lua:… | görev, çekirdek 1 | — | Açık (ya da arka plandaki) Lua uygulaması |
 | satranç | görev, çekirdek 1 | — | Satranç motoru, yalnızca düşünürken |
 
 Servisler çekirdek görevinde (öncelik 3) çalışır ve ekrana serbestçe çizer. Görevlerin kendi yığını
 vardır (öncelik 1), ekrana yalnızca ekran kilidiyle çizer. Sonlandırma işbirliklidir: süreç isteği
 görür ve kendisi çıkar, böylece yarım kalan SD yazması ya da tutulan bir kilit olmaz.
+
+Ağır işler (Lua, web sunucusu, ağ aracı, satranç motoru, Bluetooth taraması) başlamadan önce bellek
+bekçisine sorar: 18 KB taban korunur, aynı anda en çok 3 ağır iş çalışır. Ayrıntı ve sayılar:
+[docs/bellek.md](../docs/bellek.md).
 
 ## Ses
 
@@ -125,6 +130,12 @@ USB-C → USB-A OTG çevirici takıp normal kablo bağla. Powerbank'te de USB-A 
 
 **BOOT tuşu:** kısa bas → ana ekran, 2 saniye → Ayarlar, 6 saniye → Wi-Fi ayarları.
 
+**Açılışta BOOT** (logo ekranındaki 2 saniye): kısa bas → dokunmatik ayarı, 3 saniye basılı tut →
+**kurtarma kipi**. Art arda 3 çökmeden sonra kurtarma kipi kendiliğinden açılır. Seçenekler: normal
+başlat, güvenli başlat (Wi-Fi kapalı), PIN'i ve ekran kilidini kaldır, dokunmatik ayarını sıfırla,
+önceki yazılıma dön, bütün ayarları sıfırla. Silen ya da değiştiren seçenek ikinci kez seçilince
+uygulanır; SD karttaki dosyalara hiçbiri dokunmaz.
+
 **Işık:** yeşil = sayaç çalışıyor, mavi yanıp sönme = 2 dk içinde oturum başlıyor ya da Pomodoro
 molası, kırmızı = buluta bağlanamıyor. *Gece ekranı kıs* açıksa ekran 22:00–07:00 arası kısılır (Ayarlar → Ekran).
 Otomatik parlaklık ortam ışığına göre ayarlar; sensör ters çalışıyorsa Işık ölçer → *Ters çevir*.
@@ -151,6 +162,12 @@ Kart yalnızca aynı modelin **daha yeni** sürümünü yükler; işlediği dosy
 
 Takılı değilse sistem yine çalışır (notlar, fotoğraf ve Lua uygulamaları hariç). FAT32 olmalı.
 
+**Yazı tipleri, logo ve Lua dosyaları SD karttadır** (`/daxen/sys/varlik.bin`, yazılıma gömülü
+değil; bellekte yer açmak için). Paket yoksa ya da yazılımın beklediği sürüm değilse kart onu
+Wi-Fi'deyken çalıştığı sürümün GitHub sayfasından indirir (açılışta, sonra dakikada bir dener);
+indirme sertifika doğrulamalıdır, dosya boyu, sürümü ve CRC32'si tutmazsa kullanılmaz. Paket
+inene kadar ya da SD kart yokken ekran yerleşik yazıyla çalışır (ç → c, ğ → g …).
+
 | Klasör | İçerik |
 | --- | --- |
 | `/calisma/` | Plan önbelleği, internet yokken biriken kayıtlar ve aylık kalıcı kayıt |
@@ -160,7 +177,8 @@ Takılı değilse sistem yine çalışır (notlar, fotoğraf ve Lua uygulamalar�
 | `/daxen/cizim/` | Çizimler |
 | `/daxen/kartlar/` | Kendi bilgi kartı destelerin |
 | `/daxen/uygulamalar/` | Lua uygulamaları ve verileri (her uygulamanın günlüğü `veri/<ad>/gunluk.txt`); izinler ilk açılışta sorulur ([docs/lua.md](../docs/lua.md)) |
-| `/daxen/sys/` | Sistem dosyaları; `gunluk.txt` sistem günlüğü (32 KB'ta `gunluk.1.txt`'ye döner) |
+| `/daxen/sys/` | Sistem dosyaları; `varlik.bin` yazı tipleri, logo, Lua dosyaları; `gunluk.txt` sistem günlüğü (32 KB'ta `gunluk.1.txt`'ye döner) |
+| `/daxen/gizli/` | Gizli özelliklerin açıldığı yer ([docs/gizli.md](../docs/gizli.md)) |
 
 ## Telefonla eşleşme
 
@@ -178,7 +196,10 @@ Bluetooth bağlıyken Wi-Fi gerekmez: plan, tikler, sayaç, saat, bildirimler ve
   `os/` çekirdek ve kabuk (ana ekran, başlatıcı, dokunma), `apps/` uygulamalar. Yeni uygulama: `apps/` altına
   bir `App` tanımı yaz, `os/shell.h` içindeki `AppId` ve `os/registry.h` tablosuna ekle.
 - Renkler `ui/theme.h`, simgeler `ui/icons.h` (48'lik ızgarada vektör), logo `tools/make_logo.py`,
-  yazı tipleri `tools/make_fonts.py` (Inter, SIL Open Font License 1.1).
+  yazı tipleri `tools/make_fonts.py` (Inter, SIL Open Font License 1.1) → `assets/`. Varlık paketi
+  `tools/make_assets.py` (`assets/`, `lua/` → `varlik.bin` ve beklenen sürüm `src/core/varlik.h`;
+  `--check` ile denetler); okuma `ui/font.h`, indirme `sys/assets.h`. Lua dosyası, yazı tipi ya da
+  logo değişince `make_assets.py` çalıştırılıp `varlik.h` işlenmeli, yoksa CI geçmez.
 - Lua 5.4 `lib/lua/` (MIT).
 - Dokunmatik: `core/touch.h` (XPT2046, eksen başına 5 ölçümün ortancası), `core/calib.h`
   (9 noktadan en küçük karelerle afin dönüşüm: ölçek, kayma, eksen takası, dönüklük), `os/calibrate.h`.

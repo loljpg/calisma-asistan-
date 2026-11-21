@@ -1,7 +1,8 @@
 """TFT_eSPI için yumuşak (anti-aliased) yazı tipleri üretir: python3 make_fonts.py
 
 TFT_eSPI'nin yerleşik yazı tiplerinde Türkçe harfler (ç ğ ı İ ö ş ü) yok. Bu betik
-gereken harfleri .vlw biçiminde çizip src/fonts.h dosyasına yazar.
+gereken harfleri .vlw biçiminde çizip assets/fonts/<ad>.vlw dosyalarına yazar. Yazılıma
+gömülmezler: tools/make_assets.py onları SD karttaki varlık paketine koyar (ui/font.h okur).
 DAXEN VANE tasarımı: bütün arayüz Inter (SIL Open Font License 1.1, gömülü kullanım serbest).
 Logonun serif yazısı yazı tipi değil, görseldir (tools/make_logo.py).
 """
@@ -11,7 +12,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 INTER = Path("/usr/share/fonts/opentype/inter")
-OUT = Path(__file__).resolve().parent.parent / "src" / "fonts.h"
+OUT = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 
 TEXT = (
     "".join(chr(c) for c in range(0x20, 0x7F))
@@ -69,24 +70,11 @@ def build(path, size, chars, tight=False):
 
 
 def main():
-    lines = [
-        "// Bu dosya tools/make_fonts.py ile üretildi, elle değiştirme.",
-        "// Yazı tipi: Inter (rsms.me/inter), SIL Open Font License 1.1",
-        "#pragma once",
-        "#include <Arduino.h>",
-        "",
-    ]
+    OUT.mkdir(parents=True, exist_ok=True)
     for name, path, size, chars in FONTS:
         blob = build(path, size, chars, name in TIGHT)
-        lines.append(f"// {path} {size}px, {len(set(chars))} karakter, {len(blob)} bayt")
-        lines.append(f"const uint8_t {name}[] PROGMEM = {{")
-        for i in range(0, len(blob), 24):
-            lines.append("  " + ",".join(f"0x{b:02X}" for b in blob[i:i + 24]) + ",")
-        lines.append("};")
-        lines.append("")
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text("\n".join(lines), encoding="utf-8")
-    print(f"yazıldı: {OUT} ({OUT.stat().st_size // 1024} KB kaynak)")
+        (OUT / f"{name}.vlw").write_bytes(blob)
+        print(f"yazıldı: assets/fonts/{name}.vlw ({path} {size}px, {len(set(chars))} karakter, {len(blob)} bayt)")
 
 
 if __name__ == "__main__":

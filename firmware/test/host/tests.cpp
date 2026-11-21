@@ -483,19 +483,81 @@ static void testLua() {
   }
   CHECK(same);
 
-  group("sıkıştırılmış dosyalar");
+  group("varlık paketi ve yazı tipleri");
   CHECK(crc32Upd(0, (const uint8_t*)"123456789", 9) == 0xCBF43926u);
   CHECK(crc32Upd(crc32Upd(0, (const uint8_t*)"1234", 4), (const uint8_t*)"56789", 5) == 0xCBF43926u);
-  bool allOk = true;
-  for (auto& p : LUA_PACK) {
-    std::vector<uint8_t> b(p.len);
-    allOk &= lzUnpack(p.data, p.plen, b.data(), p.len) == p.len && b[0] != 0;
-    allOk &= lzUnpack(p.data, p.plen, b.data(), p.len - 1) == 0;  // tampon küçükse 0
+  CHECK(packOk);
+  {
+    uint32_t off, len;
+    CHECK(packFind("f/sm", off, len) && len > 1000 && off % 4 == 0);
+    CHECK(packFind("gizli/vane.lua", off, len) || packFind("logo/l", off, len));
+    CHECK(!packFind("yok/boyle", off, len));
+    CHECK(packCopy("lua/zar.lua", "/zar-kopya.lua") && SD.open("/zar-kopya.lua").size() > 50);
+    SD.remove("/zar-kopya.lua");
   }
-  CHECK(allOk && sizeof(LUA_PACK) / sizeof(LUA_PACK[0]) >= 6);
-  const uint8_t bad[] = {0x00, 0xff, 0xff};  // ilk öğe olmayan geçmişe başvuruyor
-  uint8_t ob[8];
-  CHECK(lzUnpack(bad, 3, ob, 8) == 0);
+  // genişlikler TFT_eSPI'nin .vlw ile ölçtüğüyle aynı (yerleşim değişmesin)
+  {
+    static const char* const VLW[5] = {"F_XS", "F_SM", "F_MD", "F_LG", "F_XL"};
+    const Font fs[5] = {F_XS, F_SM, F_MD, F_LG, F_XL};
+    const char* words[] = {"Merhaba", "çğıöşüÇĞİÖŞÜ", "0123456789:", "DAXEN", "Ağ/Bluetooth", "%42", "12:05"};
+    std::string dir = std::string(__FILE__);
+    dir = dir.substr(0, dir.rfind('/')) + "/../../assets/fonts/";
+    bool same = true;
+    for (int i = 0; i < 5; i++) {
+      FILE* fp = fopen((dir + VLW[i] + ".vlw").c_str(), "rb");
+      CHECK(fp != nullptr);
+      if (!fp) continue;
+      std::vector<uint8_t> v(1 << 20);
+      v.resize(fread(v.data(), 1, v.size(), fp));
+      fclose(fp);
+      TFT_eSPI t(320, 240);
+      t.loadFont(v.data());
+      for (const char* w : words) {
+        if (i == 3 && (w[0] < '0' || w[0] > '9') && w[0] != '%') continue;  // F_LG yalnız rakam
+        if (i == 4 && (w[0] < '0' || w[0] > '9')) continue;                // F_XL yalnız rakam
+        int a = t.textWidth(w), b = fontWidth(fs[i], w);
+        if (a != b) printf("    %s \"%s\": vlw %d, paket %d\n", VLW[i], w, a, b);
+        same &= a == b;
+      }
+    }
+    CHECK(same);
+    printf("    satır yükseklikleri: %d %d %d %d %d\n", fontHeight(F_XS), fontHeight(F_SM), fontHeight(F_MD), fontHeight(F_LG), fontHeight(F_XL));
+    CHECK(fontHeight(F_MD) > fontHeight(F_SM) && fontHeight(F_XL) > 40);
+  }
+  // paket yoksa ya da bozuksa: yerleşik yazı (yalnız ASCII), çizim çökmez
+  {
+    std::vector<uint8_t> keep;
+    {
+      File f = SD.open(ASSET_PATH);
+      keep.resize(f.size());
+      f.read(keep.data(), keep.size());
+    }
+    std::vector<uint8_t> bad = keep;
+    bad[0] = 'X';
+    File w = SD.open(ASSET_PATH, FILE_WRITE);
+    w.write(bad.data(), bad.size());
+    w.close();
+    CHECK(!packOpen() && !packOk);
+    CHECK(fontAscii("Çığ öşü İz") == "Cig osu Iz");
+    CHECK(fontWidth(F_MD, "çay") == 3 * 6 * 2 && fontWidth(F_SM, "ab") == 12);
+    tft.fillRect(0, 0, 320, 240, 0);
+    text("Ağ ayarı", 10, 10, F_MD, C_TEXT, C_BG);
+    DRAW_LOGO(LOGO_L, 40, 60);
+    int ink = 0;
+    for (int y = 0; y < 40; y++)
+      for (int x = 0; x < 120; x++) ink += tft.readPixel(x, y) != 0;
+    CHECK(ink > 20);  // yerleşik yazıyla bir şey çizildi
+    uint32_t off, len;
+    CHECK(!packFind("f/sm", off, len) && !packCopy("lua/zar.lua", "/zar-kopya.lua"));
+    w = SD.open(ASSET_PATH, FILE_WRITE);
+    w.write(keep.data(), keep.size() - 4);  // eksik dosya
+    w.close();
+    CHECK(!packOpen());
+    w = SD.open(ASSET_PATH, FILE_WRITE);
+    w.write(keep.data(), keep.size());
+    w.close();
+    CHECK(packOpen() && fontWidth(F_MD, "çay") != 36);
+  }
   // örnekler SD'de, rehber yeni sürüm
   File g = SD.open(LUA_APPS_DIR "/REHBER.txt");
   CHECK(g && g.readString().indexOf("-- izin:") >= 0);
@@ -915,6 +977,115 @@ static void testAuth() {
   homeShow();
 }
 
+// ---------------------------------------------------------------------------
+// Gizli özellikler: beş ekran gerçek Lua ile çalışır, hata vermez; tetikler (docs/gizli.md)
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Bellek bütçesi (core/memcalc.h, os/membudget.h)
+// ---------------------------------------------------------------------------
+static void testMem() {
+  group("bellek bütçesi");
+  const uint32_t K = 1024;
+  CHECK(memDecide(60 * K, 40 * K, 20 * K, 14 * K, 0, MJ_LUA) == MV_OK);
+  CHECK(memDecide(39 * K, 40 * K, 20 * K, 14 * K, 0, MJ_LUA) == MV_LOW);       // 20 + 18 taban + 2 pay = 40
+  CHECK(memDecide(40 * K, 40 * K, 20 * K, 14 * K, 0, MJ_LUA) == MV_OK);
+  CHECK(memDecide(80 * K, 14 * K, 20 * K, 14 * K, 0, MJ_LUA) == MV_FRAG);      // yığın tek parça sığmıyor
+  uint8_t three = 1 << MJ_WEB | 1 << MJ_NETTOOL | 1 << MJ_BLESCAN;
+  CHECK(memDecide(200 * K, 100 * K, 1 * K, 1 * K, three, MJ_LUA) == MV_BUSY);  // en çok 3 ağır iş
+  CHECK(memDecide(200 * K, 100 * K, 1 * K, 1 * K, three, MJ_WEB) == MV_OK);    // kendisi sayılmaz
+  CHECK(memDecide(200 * K, 100 * K, 1 * K, 1 * K, 1 << MJ_WEB | 1 << MJ_CHESS, MJ_LUA) == MV_OK);
+  // memAsk: açık işler adlarıyla söylenir
+  webOn = g_ndBusy = g_bsBusy = true;
+  String why;
+  CHECK(!memAsk(MJ_CHESS, 10 * K, 10 * K, &why) && why.indexOf("web sunucusu") >= 0 && why.indexOf("ağ aracı") >= 0 &&
+        why.indexOf("Bluetooth taraması") >= 0);
+  // Lua uygulaması açılmaz, nedeni ekranda
+  luaStopProc();
+  luaSetError("");
+  {
+    Lock l;
+    luaErr = "";
+  }
+  luaCur = -1;
+  luaExtra.path = LUA_APPS_DIR "/merhaba.lua";
+  luaExtra.name = "Merhaba";
+  luaCur = -2;
+  luaOpenFn();
+  String e;
+  {
+    Lock l;
+    e = luaErr;
+  }
+  CHECK(!LS && e.startsWith("Aynı anda en çok 3"));
+  webOn = g_ndBusy = g_bsBusy = false;
+  CHECK(memAsk(MJ_LUA, LUA_STACK + 16 * K, LUA_STACK, &why));  // önizlemede 96 KB boş, en büyük blok 52 KB
+  CHECK(!memAsk(MJ_LUA, 80 * K, LUA_STACK, &why) && why.startsWith("Bellek yetersiz: 100 KB gerekiyor, 96 KB boş"));
+  CHECK(!memAsk(MJ_WEB, 10 * K, 60 * K, &why) && why.startsWith("Bellek parçalı"));
+  luaCur = -1;
+}
+
+static void testGizli() {
+  group("gizli özellikler");
+  homeShow();
+  const char* files[] = {"vane.lua", "uyanis.lua", "hayalet.lua", "radar.lua", "bilinmeyen.lua"};
+  const char* names[] = {"Project VANE", "Developer Awakening", "Ghost Protocol", "Dark Radar", "The Unknown"};
+  for (int k = 0; k < 5; k++) {
+    gizliAc(files[k]);
+    bool open = curApp == &APP_LUA && luaRunName == names[k] && SD.exists(String(LUA_GIZLI_DIR "/") + files[k]);
+    for (int i = 0; i < 300 && open; i++) {  // 12 sn: yağmur, yazılar, radar turları
+      g_ms += 40;
+      shellTick();
+    }
+    if (!open) printf("    açılmadı: %s (app %s, ad %s, pid %d %d)\n", files[k], curApp ? curApp->label : "-", luaRunName.c_str(), (int)kAlive(luaPid), luaPid);
+    CHECK(open && !luaHasError());
+    if (luaHasError()) printf("    %s: %s\n", files[k], luaErr.c_str());
+    if (k == 3) CHECK(luaRunPerm == (LP_EKRAN | LP_BT));
+    appExit();
+  }
+  CHECK(bsCount() == 0);  // radar kapanınca tarama listesi bırakıldı
+  // tetikler: terminalin gizli komutları yardımda görünmez
+  CmdOut h = termExec("help");
+  bool listed = false;
+  for (auto& l : h.lines) listed |= l.indexOf("ghost") >= 0 || l.indexOf("radar") >= 0 || l.indexOf("awaken") >= 0;
+  CHECK(!listed);
+  homeShow();
+  termExec("ghost");
+  CHECK(curApp == &APP_LUA && luaRunName == "Ghost Protocol");
+  appExit();
+  CHECK(termExec("awaken").lines[0].indexOf("geliştirici") >= 0);
+  // Project VANE: Sistem sayfasında logoya beş dokunuş
+  settingsOpenPage(SP_SYSTEM);
+  for (int i = 0; i < 4; i++) tap(40, HDR_H + 20);
+  CHECK(curApp == &APP_SETTINGS);
+  tap(40, HDR_H + 20);
+  CHECK(curApp == &APP_LUA && luaRunName == "Project VANE");
+  appExit();
+  // Dark Radar: Ağ'da Bluetooth sekmesinin adına uzun basış
+  openApp(AID_NETWORK);
+  CHECK(curApp->hold && curApp->hold(264, HDR_H + 12) && curApp == &APP_LUA && luaRunName == "Dark Radar");
+  appExit();
+  appExit();
+  // Developer Awakening: geliştirici seviyesi ilk kez açılınca bir kez
+  prefs.begin("cs", false);
+  prefs.remove("gzdev");
+  prefs.end();
+  authSetPin("2468");
+  homeShow();
+  termExec("dev");
+  typePin("2468");
+  CHECK(curApp == &APP_LUA && luaRunName == "Developer Awakening");
+  appExit();
+  authDevOff();
+  termExec("dev");
+  typePin("2468");
+  CHECK(curApp != &APP_LUA);
+  authClearPin();
+  homeShow();
+  CHECK(!termExec("ghost").lines.empty());
+  appExit();
+  homeShow();
+}
+
 static void testBle() {
   group("BLE reklam çözücü");
   BleDev d = bleOf({2, 1, 6, 5, 9, 'V', 'a', 'n', 'e', 4, 0xFF, 0x4C, 0x00, 7, 3, 2, 0x0F, 0x18, 2, 0x0A, 0xF4, 3, 0x19, 0xC1, 0x00});
@@ -1090,6 +1261,8 @@ int main() {
   testNet();
   testBle();
   testAuth();
+  testGizli();
+  testMem();
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

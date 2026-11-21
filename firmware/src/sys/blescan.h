@@ -61,13 +61,10 @@ static bool bsStart(uint32_t ms, bool report) {
   if (!bsList) {
     const size_t need = sizeof(BleDev) * BLE_LIST_CAP;
     BleDev* l;
-    if (sysHeapFree() < 20 * 1024 + need || sysHeapMaxAlloc() < need + 256) {
-      l = nullptr;
-    } else {
-      l = (BleDev*)calloc(BLE_LIST_CAP, sizeof(BleDev));
-    }
+    String why;
+    l = memAsk(MJ_BLESCAN, need, need, &why) ? (BleDev*)calloc(BLE_LIST_CAP, sizeof(BleDev)) : nullptr;  // os/membudget.h
     if (!l) {
-      bsErr = "Bellek yetmiyor";
+      bsErr = why.length() ? why : String("Bellek yetmiyor");
       return false;
     }
     portENTER_CRITICAL(&bsMux);

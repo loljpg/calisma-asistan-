@@ -106,14 +106,12 @@ static int edCharW(const String& s, int i) {
   uint8_t c = s[i];
   if (c < 0x80) {
     if (!edCwOk) {
-      useFont(F_SM);
       for (int k = 0; k < 256; k++) edCw[k] = 0;
       edCwOk = true;
     }
     if (!edCw[c]) {
       char b[2] = {(char)c, 0};
-      useFont(F_SM);
-      edCw[c] = std::max(1, (int)tft.textWidth(b));
+      edCw[c] = std::max(1, textW(b, F_SM));
     }
     return edCw[c];
   }

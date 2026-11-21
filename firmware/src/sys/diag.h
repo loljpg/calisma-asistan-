@@ -66,6 +66,20 @@ static void diagTick() {
                        String(ESP.getMaxAllocHeap() / 1024) + " KB, ağ: " + netPhase + ")");
 }
 
+// Yığını azalan görev: boşluğu 1,5 KB'ın altına inen her görev bir kez günlüğe yazılır (yığın
+// boyları bu kayıtlara göre ayarlanır; docs/bellek.md). Saat servisinden, tanıyla birlikte çağrılır.
+static void diagStackTick() {
+  static int warned[K_MAX] = {0};
+  for (int i = 0; i < K_MAX; i++) {
+    const Proc& p = kProcs[i];
+    if (!p.used || p.kind != PK_TASK || p.done || !p.task || warned[i] == p.pid) continue;
+    uint32_t fr = kStackFree(p);
+    if (fr >= 1536) continue;
+    warned[i] = p.pid;
+    sysLog("bellek", "yığın azaldı: " + p.name + " " + String(fr) + " B boş (" + String(p.stack / 1024) + " KB)");
+  }
+}
+
 // ESP-IDF ve NimBLE'nin kendi görevleri: adlarıyla bulunur, Görevler'de durum ve yığın boşluğu
 // görünür. İşlemci payları ölçülemez (FreeRTOS çalışma süresi sayacı bu derlemede kapalı).
 static void diagAdoptSystemTasks() {

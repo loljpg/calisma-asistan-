@@ -243,15 +243,15 @@ static void ndPoll() {
     else ndEmit("Tarama bitmedi");
   }
   if (ndPending) {
-    bool memOk = sysHeapFree() >= ND_STACK + 18 * 1024 + 2048 && sysHeapMaxAlloc() >= ND_STACK + 512;
+    String why;
+    bool memOk = memAsk(MJ_NETTOOL, ND_STACK, ND_STACK, &why);  // os/membudget.h
     if (memOk) {
       ndPending = false;
       ndPid = kSpawn("ağ-araç", ndProc, ND_STACK, true, K_PROC_PRIO, 1);
       if (ndPid < 0) ndEmit("Süreç açılamadı");
-    } else if (millis() - ndPendingAt > 8000) {
-      ndPending = false;
-      ndEmit("Bellek yetersiz: " + String((ND_STACK + 20 * 1024) / 1024) + " KB gerekiyor, " + String(sysHeapFree() / 1024) +
-             " KB boş (en büyük blok " + String(sysHeapMaxAlloc() / 1024) + " KB)");
+    } else if (millis() - ndPendingAt > 8000 || why.startsWith("Aynı anda")) {
+      ndPending = false;  // bellek beklenince açılmadı ya da başka ağır işler açık
+      ndEmit(why);
     }
   }
   if (!ndPending && !kAlive(ndPid)) {
@@ -280,7 +280,7 @@ static bool ndStart(uint8_t job, const String& host, int arg) {
   ndHost = host;
   ndArg = arg;
   ndPending = true;
-  if (sysHeapFree() < ND_STACK + 20 * 1024 || sysHeapMaxAlloc() < ND_STACK + 512) {
+  if (memDecide(sysHeapFree(), sysHeapMaxAlloc(), ND_STACK, ND_STACK, 0, MJ_NETTOOL) != MV_OK) {
     netHold |= HOLD_NETTOOL;  // bulut iş bitene kadar bekler; ndPoll bırakır
     ndEmit("Bellek açılıyor (bulut bağlantısı iş boyunca duraklatıldı)…");
   }

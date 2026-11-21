@@ -47,10 +47,12 @@ static const char FW_MARKER[] = "CSFW:" FW_VARIANT ":" STR(FW_BUILD) ";";
 #include "sys/libtrim.h"  // kullanılmayan kütüphane parçalarının yerine küçük karşılıklar
 #include "sys/store.h"
 #include "sys/backup.h"
+#include "sys/recovery.h"
 #include "sys/sdlog.h"
 #include "sys/diag.h"
 #include "sys/ota_roots.h"
 #include "sys/google_roots.h"
+#include "sys/assets.h"  // varlık paketini indirme
 #include "sys/net.h"
 #include "sys/sdupdate.h"
 #include "sys/events.h"
@@ -178,13 +180,12 @@ void setup() {
 
   tsBegin();
 
-  spr.setColorDepth(16);
-  sprOk = spr.createSprite(SPR_W, SPR_H) != nullptr;
-  if (sprOk) spr.loadFont(F_XL);
+  sprInit();  // 4 bit paletli ara bellek (ui/theme.h)
 
   Serial.println(FW_MARKER);
-  uiSplash("SD kart denetleniyor…");
   sdOk = sdBegin();
+  packOpen();  // yazı tipleri ve logo SD'deki varlık paketinden (ui/font.h)
+  uiSplash(sdOk ? "SD kart denetleniyor…" : "SD kart yok");
   diagStart();  // günlük (RAM + SD), önceki çökmenin özeti
   if (sdOk) {
     sdTryUpdate();
@@ -204,19 +205,28 @@ void setup() {
   pruneLocalEvents();
   timerRestore();
 
-  // Açılışta 2 sn içinde BOOT'a basılırsa dokunmatik yeniden ayarlanır.
-  bool calib = !cfg.calibrated;
-  if (!calib) {
-    uiSplash("Dokunmatik ayarı için BOOT'a bas");
+  // Açılışta 2 sn içinde BOOT: kısa bas → dokunmatik ayarı; 3 sn basılı tut → kurtarma kipi
+  // (sys/recovery.h). Art arda 3 çökmeden sonra kurtarma kipi kendiliğinden açılır.
+  bool calib = !cfg.calibrated, recovery = rcCountCrash();
+  String why = recovery ? "Art arda 3 çökme" : "BOOT basılı tutuldu";
+  if (!recovery) {
+    uiSplash("BOOT: bas → dokunmatik ayarı · 3 sn tut → kurtarma");
     uint32_t t0 = millis();
     while (millis() - t0 < 2000) {
       if (digitalRead(PIN_BOOT) == LOW) {
-        while (digitalRead(PIN_BOOT) == LOW) delay(10);
-        calib = true;
+        uint32_t d0 = millis();
+        while (digitalRead(PIN_BOOT) == LOW && millis() - d0 < 3000) delay(10);
+        if (millis() - d0 >= 3000) recovery = true;
+        else calib = true;
         break;
       }
       delay(10);
     }
+  }
+  if (recovery) {
+    while (digitalRead(PIN_BOOT) == LOW) delay(10);
+    rcRun(why);
+    calib = calib || !cfg.calibrated;
   }
   if (calib) runCalibration();
 
@@ -229,11 +239,13 @@ void setup() {
     Lock l;
     haveWifi = !wifiKnown.empty();
   }
+  if (rcSafe) haveWifi = false;  // güvenli başlatma: bu açılışta Wi-Fi yok
   if (haveWifi) {
     WiFi.begin();  // son bağlanılan ağ; olmazsa ağ görevi kayıtlı ağlardan görüneni seçer
   }
   configTzTime("<+03>-3", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
   if (haveWifi) bootOtaCheck();
+  if (haveWifi && !rcSafe) assetsBoot();  // varlık paketi eksikse (sys/assets.h)
   bleBegin();
 
   TaskHandle_t netH = nullptr;
@@ -285,13 +297,16 @@ static void svcClock() {  // 200 ms: dakika işleri, Pomodoro, bakım, tanı
     lastDiag = millis();
     rtcUpSec = millis() / 1000;
     rtcMinHeap = ESP.getMinFreeHeap();
+    diagStackTick();  // yığını azalan görev günlüğe (sys/diag.h)
   }
   diagTick();
   termSerialPoll();  // USB seri porttan terminal komutları (apps/terminal.h)
   ndPoll();          // ağ aracı: bekleyen işi başlat, biteni kapat (sys/netdiag.h)
+  webIdleTick();     // 10 dk kullanılmayan web sunucusu kapatılır (sys/web.h)
   bsPoll();          // Bluetooth taraması: biteni işaretle, kullanılmayan listeyi bırak (sys/blescan.h)
   if (!markedValid && millis() > 45000) {
     markedValid = true;
+    rcHealthy();
     esp_ota_mark_app_valid_cancel_rollback();
     sysLog("güncelleme", "45 sn sorunsuz: yazılım sağlam işaretlendi");
   }

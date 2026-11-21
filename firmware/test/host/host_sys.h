@@ -137,6 +137,8 @@ static bool webOn = false;
 static bool webStart() { return webOn = true; }
 static void webStop() { webOn = false; }
 static bool webRunning() { return webOn; }
+static String g_webErr;
+static String webError() { return g_webErr; }
 static String webStatus() { return "Alındı: Sezen Aksu - Gidiyorum.mp3 (3,3 MB)"; }
 static int webProgress() { return -1; }
 static int webUploadCount() { return 4; }
@@ -385,11 +387,10 @@ static void setupState() {
   tft.init();
   tft.setRotation(1);
   tft.setSwapBytes(true);
-  spr.setColorDepth(16);
-  sprOk = spr.createSprite(SPR_W, SPR_H) != nullptr;
-  spr.loadFont(F_XL);
+  sprInit();
   themeApply();
   sdOk = true;
+  packOpen();  // run.sh geçici SD'ye varlık paketini koyar
   cfg.dbUrl = "https://calisma-asistani-default-rtdb.europe-west1.firebasedatabase.app";
   cfg.apiKey = "AIzaSyB-örnekanahtar1234";
   cfg.email = "ornek@posta.com";

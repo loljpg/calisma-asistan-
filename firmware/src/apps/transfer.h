@@ -38,8 +38,11 @@ static void trDraw(bool full) {
   if (!webRunning() && !webStart()) {
     if (!trWaitSince) trWaitSince = millis();
     bool waiting = millis() - trWaitSince < 8000;
-    emptyState(HDR_H, SCR_H - HDR_H, I_TRANSFER, waiting ? "Bellek açılıyor…" : "Sunucu açılamadı",
-               waiting ? "Bulut bağlantısı sunucu açıkken duraklatılıyor." : "Bellek yetmedi; kartı yeniden başlatıp dene.");
+    String why = webError();
+    bool busy = why.startsWith("Aynı anda");  // bellek değil, açık ağır işler (os/membudget.h)
+    emptyState(HDR_H, SCR_H - HDR_H, I_TRANSFER, waiting && !busy ? "Bellek açılıyor…" : "Sunucu açılamadı",
+               waiting && !busy ? "Bulut bağlantısı sunucu açıkken duraklatılıyor."
+                                : (why.length() ? why : String("Bellek yetmedi; kartı yeniden başlatıp dene.")));
     return;
   }
   trWaitSince = 0;

@@ -7,7 +7,8 @@ yeniden okunur.
 
 Klasör ilk kez oluşturulurken içine örnekler (`merhaba.lua`, `zar.lua`, `sayac.lua`, `top.lua`,
 `zamanlayici.lua`) ve bu belgenin kısa hali `REHBER.txt` yazılır. Örnekleri silebilirsin; yalnızca
-klasörün kendisi silinirse örnekler bir sonraki açılışta yeniden yazılır.
+klasörün kendisi silinirse örnekler bir sonraki açılışta yeniden yazılır. Örnekler SD karttaki varlık
+paketinden gelir (`/daxen/sys/varlik.bin`); paket henüz inmediyse indiği anda yazılır.
 
 Dil Lua 5.4'tür; tam sayılar ve ondalıklı sayılar 32 bittir. `string`, `table`, `math`,
 `utf8` ve `coroutine` kitaplıkları açıktır. `io`, `os`, `require`, `dofile`, `loadfile`
@@ -162,6 +163,8 @@ verilmez (sinyal gücünden güvenilir uzaklık çıkmaz). Uygulama kapanınca t
 ## Sınırlar
 
 - Bellek: Bluetooth ve Wi-Fi açıkken boş belleğin bir kısmı, en çok 96 KB. Dolarsa `not enough memory` hatası görünür.
+  Uygulama ancak 14 KB yığın ve en az 16 KB Lua belleği 18 KB tabanın üstünde boşsa açılır; aynı anda
+  en çok 3 ağır iş çalışır ([bellek.md](bellek.md)).
 - Süreç yığını 14 KB; çok derin iç içe kod (48 düzeyden fazla) `C stack overflow` hatası verir.
 - Sonsuz döngüye giren uygulama sistemi dondurmaz; geri tuşuyla ya da Görevler'den sonlandırılır.
 - Hata olursa ekranda dosya adı ve satır numarasıyla görünür; dosyayı düzeltip uygulamayı yeniden aç.

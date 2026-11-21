@@ -72,10 +72,16 @@ static UINT phJpgOut(JDEC* jd, void* bmp, JRECT* r) {
   return 1;
 }
 static bool phDrawJpg(File& f) {
-  static uint8_t work[3100];
+  // Çözücünün çalışma alanı yalnızca çözerken tutulur (sürekli 3 KB yer kaplamasın)
+  const size_t WORK = 3100;
+  std::unique_ptr<uint8_t, void (*)(void*)> work((uint8_t*)malloc(WORK), free);
+  if (!work) {
+    phErr = "Bellek yetmiyor";
+    return false;
+  }
   JDEC jd;
   PhJpg j{&f, 0, 0};
-  JRESULT rc = jd_prepare(&jd, phJpgIn, work, sizeof work, &j);
+  JRESULT rc = jd_prepare(&jd, phJpgIn, work.get(), WORK, &j);
   if (rc != JDR_OK) {
     phErr = rc == JDR_FMT3 ? "Bu JPEG türü desteklenmiyor (aşamalı)" : "Resim okunamadı (" + String((int)rc) + ")";
     return false;
@@ -99,8 +105,7 @@ static bool phDrawJpg(File&) {
 }
 #endif
 
-// --- BMP (24/32 bit ve 16 bit 565, sıkıştırmasız) ---
-static uint32_t rd32(const uint8_t* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24); }
+// --- BMP (24/32 bit ve 16 bit 565, sıkıştırmasız; rd32: ui/font.h) ---
 static bool phDrawBmp(File& f) {
   uint8_t h[54];
   if (f.read(h, 54) != 54 || h[0] != 'B' || h[1] != 'M') {

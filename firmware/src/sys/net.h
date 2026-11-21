@@ -947,8 +947,20 @@ static void netTask(void*) {
   uint32_t downSince = 0, lastAuto = 0;
   bool viewOnce = false, statusOnce = false, wasConn = false;
   for (;;) {
+    if (rcSafe) {  // güvenli başlatma (sys/recovery.h): ağ görevi boşta bekler
+      netPhase = "güvenli başlatma: Wi-Fi kapalı";
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
     netBusy = false;
     netPhase = live.c ? "canlı akış açık" : "boşta";
+    static uint32_t lastAsset = 0;  // varlık paketi eksikse dakikada bir indirmeyi dener (sys/assets.h)
+    if (!packOk && sdOk && WiFi.status() == WL_CONNECTED && (!lastAsset || millis() - lastAsset > 60000) &&
+        sysHeapMaxAlloc() > 45000) {
+      lastAsset = millis();
+      netPhase = "varlık paketi";
+      assetsDownload(nullptr);
+    }
     vTaskDelay(pdMS_TO_TICKS(live.c ? 80 : 250));
     if (wifiScanReq) {
       wifiScanReq = false;

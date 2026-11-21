@@ -133,7 +133,7 @@ static int catLeft() { return (int)cat.x - CAT_W * CAT_S / 2; }
 static void catPattern(int x, int y, const char* const* rows, int n, uint16_t col) {
   for (int r = 0; r < n; r++)
     for (int c = 0; rows[r][c]; c++)
-      if (rows[r][c] == 'X') spr.fillRect(x + c * 2, y + r * 2, 2, 2, col);
+      if (rows[r][c] == 'X') spr.fillRect(x + c * 2, y + r * 2, 2, 2, sprC(col));
 }
 static const char* const PAT_Z[] = {"XXX", "..X", ".X.", "XXX"};
 static const char* const PAT_HEART[] = {".X.X.", "XXXXX", ".XXX.", "..X.."};
@@ -145,18 +145,19 @@ static void catRender(int x0, int w) {
   if (!sprOk || x1 <= x0) return;
   while (x0 < x1) {
     int ww = std::min(x1 - x0, SPR_W);
-    spr.fillRect(0, 0, ww, ZONE_H, C_BG);
+    sprPalBegin();  // ara bellek 4 bit paletli (ui/theme.h): renkler sprC ile
+    spr.fillRect(0, 0, ww, ZONE_H, sprC(C_BG));
     int cx = (int)cat.x;
     uint16_t shadow = C_SURF;
     int fy = ZONE_FLOOR - ZONE_TOP;
-    if (cat.st != CAT_SLEEP) spr.fillRect(cx - 13 - x0, fy, 26, 2, shadow);
-    else spr.fillRect(cx - 16 - x0, fy, 32, 2, shadow);
+    if (cat.st != CAT_SLEEP) spr.fillRect(cx - 13 - x0, fy, 26, 2, sprC(shadow));
+    else spr.fillRect(cx - 16 - x0, fy, 32, 2, sprC(shadow));
     // top
     int bx = (int)cat.bx, by = fy - 4;
-    spr.fillRect(bx - 4 - x0, fy + 1, 9, 1, shadow);
-    spr.fillCircle(bx - x0, by, 4, C_ACC);
+    spr.fillRect(bx - 4 - x0, fy + 1, 9, 1, sprC(shadow));
+    spr.fillCircle(bx - x0, by, 4, sprC(C_ACC));
     float a = cat.bx / 4.0f;
-    spr.fillRect(bx - x0 + (int)roundf(cosf(a) * 2) - 1, by + (int)roundf(sinf(a) * 2) - 1, 2, 2, C_TEXT);
+    spr.fillRect(bx - x0 + (int)roundf(cosf(a) * 2) - 1, by + (int)roundf(sinf(a) * 2) - 1, 2, 2, sprC(C_TEXT));
     // kedi
     int f = catFrameNow();
     int left = catLeft(), top = ZONE_FLOOR + 1 - CAT_H * CAT_S - cat.hop;
@@ -165,7 +166,7 @@ static void catRender(int x0, int w) {
       for (int c = 0; c < CAT_W; c++) {
         char ch = row[cat.dir > 0 ? c : CAT_W - 1 - c];
         if (ch == '.') continue;
-        spr.fillRect(left + c * CAT_S - x0, top + r * CAT_S - ZONE_TOP, CAT_S, CAT_S, catColor(ch));
+        spr.fillRect(left + c * CAT_S - x0, top + r * CAT_S - ZONE_TOP, CAT_S, CAT_S, sprC(catColor(ch)));
       }
     }
     if (cat.st == CAT_SLEEP) {
