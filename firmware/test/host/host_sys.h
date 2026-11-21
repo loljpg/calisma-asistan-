@@ -134,6 +134,8 @@ static String webCode() { return webOn ? "482913" : ""; }
 static bool g_ndBusy = false;
 static String g_ndErr;
 static bool ndBusy() { return g_ndBusy; }
+static void ndPoll() {}
+static bool netLiveOpen() { return false; }
 static void ndCancel() { g_ndBusy = false; }
 static String ndError() { return g_ndErr; }
 static bool ndStart(uint8_t job, const String& host, int arg) {

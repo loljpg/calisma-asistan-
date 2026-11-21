@@ -46,7 +46,11 @@ static bool bleHasToken = false;            // bir telefonla eşleşmiş mi
 // Yeniden başlama tanısı: RTC belleği yazılım sıfırlamalarında ve çökmelerde silinmez.
 RTC_NOINIT_ATTR uint32_t rtcMagic, rtcUpSec, rtcMinHeap;
 static String bootReason;
-static const char* volatile netPhase = "boşta";  // ağ görevi o an ne yapıyor (bellek günlüğü için)
+static const char* volatile netPhase = "boşta";
+// Bulut bağlantısını geçici durduran kullanıcı işleri (bit: 1 ağ aracı, 2 web sunucusu). Canlı akışın
+// açık TLS bağlantısı on binlerce bayt tutar; kullanıcının başlattığı iş için bırakılır, iş bitince döner.
+enum : uint8_t { HOLD_NETTOOL = 1, HOLD_WEB = 2 };
+static volatile uint8_t netHold = 0;  // ağ görevi o an ne yapıyor (bellek günlüğü için)
 static String diagLastCrash;  // önceki çökmenin özeti (açılışta çekirdek dökümünden)
 
 // Hava durumu

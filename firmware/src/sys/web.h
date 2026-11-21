@@ -379,6 +379,12 @@ static void webProc(Proc* p) {
 static bool webStart() {
   if (web) return true;
   if (WiFi.status() != WL_CONNECTED) return false;
+  // Süreç yığını (10 KB) + yükleme tamponu (4 KB) + sunucu; 18 KB taban korunur. Yetmezse bulutun
+  // canlı akışı duraklatılır (netHold), ekran birkaç saniye sonra yeniden dener.
+  if (sysHeapFree() < (10 + 4 + 4 + 18) * 1024 || sysHeapMaxAlloc() < 11 * 1024) {
+    netHold |= HOLD_WEB;
+    return false;
+  }
   web = new (std::nothrow) WebServer(80);
   if (!web) return false;
   const char* hdrs[] = {"Content-Length", "Cookie"};
@@ -455,6 +461,7 @@ static bool webStart() {
 }
 
 static void webStop() {
+  netHold &= ~HOLD_WEB;
   if (!web) return;
   kStop(webPid);
   if (!kWait(webPid, 8000)) return;  // süreç hâlâ sunucuyu kullanıyor: silinmez (bir dahaki çağrıda)

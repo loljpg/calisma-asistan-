@@ -283,6 +283,7 @@ static void svcClock() {  // 200 ms: dakika işleri, Pomodoro, bakım, tanı
   }
   diagTick();
   termSerialPoll();  // USB seri porttan terminal komutları (apps/terminal.h)
+  ndPoll();          // ağ aracı: bekleyen işi başlat, biteni kapat (sys/netdiag.h)
   if (!markedValid && millis() > 45000) {
     markedValid = true;
     esp_ota_mark_app_valid_cancel_rollback();

@@ -429,7 +429,9 @@ static void setTap(int x, int y) {
       if (y >= 200) {
         if (!wifiConnected()) {
           alertBox("Wi-Fi gerekli", "Tarayıcıdan girmek için kart ve telefon aynı Wi-Fi ağında olmalı.");
-        } else if (webStart()) {
+        } else if (!webStart()) {
+          alertBox("Bellek açılıyor", "Bulut bağlantısı duraklatıldı; birkaç saniye sonra yeniden dokun.");
+        } else {
           alertBox("Tarayıcıdan gir", "Telefonun tarayıcısında http://" + wifiIp() + "/hesap adresini aç. Giriş kodu: " + webCode());
         }
       } else if (y >= HDR_H + 50) {

@@ -179,4 +179,4 @@ static void nwClose() {
   nwLines.shrink_to_fit();
 }
 
-static const App APP_NETWORK = {"Ağ", "Ağ", I_WIFI, nwOpen, nwDraw, nwTap, nullptr, nwSwipe, nullptr, nwTick, nullptr, nwClose};
+static const App APP_NETWORK = {"Ağ", "Ağ", I_GLOBE, nwOpen, nwDraw, nwTap, nullptr, nwSwipe, nullptr, nwTick, nullptr, nwClose};

@@ -523,7 +523,7 @@ static void testCmd() {
 
   group("terminal komutları");
   CmdOut m = termExec("memory");
-  CHECK(m.lines.size() == 4 && m.lines[0].startsWith("Boş: "));
+  CHECK(m.lines.size() == 5 && m.lines[0].startsWith("Boş: ") && m.lines[3].startsWith("Bulut canlı akışı"));
   CHECK(termExec("clear").clear);
   sysLog("test", "bir");
   sysLog("test", "iki");
@@ -584,6 +584,15 @@ static void testNet() {
   CHECK(icmpMatch(t.data(), 30, 0xbeef, 3) == -1);  // kısa paket
   auto q = ipPkt(8, 1, 1, false);
   CHECK(icmpMatch(q.data(), q.size(), 1, 1) == -1);  // istek, yanıt değil
+
+  group("uygulama listesi sırası");
+  const App* const* at = appTable();
+  CHECK(at[AID_YKS] == &APP_YKS && at[AID_NOTES] == &APP_NOTES && at[AID_FILES] == &APP_FILES && at[AID_SETTINGS] == &APP_SETTINGS);
+  CHECK(at[AID_TERMINAL] == &APP_TERMINAL && at[AID_NETWORK] == &APP_NETWORK && at[AID_SYSINFO] == &APP_SYSINFO && at[AID_TASKS] == &APP_TASKS);
+  CHECK(at[AID_TRANSFER] == &APP_TRANSFER && at[AID_MEDIA] == &APP_MEDIA && at[AID_NOTIFS] == &APP_NOTIFS && at[AID_CALC] == &APP_CALC);
+  CHECK(at[AID_CLOCK] == &APP_CLOCK && at[AID_WEATHER] == &APP_WEATHER && at[AID_TODO] == &APP_TODO && at[AID_GAMES] == &APP_GAMES);
+  CHECK(at[AID_PHOTOS] == &APP_PHOTOS && at[AID_READER] == &APP_READER && at[AID_DRAW] == &APP_DRAW && at[AID_CARDS] == &APP_CARDS);
+  CHECK(at[AID_LIGHT] == &APP_LIGHT && appTableCount() == 21);
 
   group("terminal ağ komutları");
   ndConsented = false;

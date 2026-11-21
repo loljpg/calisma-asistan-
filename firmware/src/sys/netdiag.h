@@ -1,7 +1,9 @@
 #pragma once
 // DAXEN VANE sistem katmanı · Ağ teşhisi: ayrıntılı tarama, ping, DNS, TCP bağlantı testi,
-// traceroute ve bağlantı testi. Her iş, iş süresince var olan "ağ-araç" sürecinde çalışır (8 KB
-// yığın); çıktı satır satır ndOut'a yazılır, Terminal ve Ağ uygulaması oradan okur. Yalnızca
+// traceroute ve bağlantı testi. Tarama ağ görevine yaptırılır (süreç açılmaz). Diğer işler iş
+// süresince var olan "ağ-araç" sürecinde çalışır (6 KB yığın); bellek yetmezse bulutun canlı akışı
+// duraklatılır (netHold) ve iş bellek açılınca başlar, bitince akış geri gelir. Çıktı satır satır
+// ndOut'a yazılır, Terminal ve Ağ uygulaması oradan okur. Yalnızca
 // kullanıcının istediği adreslere yanıt isteği gönderilir; tarama pasiftir, ağa müdahale edilmez.
 // main.cpp'den sırayla eklenir (tek çeviri birimi); kendinden önceki dosyalardaki tanımları kullanır.
 #include <lwip/netdb.h>
@@ -10,6 +12,9 @@
 
 static int ndPid = -1;
 static String ndErr;
+static bool ndPending = false, ndScanPending = false;  // bellek bekleniyor / tarama sürüyor
+static uint32_t ndPendingAt = 0, ndScanBefore = 0;
+static const uint32_t ND_STACK = 6144;
 static uint8_t ndJob = ND_SCAN;
 static String ndHost;
 static int ndArg = 0;
@@ -194,17 +199,7 @@ static void ndTest() {
          " · internet " + (netOk ? "var" : "yok"));
 }
 
-static void ndScan() {
-  ndEmit("Taranıyor…");
-  uint32_t before = wifiScanAt;
-  wifiScanFull = true;
-  wifiScanReq = true;
-  uint32_t t0 = millis();
-  while (wifiScanAt == before && millis() - t0 < 15000 && !ndStop()) vTaskDelay(pdMS_TO_TICKS(100));
-  if (wifiScanAt == before) {
-    ndEmit("Tarama bitmedi");
-    return;
-  }
+static void ndScanReport() {
   std::vector<WifiAp> aps;
   {
     Lock l;
@@ -220,11 +215,10 @@ static void ndScan() {
 
 static void ndProc(Proc* p) {
   ndProcP = p;
-  if (WiFi.status() != WL_CONNECTED && ndJob != ND_SCAN) {
+  if (WiFi.status() != WL_CONNECTED) {
     ndEmit("Wi-Fi'ye bağlı değil");
   } else {
     switch (ndJob) {
-      case ND_SCAN: ndScan(); break;
       case ND_PING: ndPing(ndHost, ndArg); break;
       case ND_DNS: ndDns(ndHost); break;
       case ND_TCP: ndTcp(ndHost, ndArg); break;
@@ -236,34 +230,69 @@ static void ndProc(Proc* p) {
   ndProcP = nullptr;
 }
 
-static bool ndBusy() { return kAlive(ndPid); }
+static bool ndBusy() { return ndPending || ndScanPending || kAlive(ndPid); }
 static String ndError() { return ndErr; }
+static bool netLiveOpen() { return live.c != nullptr; }
+
+// Bellek yeterliyse işi başlatır; değilse bulut duraklatılmış olarak bekler (en fazla 8 sn).
+// Biten işin süreç kaydını kapatıp bulutu geri bırakır. Saat servisinden ve ekranlardan çağrılır.
+static void ndPoll() {
+  if (ndScanPending && (wifiScanAt != ndScanBefore || millis() - ndPendingAt > 15000)) {
+    ndScanPending = false;
+    if (wifiScanAt != ndScanBefore) ndScanReport();
+    else ndEmit("Tarama bitmedi");
+  }
+  if (ndPending) {
+    bool memOk = sysHeapFree() >= ND_STACK + 18 * 1024 + 2048 && sysHeapMaxAlloc() >= ND_STACK + 512;
+    if (memOk) {
+      ndPending = false;
+      ndPid = kSpawn("ağ-araç", ndProc, ND_STACK, true, K_PROC_PRIO, 1);
+      if (ndPid < 0) ndEmit("Süreç açılamadı");
+    } else if (millis() - ndPendingAt > 8000) {
+      ndPending = false;
+      ndEmit("Bellek yetersiz: " + String((ND_STACK + 20 * 1024) / 1024) + " KB gerekiyor, " + String(sysHeapFree() / 1024) +
+             " KB boş (en büyük blok " + String(sysHeapMaxAlloc() / 1024) + " KB)");
+    }
+  }
+  if (!ndPending && !kAlive(ndPid)) {
+    ndPid = -1;
+    netHold &= ~HOLD_NETTOOL;
+  }
+}
 
 static bool ndStart(uint8_t job, const String& host, int arg) {
   if (ndBusy()) {
     ndErr = "Önceki ağ işi sürüyor (durdurmak için: stop)";
     return false;
   }
-  const uint32_t stack = 8192;
-  if (sysHeapFree() < stack + 18 * 1024 + 6 * 1024 || sysHeapMaxAlloc() < stack) {
-    ndErr = "Bellek yetersiz: " + String((stack + 24 * 1024) / 1024) + " KB gerekiyor, " + String(sysHeapFree() / 1024) + " KB boş";
-    return false;
+  static const char* const NAMES[] = {"tarama", "ping", "dns", "tcp", "traceroute", "test"};
+  sysLog("ağ", String("araç: ") + NAMES[job] + (host.length() ? " " + host : String("")));
+  ndPendingAt = millis();
+  if (job == ND_SCAN) {  // taramayı ağ görevi yapar; süreç ve ek bellek gerekmez
+    ndEmit("Taranıyor…");
+    ndScanBefore = wifiScanAt;
+    ndScanPending = true;
+    wifiScanFull = true;
+    wifiScanReq = true;
+    return true;
   }
   ndJob = job;
   ndHost = host;
   ndArg = arg;
-  ndPid = kSpawn("ağ-araç", ndProc, stack, true, K_PROC_PRIO, 1);
-  if (ndPid < 0) {
-    ndErr = "Süreç açılamadı";
-    return false;
+  ndPending = true;
+  if (sysHeapFree() < ND_STACK + 20 * 1024 || sysHeapMaxAlloc() < ND_STACK + 512) {
+    netHold |= HOLD_NETTOOL;  // bulut iş bitene kadar bekler; ndPoll bırakır
+    ndEmit("Bellek açılıyor (bulut bağlantısı iş boyunca duraklatıldı)…");
   }
-  static const char* const NAMES[] = {"tarama", "ping", "dns", "tcp", "traceroute", "test"};
-  sysLog("ağ", String("araç: ") + NAMES[job] + (host.length() ? " " + host : String("")));
+  ndPoll();
   return true;
 }
 
 static void ndCancel() {
-  if (ndBusy()) kStop(ndPid);
+  ndPending = false;
+  ndScanPending = false;
+  if (kAlive(ndPid)) kStop(ndPid);
+  ndPoll();
 }
 
 static void ndConnInfo(std::vector<String>& o) {

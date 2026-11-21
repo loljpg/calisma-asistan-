@@ -28,8 +28,8 @@ static std::vector<const App*> appStack;  // bir uygulamanın içinden açılanl
 
 // Uygulama kimlikleri (os/registry.h'deki listeyle aynı sıra)
 enum AppId : uint8_t {
-  AID_YKS, AID_NOTES, AID_FILES, AID_SETTINGS, AID_MEDIA, AID_NOTIFS, AID_CALC, AID_CLOCK, AID_WEATHER,
-  AID_TODO, AID_GAMES, AID_PHOTOS, AID_READER, AID_DRAW, AID_CARDS, AID_LIGHT, AID_TRANSFER, AID_SYSINFO, AID_TASKS, AID_TERMINAL, AID_NETWORK, AID_COUNT
+  AID_YKS, AID_NOTES, AID_FILES, AID_SETTINGS, AID_TERMINAL, AID_NETWORK, AID_SYSINFO, AID_TASKS, AID_TRANSFER, AID_MEDIA,
+  AID_NOTIFS, AID_CALC, AID_CLOCK, AID_WEATHER, AID_TODO, AID_GAMES, AID_PHOTOS, AID_READER, AID_DRAW, AID_CARDS, AID_LIGHT, AID_COUNT
 };
 static void openApp(uint8_t id);
 static const App* const* appTable();  // os/registry.h

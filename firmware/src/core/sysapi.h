@@ -72,6 +72,8 @@ static bool ndStart(uint8_t job, const String& host, int arg);  // false: iş s�
 static bool ndBusy();
 static void ndCancel();
 static String ndError();
+static void ndPoll();  // bekleyen işi başlatır, biteni kapatır (saat servisi ve ekranlar çağırır)
+static bool netLiveOpen();  // bulutun canlı akışı açık mı
 static void ndConnInfo(std::vector<String>& out);  // bağlı ağın ayrıntıları (anında)
 static void ndSaved(std::vector<String>& out);     // kayıtlı ağlar  // tarayıcının giriş kodu (sunucu kapalıysa boş)
 

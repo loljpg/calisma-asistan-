@@ -4,6 +4,8 @@
 // Tarayıcı ekranda gösterilen 6 haneli kodla girer (sys/web.h).
 #include "../os/shell.h"
 
+static uint32_t trWaitSince = 0;  // bellek açılması bekleniyor (bulut duraklatıldı)
+
 static void trDrawStatus() {
   fillBg(0, 168, SCR_W, SCR_H - 168);
   String st = webStatus();
@@ -34,9 +36,13 @@ static void trDraw(bool full) {
     return;
   }
   if (!webRunning() && !webStart()) {
-    emptyState(HDR_H, SCR_H - HDR_H, I_TRANSFER, "Sunucu açılamadı", "Bellek yetmedi; kartı yeniden başlatıp dene.");
+    if (!trWaitSince) trWaitSince = millis();
+    bool waiting = millis() - trWaitSince < 8000;
+    emptyState(HDR_H, SCR_H - HDR_H, I_TRANSFER, waiting ? "Bellek açılıyor…" : "Sunucu açılamadı",
+               waiting ? "Bulut bağlantısı sunucu açıkken duraklatılıyor." : "Bellek yetmedi; kartı yeniden başlatıp dene.");
     return;
   }
+  trWaitSince = 0;
   if (!full) {
     trDrawStatus();
     return;
@@ -61,10 +67,10 @@ static void trTick() {
   static uint32_t last = 0, lastStat = 0;
   static bool lastConn = true;
   static String lastSig;
-  if (millis() - last > 1000) {
+  if (millis() - last > (trWaitSince ? 500 : 1000)) {
     last = millis();
     bool c = wifiConnected();
-    if (c != lastConn) {
+    if (c != lastConn || (trWaitSince && sdOk && c && !webRunning() && millis() - trWaitSince < 9000)) {
       lastConn = c;
       trDraw(true);
       return;
@@ -81,6 +87,9 @@ static void trTick() {
   }
 }
 
-static void trClose() { webStop(); }
+static void trClose() {
+  trWaitSince = 0;
+  webStop();
+}
 
 static const App APP_TRANSFER = {"Dosya aktarımı", "Aktarım", I_TRANSFER, nullptr, trDraw, trTap, nullptr, nullptr, nullptr, trTick, nullptr, trClose};

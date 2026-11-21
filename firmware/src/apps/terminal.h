@@ -52,6 +52,7 @@ static void cMemory(const std::vector<String>&, CmdOut& o) {
   o.kv("Boş", tlKB(sysHeapFree()));
   o.kv("En az (açılıştan beri)", tlKB(mn) + (mn < 18 * 1024 ? "  · 18 KB tabanının altında" : "  · taban tamam"));
   o.kv("En büyük blok", tlKB(sysHeapMaxAlloc()));
+  o.kv("Bulut canlı akışı", netLiveOpen() ? "açık (şifreli bağlantı on binlerce bayt tutar)" : (netHold ? "duraklatıldı" : "kapalı"));
   o.kv("Günlük halkası", String(logRing.used) + " / " + String(LOG_RING) + " B");
 }
 
@@ -400,4 +401,4 @@ static void termSerialPoll() {
 #endif
 }
 
-static const App APP_TERMINAL = {"Terminal", "Terminal", I_CODE, tlOpen, tlDraw, tlTap, nullptr, tlSwipe, nullptr, tlTick, nullptr, tlClose};
+static const App APP_TERMINAL = {"Terminal", "Terminal", I_TERMINAL, tlOpen, tlDraw, tlTap, nullptr, tlSwipe, nullptr, tlTick, nullptr, tlClose};
