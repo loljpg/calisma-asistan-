@@ -549,7 +549,10 @@ static void onBtState(esp_a2d_connection_state_t, void*) { btConnChanged = true;
 
 // Listede en güçlü sinyaller (yakındaki kulaklık) önce; seçili kulaklık her zaman görünür
 static std::vector<BtDev> btSorted() {
-  std::vector<BtDev> list = btSorted();
+  std::vector<BtDev> list;
+  xSemaphoreTake(btMtx, portMAX_DELAY);
+  list = btFound;
+  xSemaphoreGive(btMtx);
   std::sort(list.begin(), list.end(), [](const BtDev& a, const BtDev& b) {
     bool sa = a.name == btTarget, sb = b.name == btTarget;
     if (sa != sb) return sa;
@@ -884,10 +887,7 @@ static void onTap(int x, int y) {
       return;
     }
     int i = (y - BT_LIST_Y) / BT_ROW;
-    std::vector<BtDev> list;
-    xSemaphoreTake(btMtx, portMAX_DELAY);
-    list = btFound;
-    xSemaphoreGive(btMtx);
+    std::vector<BtDev> list = btSorted();  // ekrandaki sırayla aynı
     if (y >= BT_LIST_Y && i >= 0 && i < (int)list.size() && i < BT_ROWS && list[i].name != btTarget) {
       btTarget = list[i].name;  // bir sonraki aramada bulununca bağlanır
       saveState();
