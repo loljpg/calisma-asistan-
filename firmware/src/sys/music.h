@@ -10,7 +10,7 @@
 // yazılımından çıkınca ya da bir sorun olursa kart kendiliğinden bu yazılıma döner.
 #define MUSIC_DIR "/daxen/sys"
 #define MUSIC_FILE MUSIC_DIR "/muzik-" FW_VARIANT ".bin"
-#define MUSIC_MIN_BUILD 35  // hoparlör düzeltmesi (düzey, gürültü, patırtı) bu sürümle geldi; eski modül yenisiyle değiştirilir
+#define MUSIC_MIN_BUILD 39  // fw-v38 modülü hoparlör kipinde açılışta çöküyordu (I2S saat sınırı); daha eskisi yenisiyle değiştirilir
 static String musicErr;
 static int musicCachedState = -1;
 static uint32_t musicCachedSize = 0;

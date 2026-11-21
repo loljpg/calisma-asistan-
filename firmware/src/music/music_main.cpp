@@ -269,18 +269,21 @@ static int32_t a2dpData(Frame* f, int32_t count) {
 // --- Hoparlör: I2S → iç DAC (yalnızca GPIO26; GPIO25 dokunmatiğin saat ucudur, açılmaz) ---
 // Kartın yükselteci çok yüksek kazançlı: DAC'ın tek basamağı (13 mV) bile yüksek ses veriyor. Bu yüzden:
 //  · Ses düzeyi üstel: 0,25 basamaktan 56 basamağa (dirençle kısılmış hoparlör için de yetsin).
-//  · 8 kat aşırı örnekleme (352,8 kHz) ve 2. dereceden gürültü biçimlendirme: 8 bitlik DAC basamaktan
+//  · 4 kat aşırı örnekleme (176,4 kHz) ve 2. dereceden gürültü biçimlendirme: 8 bitlik DAC basamaktan
 //    küçük sesleri de verebilir, nicemleme gürültüsü duyulmayan yüksek frekanslara itilir.
 //  · Taban gerilimi 1,65 V değil 0,82 V (64 basamak) ve yarım saniyede yavaşça kurulur: çıt sesi azalır.
 //  · Çalmıyorken DAC kapatılır, uç sabit sıfıra çekilir (DAC'ın kendi gürültüsü/vızıltısı kesilir).
 //  · Yeniden başlatmada uç sıfırda tutulur (gpio_hold), açılışta patırtı olmaz.
-static const int SPK_OSR = 8;
+// I2S iç DAC kipinde ana saat = örnekleme hızı × 256, 160 MHz'i en az 2'ye bölmeli (≤ 312,5 kHz).
+// 352,8 kHz bu sınırı aşıyordu (müzik yazılımı açılırken çöküyordu); 176,4 kHz güvenle içinde.
+static const int SPK_OSR = 4;
 static const int SPK_RATE = 44100 * SPK_OSR;
-static const int SPK_BUF = 1024;               // DMA tamponu (çerçeve, ~2,9 ms)
+static const int SPK_BUF = 1024;               // DMA tamponu (çerçeve, ~5,8 ms)
 static const int32_t SPK_BIAS = 64 << 8;       // 16 bitlik ölçekte; 1 DAC basamağı = 256
 static const int32_t SPK_AMAX = 56 << 8;       // tabanın altına inmesin diye pay bırakılır
 static bool spkReady = false;
 static volatile bool spkStopReq = false, spkParked = true;
+static bool spkFailed = false;
 
 static void spkWrite(uint16_t* buf, int frames) {
 #ifndef HOST
@@ -355,7 +358,10 @@ static bool spkBegin() {
   c.dma_buf_len = SPK_BUF;
   c.use_apll = false;
   c.tx_desc_auto_clear = false;  // boşalırsa son tampon tekrarlanır (sıfıra düşüp çıt yapmaz)
-  if (i2s_driver_install(I2S_NUM_0, &c, 0, nullptr) != ESP_OK) return false;
+  if (i2s_driver_install(I2S_NUM_0, &c, 0, nullptr) != ESP_OK) {
+    spkFailed = true;
+    return false;
+  }
   i2s_set_dac_mode(I2S_DAC_CHANNEL_DISABLE);  // çalmaya başlayınca açılır
 #endif
   spkReady = true;
@@ -750,7 +756,7 @@ static void drawBt(bool full) {
   if (outMode == OUT_SPK) {
     drawIcon(I_VOLUME, 12, HDR_H + 54, 24, C_ACC, C_BG);
     text("Hoparlör", 46, HDR_H + 52, F_MD, C_TEXT, C_BG);
-    text("Kartın SPEAK soketindeki hoparlörden çalar", 46, HDR_H + 74, F_XS, C_TEXT2, C_BG);
+    text(spkFailed ? "Ses donanımı açılamadı" : "Kartın SPEAK soketindeki hoparlörden çalar", 46, HDR_H + 74, F_XS, spkFailed ? C_ACC : C_TEXT2, C_BG);
     auto ls = wrapText("Kartın yükselteci çok güçlü: sesi düşükten aç. Çok yüksek ve cızırtılıysa hoparlör kablolarından birine 47–100 Ω direnç ekle, sonra sesi açabilirsin. Bluetooth kapalı.",
                        F_SM, 296, 5);
     for (size_t i = 0; i < ls.size(); i++) text(ls[i], 12, HDR_H + 104 + i * 20, F_SM, C_TEXT2, C_BG);
