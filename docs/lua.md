@@ -15,6 +15,14 @@ Dil Lua 5.4'tür; tam sayılar ve ondalıklı sayılar 32 bittir. `string`, `tab
 kapalıdır; dosyalara yalnızca aşağıdaki `dosya` arabirimiyle erişilir. `print` seri porta yazar.
 `load` yalnızca metin kabul eder; derlenmiş Lua kodu (ne uygulama dosyası ne `load` ile) yüklenmez.
 
+## Mağaza
+
+**Mağaza** uygulaması yazılımla gelen isteğe bağlı Lua uygulamalarını listeler (kaynakları
+`firmware/lua/magaza/`). Uygulamalar SD'deki varlık paketinde durur; *Kur* uygulama klasörüne
+kopyalar, ilk açılışta izinler sorulur. Yeni sürümle uygulama değiştiyse *Güncelle* görünür.
+Mağazaya uygulama eklemek için dosyayı `firmware/lua/magaza/`'ya koyup `tools/make_assets.py`
+çalıştır; başlığa bir satırlık `-- aciklama:` ekle. Dosya adı en çok 16 bayt olabilir.
+
 ## Süreç olarak çalışma
 
 Her Lua uygulaması DAXEN çekirdeğinde ayrı bir süreçtir: kendi yığını (14 KB) vardır ve

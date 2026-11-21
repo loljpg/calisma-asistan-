@@ -74,6 +74,44 @@ static bool packFind(const char* name, uint32_t& off, uint32_t& len) {
   return false;
 }
 
+// Adı prefix ile başlayan girdiler (önek atılmış adlarla; ör. mağazadaki uygulamalar)
+static std::vector<String> packList(const char* prefix) {
+  std::vector<String> v;
+  uint8_t c[4];
+  if (!packRead(8, c, 4)) return v;
+  uint32_t n = std::min<uint32_t>(rd32(c), 64);
+  size_t pl = strlen(prefix);
+  for (uint32_t i = 0; i < n; i++) {
+    char e[25] = {0};
+    if (!packRead(12 + i * 32, e, 24)) break;
+    if (!strncmp(e, prefix, pl)) v.push_back(String(e + pl));
+  }
+  return v;
+}
+
+// Girdinin ilk len baytı (en çok cap); okunamazsa 0
+static size_t packHead(const char* name, char* buf, size_t cap) {
+  uint32_t off, len;
+  if (!packFind(name, off, len)) return 0;
+  size_t k = std::min<size_t>(len, cap);
+  return packRead(off, buf, k) ? k : 0;
+}
+
+// Girdinin CRC32'si (kurulu dosyayla karşılaştırmak için)
+static bool packCrc(const char* name, uint32_t& crc, uint32_t& size) {
+  uint32_t off, len;
+  if (!packFind(name, off, len)) return false;
+  uint8_t b[256];
+  crc = 0;
+  for (uint32_t p = 0; p < len; p += sizeof b) {
+    size_t k = std::min<uint32_t>(sizeof b, len - p);
+    if (!packRead(off + p, b, k)) return false;
+    crc = crc32Upd(crc, b, k);
+  }
+  size = len;
+  return true;
+}
+
 // Paketteki bir dosyayı SD'ye yazar (Lua örnekleri, rehber, gizli özellikler)
 static bool packCopy(const char* name, const String& dest) {
   uint32_t off, len;

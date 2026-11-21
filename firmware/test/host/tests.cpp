@@ -823,7 +823,7 @@ static void testNet() {
   CHECK(at[AID_TRANSFER] == &APP_TRANSFER && at[AID_MEDIA] == &APP_MEDIA && at[AID_NOTIFS] == &APP_NOTIFS && at[AID_CALC] == &APP_CALC);
   CHECK(at[AID_CLOCK] == &APP_CLOCK && at[AID_WEATHER] == &APP_WEATHER && at[AID_TODO] == &APP_TODO && at[AID_GAMES] == &APP_GAMES);
   CHECK(at[AID_PHOTOS] == &APP_PHOTOS && at[AID_READER] == &APP_READER && at[AID_DRAW] == &APP_DRAW && at[AID_CARDS] == &APP_CARDS);
-  CHECK(at[AID_LIGHT] == &APP_LIGHT && appTableCount() == 21);
+  CHECK(at[AID_LIGHT] == &APP_LIGHT && at[AID_STORE] == &APP_STORE && appTableCount() == 22);
 
   group("terminal ağ komutları");
   ndConsented = false;
@@ -1240,6 +1240,93 @@ static void testSoru() {
   appExit();
 }
 
+// ---------------------------------------------------------------------------
+// Mağaza (apps/store.h) ve mağazadaki Lua uygulamaları (firmware/lua/magaza)
+// ---------------------------------------------------------------------------
+static int luaIndexOf(const char* name) {
+  luaScanned = false;
+  for (int i = 0; i < luaAppCount(); i++)
+    if (luaAppLabel(i) == name) return i;
+  return -1;
+}
+static void luaRunFrames(int n, int tapEvery = 0, int tx = 160, int ty = 120) {
+  for (int i = 0; i < n; i++) {
+    g_ms += 40;
+    if (tapEvery && i % tapEvery == tapEvery - 1) tap(tx, ty);
+    shellTick();
+  }
+}
+static String sdRead(const char* vp) {
+  File f = SD.open(vp);
+  String s = f ? f.readString() : String();
+  if (f) f.close();
+  return s;
+}
+static void testStore() {
+  group("mağaza");
+  appOpen(&APP_STORE);
+  CHECK(stApps.size() >= 3);
+  int pong = -1;
+  for (size_t i = 0; i < stApps.size(); i++) {
+    CHECK(stApps[i].state == 0 && stApps[i].desc.length() > 10 && stApps[i].perm & LP_EKRAN);
+    if (stApps[i].name == "Pong") pong = i;
+  }
+  CHECK(pong >= 0);
+  for (size_t r = 0; r < stApps.size() && r < (size_t)ST_ROWS; r++) stTap(270, HDR_H + r * ST_ROW + 20);  // Kur
+  for (size_t r = 0; r < stApps.size() && r < (size_t)ST_ROWS; r++) CHECK(stApps[r].state == 1 && SD.exists(stPath(stApps[r])));
+  {  // kurulu dosya paketinkinden farklıysa güncelleme görünür
+    File f = SD.open(stPath(stApps[pong]), FILE_APPEND);
+    f.print("-- yerel değişiklik\n");
+    f.close();
+    stState(stApps[pong]);
+    CHECK(stApps[pong].state == 2);
+    stTap(270, HDR_H + pong * ST_ROW + 20);
+    CHECK(stApps[pong].state == 1);
+  }
+  appExit();
+
+  group("mağaza uygulamaları");
+  const char* names[] = {"Pong", "Nefes", "Deneme"};
+  for (const char* nm : names) {
+    int i = luaIndexOf(nm);
+    CHECK(i >= 0);
+    if (i < 0) continue;
+    luaAppOpen(i);
+    CHECK(ov.kind == OV_DIALOG);  // izinler sorulur
+    if (ov.cb) ov.cb(1);
+    ov = Overlay();
+    luaRunFrames(10);
+    if (!strcmp(nm, "Deneme")) {
+      tap(150, 88);   // Türkçe: doğru kutusu
+      luaRunFrames(2);
+      tap(118, 204);  // 3
+      luaRunFrames(2);
+      tap(222, 204);  // 5
+      luaRunFrames(2);
+      tap(274, 230);  // tamam
+      luaRunFrames(2);
+      tap(200, 88);   // Türkçe: yanlış kutusu
+      luaRunFrames(2);
+      tap(66, 204);   // 2
+      luaRunFrames(2);
+      tap(274, 230);
+      luaRunFrames(2);
+      tap(220, 45);   // Kaydet
+      luaRunFrames(4);
+      String k = sdRead(LUA_APPS_DIR "/veri/deneme/denemeler.txt");
+      CHECK(k.indexOf(";TYT;35,2;0,0;0,0;0,0") > 0);
+      if (k.indexOf(";TYT;35,2") < 0) printf("    kayıt: %s\n", k.c_str());
+      tap(280, 45);   // Geçmiş
+      luaRunFrames(4);
+    } else {
+      luaRunFrames(250, 60, 30, 150);
+    }
+    CHECK(!luaHasError());
+    if (luaHasError()) printf("    %s: %s\n", nm, luaErr.c_str());
+    appExit();
+  }
+}
+
 static void testGizli() {
   group("gizli özellikler");
   homeShow();
@@ -1481,6 +1568,7 @@ int main() {
   testMem();
   testDraw();
   testSoru();
+  testStore();
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

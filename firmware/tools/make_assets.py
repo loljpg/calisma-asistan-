@@ -89,6 +89,16 @@ def entries():
     ents.append(("logo/s", open(os.path.join(ROOT, "assets", "logo", "LOGO_S.bin"), "rb").read()))
     for name, rel in LUA:
         ents.append((name, open(os.path.join(ROOT, "lua", rel), "rb").read()))
+    # Mağaza (apps/store.h): lua/magaza/ içindeki bütün uygulamalar, ada göre sıralı
+    mdir = os.path.join(ROOT, "lua", "magaza")
+    for f in sorted(os.listdir(mdir)) if os.path.isdir(mdir) else []:
+        if f.endswith(".lua"):
+            name = "magaza/" + f
+            if len(name.encode()) > 23:
+                sys.exit("mağaza dosya adı çok uzun (en çok 16 bayt): " + f)
+            ents.append((name, open(os.path.join(mdir, f), "rb").read()))
+    if len(ents) > 64:
+        sys.exit("pakette en çok 64 dosya olabilir")
     return ents
 
 

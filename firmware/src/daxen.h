@@ -36,6 +36,7 @@
 #include "apps/cards.h"
 #include "apps/light.h"
 #include "apps/lua.h"
+#include "apps/store.h"  // isteğe bağlı Lua uygulamaları (varlık paketinden)
 #include "apps/taskman.h"
 #include "apps/terminal.h"
 #include "apps/network.h"

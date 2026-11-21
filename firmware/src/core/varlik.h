@@ -2,8 +2,8 @@
 // SD karttaki varlık paketinin (/daxen/sys/varlik.bin) beklenen sürümü ve boyu. Paket her
 // sürümün GitHub sayfasında; eksik ya da eskiyse kart indirir (sys/assets.h).
 #pragma once
-#define ASSET_VER 0x539CB573u
-#define ASSET_LEN 77326u
+#define ASSET_VER 0x52457AF8u
+#define ASSET_LEN 90185u
 // içerik:
 //   f/xs                     5992 bayt
 //   f/sm                    12319 bayt
@@ -23,3 +23,6 @@
 //   gizli/hayalet.lua        1083 bayt
 //   gizli/radar.lua          2701 bayt
 //   gizli/bilinmeyen.lua     1358 bayt
+//   magaza/deneme.lua        7023 bayt
+//   magaza/nefes.lua         2137 bayt
+//   magaza/pong.lua          3597 bayt

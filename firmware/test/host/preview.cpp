@@ -454,6 +454,36 @@ int main(int argc, char** argv) {
     shot("d7-lua-zamanlayici");
     appExit();
   }
+  if (want("magaza")) {  // mağaza ve mağazadaki Lua uygulamaları
+    appOpen(&APP_STORE);
+    shot("h0-magaza");
+    for (int r = 0; r < (int)stApps.size() && r < ST_ROWS; r++) stTap(270, HDR_H + r * ST_ROW + 20);
+    stDraw(true);
+    shot("h1-magaza-kurulu");
+    luaScanned = false;
+    auto byName = [&](const char* n) { for (int i = 0; i < luaAppCount(); i++) if (luaAppLabel(i) == n) return i; return 0; };
+    luaOpenOk(byName("Pong"));
+    step(2500);
+    shot("h2-pong");
+    luaOpenOk(byName("Nefes"));
+    step(2600);
+    shot("h3-nefes");
+    luaOpenOk(byName("Deneme"));
+    step(200);
+    tap(150, 88); step(80); tap(118, 204); step(80); tap(222, 204); step(80);
+    shot("h4-deneme-giris");
+    tap(274, 230); step(80);
+    tap(200, 88); step(80); tap(66, 204); step(80); tap(274, 230); step(80);
+    tap(150, 116); step(80); tap(170, 204); step(80); tap(274, 230); step(80);
+    tap(150, 144); step(80); tap(14, 204); step(80); tap(222, 204); step(80); tap(274, 230); step(80);
+    tap(220, 45); step(200);
+    tap(150, 88); step(80); tap(14, 204); step(80); tap(14, 230); step(80); tap(274, 230); step(80);
+    tap(220, 45); step(200);
+    tap(280, 45); step(200);
+    shot("h5-deneme-gecmis");
+    appExit();
+    homeShow();
+  }
   if (want("gizli")) {  // gizli özellikler (docs/gizli.md)
     const char* f[] = {"vane.lua", "uyanis.lua", "hayalet.lua", "radar.lua", "bilinmeyen.lua"};
     const char* n[] = {"g1-project-vane", "g2-developer-awakening", "g3-ghost-protocol", "g4-dark-radar", "g5-the-unknown"};

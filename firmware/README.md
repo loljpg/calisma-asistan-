@@ -51,6 +51,7 @@ satıra dokununca ya da BOOT'a basınca kapanır. Menü açıkken alttaki uygula
 | **Çizim** | Vektör çizim: kalem (titreme sabitleyicili), çizgi, dikdörtgen, elips (boş/dolu), yazı, silgi, damlalık; 20 renk, 1-20 px; geri al/yinele; ayna, kılavuz (şekiller ızgaraya yaslanır), kağıt rengi; resim olarak kaydetme (`/daxen/foto/*.bmp`); küçük resimli liste (`/daxen/cizim`) |
 | **Kartlar** | Aralıklı tekrarlı bilgi kartları: TYT matematik, geometri, fizik, kimya, edebiyat; kendi destelerin `/daxen/kartlar/*.txt` (`ön|arka` satırları) |
 | **Işık ölçer** | Ortam ışığı ve 1 dakikalık grafik |
+| **Mağaza** | Yazılımla gelen isteğe bağlı Lua uygulamaları (Deneme: net hesabı ve gelişim grafiği; Nefes: yönlendirmeli nefes; Pong). Varlık paketinde durur, flash'ta yer tutmaz; Kur / Güncelle, basılı tut: kaldır |
 | **Aktarım** | Tarayıcıdan SD karta dosya yükleme ve indirme (aynı Wi-Fi ağında, ekrandaki adresi aç ve ekrandaki 6 haneli kodla gir); sayfada ilerleme çubuğu, yükleme sürerken saat donmaz |
 | **Sistem** | Sürüm, çip, çalışma süresi, son açılış sebebi (önceki çökme kaydı varsa belirtilir), bellek (boş, en az, en büyük blok), Wi-Fi adresi ve sinyali |
 | **Görevler** | Çekirdeğin süreçleri: servisler ve görevler, işlemci payı, yığın, bellek; görevleri sonlandırma. Wi-Fi, TCP/IP ve Bluetooth sistem görevleri de görünür (yığın ve durum; işlemci payı ölçülemez, "—") |
@@ -207,7 +208,8 @@ Bluetooth bağlıyken Wi-Fi gerekmez: plan, tikler, sayaç, saat, bildirimler ve
   yazı tipleri `tools/make_fonts.py` (Inter, SIL Open Font License 1.1) → `assets/`. Varlık paketi
   `tools/make_assets.py` (`assets/`, `lua/` → `varlik.bin` ve beklenen sürüm `src/core/varlik.h`;
   `--check` ile denetler); okuma `ui/font.h`, indirme `sys/assets.h`. Lua dosyası, yazı tipi ya da
-  logo değişince `make_assets.py` çalıştırılıp `varlik.h` işlenmeli, yoksa CI geçmez.
+  logo değişince `make_assets.py` çalıştırılıp `varlik.h` işlenmeli, yoksa CI geçmez. Mağaza
+  uygulamaları `lua/magaza/*.lua` (dosya adı en çok 16 bayt; başlıkta `-- aciklama:` satırı).
 - Lua 5.4 `lib/lua/` (MIT).
 - Dokunmatik: `core/touch.h` (XPT2046, eksen başına 5 ölçümün ortancası), `core/calib.h`
   (9 noktadan en küçük karelerle afin dönüşüm: ölçek, kayma, eksen takası, dönüklük), `os/calibrate.h`.
