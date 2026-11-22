@@ -19,6 +19,7 @@ USB seri porttan: 115200 baud, her komut bir satır (`\n`). Çıktı aynı porta
 | `sysinfo` | Sürüm, çip, çalışma süresi, son açılış, varsa önceki çökme, bellek, SD, Wi-Fi, Bluetooth, çekirdek yükü |
 | `version` | Yazılım sürümü ve modeli, çip, Lua sürümü |
 | `uptime` | Açılıştan beri geçen süre |
+| `screenshot [sn]` | Ekran görüntüsü, isteğe bağlı gecikmeyle (`/daxen/foto/ekran-*.bmp`). Seri porttan da çalışır; ekranın veri çıkışı bağlı olmayan kartta "okunamıyor" der |
 | `memory` | Boş bellek, açılıştan beri en az (18 KB tabanıyla karşılaştırılır), en büyük blok |
 | `tasks` | Servisler ve görevler: durum, işlemci payı (ölçülmüyorsa `—`), yığın boşluğu |
 | `apps` | Yerleşik ve Lua uygulamaları |

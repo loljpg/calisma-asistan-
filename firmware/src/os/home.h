@@ -530,6 +530,11 @@ static void shellTick() {
     focusOn = false;
     toast("Odak modu bitti");
   }
+  if (shotAt && (int32_t)(ms - shotAt) >= 0 && !ov.kind && !kbm.active) {
+    shotAt = 0;
+    String p = phScreenshot();
+    toast(p == "-" ? String("Bu kartın ekranı okunamıyor") : p.length() ? "Ekran görüntüsü: Fotoğraflar → " + baseName(p) : String("Kaydedilemedi (SD kart?)"));
+  }
   if (assetsFresh) {  // varlık paketi indi: yazı tipleriyle baştan çiz
     assetsFresh = false;
     luaScanned = false;

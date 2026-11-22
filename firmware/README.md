@@ -28,7 +28,8 @@ saklanmaz. Ayrıntılar ve sınırlar: [docs/guvenlik.md](../docs/guvenlik.md).
 **Sistem menüsü:** her ekranda üst kenardan aşağı kaydır ya da ana ekranın durum çubuğuna dokun.
 Saat ve boş bellek; Wi-Fi, telefon, SD kart ve bulut kutucukları (dokununca ilgili ayar sayfası);
 parlaklık; son kullanılan dört uygulama (hızlı geçiş) ve arka planda süren işler; son bildirim
-(dokununca Bildirimler); Terminal, Görevler ve onaylı yeniden başlatma. Yukarı kaydırınca, üst
+(dokununca Bildirimler) ve yanında ekran görüntüsü (`/daxen/foto/ekran-*.bmp`); Terminal, Görevler ve
+onaylı yeniden başlatma. Yukarı kaydırınca, üst
 satıra dokununca ya da BOOT'a basınca kapanır. Menü açıkken alttaki uygulama çalışmaya devam eder.
 
 ## Uygulamalar

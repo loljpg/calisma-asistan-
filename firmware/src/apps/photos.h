@@ -278,6 +278,54 @@ static bool phBack() {
   return false;
 }
 
+// --- Ekran görüntüsü: ekran satır satır okunur, /daxen/foto/ekran-*.bmp (24 bit, aşağıdan yukarı) ---
+// Sistem menüsünden ya da Terminal'deki screenshot komutundan (çizim bitsin diye kısa bir gecikmeyle).
+// Ekranın veri çıkışı bağlı değilse okunan her piksel aynı çıkar: o zaman dosya silinir.
+static String phScreenshot() {
+  if (!sdOk || !ensureDir("/daxen/foto")) return "";
+  struct tm t;
+  char nm[40];
+  if (localNow(t)) snprintf(nm, sizeof nm, "/daxen/foto/ekran-%04d%02d%02d-%02d%02d%02d.bmp", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
+  else snprintf(nm, sizeof nm, "/daxen/foto/ekran-%lu.bmp", (unsigned long)millis());
+  const int W = SCR_W, H = SCR_H;
+  std::unique_ptr<uint16_t[]> px(new (std::nothrow) uint16_t[W]);
+  std::unique_ptr<uint8_t[]> row(new (std::nothrow) uint8_t[W * 3]);
+  if (!px || !row) return "";
+  File f = SD.open(nm, FILE_WRITE);
+  if (!f) return "";
+  uint8_t h[54] = {'B', 'M'};
+  auto put32 = [&](int o, uint32_t v) {
+    for (int i = 0; i < 4; i++) h[o + i] = v >> (8 * i);
+  };
+  put32(2, 54 + W * 3 * H), put32(10, 54), put32(14, 40), put32(18, W), put32(22, H), put32(34, W * 3 * H);
+  put32(38, 2835), put32(42, 2835);
+  h[26] = 1, h[28] = 24;
+  bool ok = f.write(h, 54) == 54, same = true;
+  uint16_t first = 0;
+  {
+    Gfx g;
+    for (int y = H - 1; y >= 0 && ok; y--) {
+      tft.readRect(0, y, W, 1, px.get());
+      for (int x = 0; x < W; x++) {
+        uint16_t c = px[x] >> 8 | px[x] << 8;  // readRect bayt sırası ters verir
+        if (y == H - 1 && x == 0) first = c;
+        same &= c == first;
+        uint8_t r5 = c >> 11, g6 = (c >> 5) & 63, b5 = c & 31;
+        row[x * 3] = b5 << 3 | b5 >> 2, row[x * 3 + 1] = g6 << 2 | g6 >> 4, row[x * 3 + 2] = r5 << 3 | r5 >> 2;
+      }
+      ok = f.write(row.get(), W * 3) == (size_t)W * 3;
+    }
+  }
+  f.close();
+  if (!ok || same) {
+    SD.remove(nm);
+    sysLog("ekran", same ? "görüntü alınamadı: ekran okunamıyor" : "görüntü yazılamadı");
+    return same ? "-" : "";
+  }
+  sysLog("ekran", String("görüntü: ") + baseName(nm));
+  return nm;
+}
+
 // Kapanınca liste bırakılır (yüzlerce yol birkaç KB tutar; açılışta yeniden taranır)
 static void phClose() {
   std::vector<String>().swap(phList);

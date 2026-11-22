@@ -1329,6 +1329,37 @@ static void testStore() {
   }
 }
 
+static void testShot() {
+  group("ekran görüntüsü");
+  homeShow();
+  tft.fillRect(0, 0, 10, 10, 0xF800);  // sol üst kırmızı
+  String p = phScreenshot();
+  CHECK(p.startsWith("/daxen/foto/ekran-") && SD.exists(p));
+  {
+    File f = SD.open(p);
+    CHECK(f.size() == 54 + 320 * 3 * 240);
+    uint8_t px[3];
+    f.seek(54 + 239 * 960);  // aşağıdan yukarı: en üst satır en sonda
+    f.read(px, 3);
+    CHECK(px[2] == 0xFF && px[1] == 0 && px[0] == 0);
+    f.close();
+  }
+  SD.remove(p);
+  tft.fillRect(0, 0, 320, 240, 0x1234);  // okunamayan ekran gibi: hepsi aynı renk
+  CHECK(phScreenshot() == "-");
+  homeShow();
+  // Terminal komutu: biraz sonra alınır
+  CmdOut o = termExec("screenshot");
+  CHECK(shotAt != 0 && o.lines[0].indexOf("ekran görüntüsü") >= 0);
+  g_ms += 400;
+  shellTick();
+  CHECK(shotAt == 0);
+  int n = 0;
+  File d = SD.open("/daxen/foto");
+  for (File f = d.openNextFile(); f; f = d.openNextFile()) n += String(f.name()).indexOf("ekran-") >= 0;
+  CHECK(n == 1);
+}
+
 static void testGizli() {
   group("gizli özellikler");
   homeShow();
@@ -1571,6 +1602,7 @@ int main() {
   testDraw();
   testSoru();
   testStore();
+  testShot();
   group("kalıcı ayarlar");
   CHECK(Preferences::misuse() == 0);  // her kullanım begin()/end() içinde
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);

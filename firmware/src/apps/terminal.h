@@ -47,6 +47,11 @@ static void cHistory(const std::vector<String>&, CmdOut& o) {
 }
 
 static void cUptime(const std::vector<String>&, CmdOut& o) { o.add(tlUptime()); }
+static void cShot(const std::vector<String>& a, CmdOut& o) {  // screenshot [saniye]
+  int s = a.size() > 1 ? constrain(a[1].toInt(), 0, 30) : 0;
+  shotAt = millis() + 300 + s * 1000;
+  o.add(s ? "ekran görüntüsü " + String(s) + " sn sonra alınır (/daxen/foto)" : String("ekran görüntüsü alınıyor (/daxen/foto)"));
+}
 
 static void cMemory(const std::vector<String>&, CmdOut& o) {
   uint32_t mn = sysHeapMin();
@@ -426,6 +431,7 @@ static const Cmd TL_CMDS[] = {
     {"sysinfo", nullptr, CL_USER, 0, 0, cSysinfo, "", "sistem özeti"},
     {"version", nullptr, CL_USER, 0, 0, cVersion, "", "yazılım ve donanım sürümü"},
     {"uptime", nullptr, CL_USER, 0, 0, cUptime, "", "açılıştan beri geçen süre"},
+    {"screenshot", nullptr, CL_USER, 0, 1, cShot, "[sn]", "ekran görüntüsü (/daxen/foto, BMP)"},
     {"memory", nullptr, CL_USER, 0, 0, cMemory, "", "bellek durumu"},
     {"tasks", nullptr, CL_USER, 0, 0, cTasks, "", "süreçler ve servisler"},
     {"apps", nullptr, CL_USER, 0, 0, cApps, "", "uygulamalar"},

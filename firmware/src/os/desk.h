@@ -2,7 +2,7 @@
 // Masaüstü: sistem menüsü, sistem alanı, hızlı geçiş ve bildirim alanı.
 //  - Sistem menüsü: her ekranda üst kenardan aşağı kaydır ya da ana ekranın durum çubuğuna dokun.
 //    Saat ve boş bellek, Wi-Fi / Bluetooth / SD / bulut kutucukları, parlaklık, son kullanılan
-//    uygulamalar (hızlı geçiş), son bildirim, Terminal / Görevler / yeniden başlatma. Yukarı
+//    uygulamalar (hızlı geçiş), son bildirim, ekran görüntüsü, Terminal / Görevler / yeniden başlatma. Yukarı
 //    kaydırınca, üst satıra dokununca ya da BOOT'a basınca kapanır.
 //  - Sistem alanı: ana ekranın durum çubuğunda arka planda süren işlerin simgeleri (Aktarım, arka
 //    plandaki Lua uygulaması, ağ ya da Bluetooth taraması, kronometre, telefondaki medya).
@@ -104,11 +104,13 @@ static void sysMenuDraw() {
     text(fit(a->label, F_XS, 68), x + 37, SM_APP_Y + 41, F_XS, C_TEXT2, C_SURF, MC_DATUM);
   }
 
-  panel(6, SM_NOTE_Y, 308, 26, C_SURF, C_LINE);
+  panel(6, SM_NOTE_Y, 266, 26, C_SURF, C_LINE);
   drawIcon(I_BELL, 12, SM_NOTE_Y + 5, 16, notifs.empty() ? C_TEXT3 : C_ACC, C_SURF);
   String n = notifs.empty() ? String("Bildirim yok") : notifs[0].title + ": " + notifs[0].text;
   if (notifs.size() > 1) n = "(" + String(notifs.size()) + ") " + n;
-  text(fit(n, F_XS, 276), 34, SM_NOTE_Y + 13, F_XS, notifs.empty() ? C_TEXT3 : C_TEXT, C_SURF, ML_DATUM);
+  text(fit(n, F_XS, 232), 34, SM_NOTE_Y + 13, F_XS, notifs.empty() ? C_TEXT3 : C_TEXT, C_SURF, ML_DATUM);
+  panel(276, SM_NOTE_Y, 38, 26, C_SURF, C_LINE);  // ekran görüntüsü
+  drawIcon(I_PHOTO, 287, SM_NOTE_Y + 5, 16, C_TEXT, C_SURF);
 
   button(6, SM_BTN_Y, 84, 30, "Terminal", B_NORMAL, I_NONE, C_BG);
   button(96, SM_BTN_Y, 84, 30, "Görevler", B_NORMAL, I_NONE, C_BG);
@@ -140,6 +142,9 @@ static void sysMenuTap(int x, int y) {
     settingsOpenPage(PAGE[col]);
   } else if (y >= SM_APP_Y + 8 && y < SM_APP_Y + 52 && deskRecent[col]) {
     appOpen(deskRecent[col]);
+  } else if (y >= SM_NOTE_Y && y < SM_NOTE_Y + 28 && x >= 274) {  // menü kapanır, ekran çizilir, sonra görüntü
+    shellRedraw(true);
+    shotAt = millis() + 400;
   } else if (y >= SM_NOTE_Y && y < SM_NOTE_Y + 28) {
     openApp(AID_NOTIFS);
   } else if (y >= SM_BTN_Y - 2) {
