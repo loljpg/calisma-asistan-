@@ -46,8 +46,10 @@ SPI saati ve bellek çalışırken ölçülür ve raporda yazar.
 - İşçiler 25 ms'den uzun kesintisiz hesap yapmaz: `vTaskDelay(1)` ile boşta görevlerine yer açar (görev
   bekçisi ve silinen görevlerin belleği). Bekleme süresi hesap süresinden düşülür.
 - Bellek yalnızca hesap sürerken ayrılır. Boştayken ve uygulama kapanınca bantlar, işçi yığınları ve
-  bağlam geri verilir. Bellek yetmezse daha küçük düzene inilir: 3 bant, sonra tek işçi, sonra 4 satırlık
-  bantlar (`docs/bellek.md`, ağır işler).
+  bağlam geri verilir. BAŞLA'ya basınca önce bulut akışı bırakılır; en iyi düzen (4 bant, 2 işçi) sığana
+  dek en çok 3 sn beklenir. Yine sığmazsa küçülür: 3 bant, 2 bant, 4 satırlık bantlar; iki işçi (iki
+  çekirdek) her zaman tek işçiden önce gelir (`docs/bellek.md`, ağır işler). Raporda "İşçi" satırı
+  kullanılan düzeni yazar.
 - Test sürerken bulutun canlı akışı duraklatılır (`netHold`), test bitince kendiliğinden döner: hem şifreli
   bağlantının tuttuğu bellek boşalır hem çekirdek 0 ölçüme karışmaz.
 
@@ -59,6 +61,9 @@ SPI saati ve bellek çalışırken ölçülür ve raporda yazar.
 | Orta | sabit nokta Q4.28 (32 bit, çarpımlar 64 bit) | piksel adımı ≥ 4·10⁻⁸ |
 | Derin | double (yazılımla; yalnızca Aşırı yük) | piksel adımı ≥ 10⁻¹³ |
 
+- float çekirdeği iki komşu noktayı aynı döngüde yürütür: ESP32'nin FPU'sunda her işlemin sonucu birkaç
+  saat beklettiği için iki bağımsız zincir bu boşlukları doldurur. Biri kaçınca öteki tek başına sürer;
+  sonuç nokta nokta tek yörüngeyle aynıdır (testlerle sınanır).
 - Ana kardioid ve 2. dönem diski iterasyonsuz atlanır (görüntüde; işlemci testinde kapalı).
 - Yumuşak renk: kaçış sayısının kesirli hâli (`it + 2 − log2(log2|z|²)`), hızlı log2 yaklaşığı, 256 renkli
   palet tablosu. Renk akışı karenin sırasına bağlıdır (her çalıştırmada aynı).
@@ -161,6 +166,13 @@ Sürümleri karşılaştırmak için:
    her sürümde aynı işi içerir; daha hızlı sürüm 60 sn'de daha çok kare tamamlar.
 5. Her ölçümü en az üç kez yinele, ortancayı al (Wi-Fi ve Bluetooth çekirdek 0'da kesinti yapar).
 
+## Derleme ayarı
+
+Bütün yazılım Arduino-ESP32'nin varsayılanı `-Os` (boyut için en iyileme) ile derlenir; flash payı dar
+olduğu için öyle kalır. Mandelbrot çekirdekleri (`bnRowF`, `bnRowQ`, `bnRowD`) işlev özniteliğiyle `-O2`
+derlenir (`BN_HOT`). Derlenmiş kodda float iç döngüsü yalnızca FPU yazmaçlarında çalışır (iki nokta için
+4 çarpma, 2 çarp-topla, 2 karşılaştırma, bellek erişimi yok).
+
 ## Derleme ve yükleme
 
 Yeni bağımlılık yok. Her zamanki gibi: `pio run -e cyd` (ya da `-e cyd_st7789`), yükleme `pio run -e cyd
@@ -180,4 +192,7 @@ Yeni bağımlılık yok. Her zamanki gibi: `pio run -e cyd` (ya da `-e cyd_st778
   tutulmaz; pencere kapanınca aynı kare yeniden hesaplanır.
 - Hesap / kare değeri çekirdek 1'deki aktarım kesintilerini içerebilir (yukarıda).
 - double yazılımla hesaplanır ve float'tan onlarca kat yavaştır; Aşırı yük'te derin kareler saniyeler sürer.
-- Flash payı: bu uygulama ≈45 KB tutar; yazılımın boş flash'ı ≈23 KB'a indi.
+- Flash payı: bu uygulama ≈47 KB tutar; yazılımın boş flash'ı ≈21 KB'a indi.
+- İlk kart ölçümü (fw-v72, ST7789, Aşırı yük, Orta): bellek tek işçiye yetmişti (çekirdek 0 boşta kaldı),
+  2,79 FPS, 4,67 Mit/s, aktarım 25,6 ms/kare (2,2 Mpx/s, 40 MHz yolun %88'i). Bu yüzden başlarken
+  bulut belleği bekleniyor ve iki işçili küçük düzenler eklendi.

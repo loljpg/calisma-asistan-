@@ -82,30 +82,61 @@ static inline void bnPut(const BnRowArgs& a, uint16_t*& out, bool esc, int it, f
     for (int k = 0; k < a.rep; k++) *out++ = c;
 }
 
-// float: kaçış yarıçapı 16 (|z|² > 256)
+// float: kaçış yarıçapı 16 (|z|² > 256). Tek yörünge (it'ten mx'e); kaçınca |z|² m2'ye yazılır.
+BN_HOT static inline bool bnOrbitF(float& x, float& y, float cr, float ci, int& it, int mx, float& m2) {
+  for (; it < mx; it++) {
+    float r = x * x, q = y * y;
+    if (r + q > 256.f) {
+      m2 = r + q;
+      return true;
+    }
+    y = (x + x) * y + ci;
+    x = r - q + cr;
+  }
+  return false;
+}
+// İki komşu nokta aynı döngüde ilerler: ESP32'nin FPU'sunda her işlemin sonucu birkaç saat bekletir,
+// iki bağımsız zincir bu boşlukları doldurur. Biri kaçınca öteki tek başına sürer; sonuç nokta nokta
+// tek yörüngeyle aynıdır (testlerle sınanır).
 BN_HOT static void bnRowF(const BnRowArgs& a, float cr0, float dcr, float ci, BnRowOut& o) {
   uint16_t* out = a.out;
   const int mx = a.maxIt;
   uint32_t its = 0;
-  for (int i = 0; i < a.n; i++) {
-    float cr = cr0 + dcr * (float)i;
-    float zr = 0, zi = 0, r2 = 0, i2 = 0;
-    int it = 0;
-    bool esc = false;
-    if (!(a.interior && bnInterior(cr, ci))) {
+  for (int i = 0; i < a.n; i += 2) {
+    const bool two = i + 1 < a.n;
+    const float c0 = cr0 + dcr * (float)i, c1 = cr0 + dcr * (float)(i + 1);
+    const bool in0 = a.interior && bnInterior(c0, ci), in1 = !two || (a.interior && bnInterior(c1, ci));
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0, m0 = 0, m1 = 0;
+    int it0 = 0, it1 = 0;
+    bool e0 = false, e1 = false;
+    if (!in0 && !in1) {
+      int it = 0;
       for (; it < mx; it++) {
-        r2 = zr * zr;
-        i2 = zi * zi;
-        if (r2 + i2 > 256.f) {
-          esc = true;
+        float r0 = x0 * x0, q0 = y0 * y0, r1 = x1 * x1, q1 = y1 * y1;
+        float s0 = r0 + q0, s1 = r1 + q1;
+        if (s0 > 256.f || s1 > 256.f) {
+          if (s0 > 256.f) e0 = true, m0 = s0;
+          if (s1 > 256.f) e1 = true, m1 = s1;
           break;
         }
-        zi = (zr + zr) * zi + ci;
-        zr = r2 - i2 + cr;
+        y0 = (x0 + x0) * y0 + ci;
+        y1 = (x1 + x1) * y1 + ci;
+        x0 = r0 - q0 + c0;
+        x1 = r1 - q1 + c1;
       }
+      it0 = it1 = it;
+      if (e0 && !e1) e1 = bnOrbitF(x1, y1, c1, ci, it1, mx, m1);
+      else if (e1 && !e0) e0 = bnOrbitF(x0, y0, c0, ci, it0, mx, m0);
+    } else {
+      if (!in0) e0 = bnOrbitF(x0, y0, c0, ci, it0, mx, m0);
+      if (!in1) e1 = bnOrbitF(x1, y1, c1, ci, it1, mx, m1);
     }
-    its += it;
-    bnPut(a, out, esc, it, r2 + i2, o);
+    its += it0;
+    bnPut(a, out, e0, it0, m0, o);
+    if (two) {
+      its += it1;
+      bnPut(a, out, e1, it1, m1, o);
+    }
   }
   o.iters += its;
 }

@@ -76,7 +76,7 @@ struct BnJob {  // bir kare (ya da ölçüm yükü)
   bool interior = true, discard = false;
   BnStep path;
 };
-enum BnState : uint8_t { BS_IDLE, BS_STILL, BS_RUN, BS_SUITE };
+enum BnState : uint8_t { BS_IDLE, BS_STILL, BS_PREP, BS_RUN, BS_SUITE };
 enum BnPage : uint8_t { BP_LIVE, BP_SUITE, BP_RESULT };
 enum BnStop : uint8_t { BST_NONE, BST_USER, BST_TIME, BST_MEM, BST_TASK, BST_STALL, BST_ALLOC, BST_CLOSE };
 
@@ -89,7 +89,7 @@ struct BnRun {  // fraktal testi ölçümleri
   uint64_t winIters = 0;
   uint32_t winT = 0, lastMon = 0, lastUi = 0, beatSeen[2] = {0, 0}, beatAt = 0;
   int itLo = 0, itHi = 0;
-  uint8_t stop = BST_NONE, deepest = 0, targets = 1;
+  uint8_t stop = BST_NONE, deepest = 0, targets = 1, workers = 0, slots = 0, bh = 0;
   BnStep last;
   double minSpan = BN_SPAN0;
 };
@@ -127,6 +127,7 @@ static BnState bnSt = BS_IDLE;
 static BnPage bnPage = BP_LIVE;
 static uint8_t bnStripPg = 0, bnResPg = 0;
 static bool bnLoaded = false, bnHaveFrame = false, bnWantStill = false;
+static uint32_t bnPrepUntil = 0;  // başlarken bulut akışının belleği bırakmasını en çok bu ana dek bekle
 static String bnErr;                 // bellek yetmediyse nedeni (fraktal alanında yazılır)
 static uint32_t bnErrAt = 0;
 static std::vector<String> bnRep;    // son rapor: "#Başlık" ya da "etiket\tdeğer"
@@ -195,7 +196,8 @@ static BnPathCfg bnPathCfg() {
 struct BnPlan {
   int slots, bh, workers;
 };
-static const BnPlan BN_PLANS[] = {{4, 8, 2}, {3, 8, 2}, {2, 8, 1}, {2, 4, 1}};
+// İki işçi (iki çekirdek) her zaman önce gelir: bant sayısı azalır ama ikinci çekirdek boşta kalmaz
+static const BnPlan BN_PLANS[] = {{4, 8, 2}, {3, 8, 2}, {2, 8, 2}, {2, 4, 2}, {2, 8, 1}, {2, 4, 1}};
 static uint32_t bnPlanNeed(const BnPlan& p) { return (uint32_t)p.slots * BN_W * p.bh * 2 + p.workers * (BN_STACK + 400); }
 
 static void bnFreeSlots() {
@@ -208,6 +210,12 @@ static void bnFreeSlots() {
   B->nSlot = 0;
 }
 static bool bnStopWorkers();
+static uint8_t memRunning();  // os/membudget.h
+// En iyi düzen şu an sığar mı (bulut akışı bırakılınca genelde sığar)
+static bool bnPlanReady() {
+  const BnPlan& p = BN_PLANS[0];
+  return memDecide(sysHeapFree(), sysHeapMaxAlloc(), bnPlanNeed(p), BN_W * p.bh * 2, memRunning(), MJ_BENCH) == MV_OK;
+}
 static bool bnAllocSlots(String* why) {
   if (!bnStopWorkers()) {  // önceki hesap bitmeden ara belleklere dokunulmaz
     if (why) *why = "Önceki hesap henüz bitmedi, birazdan yeniden dene";
@@ -422,7 +430,7 @@ static uint32_t bnPushBand(const BnSlot& sl, int y, int rows) {
 }
 
 static void bnFrameDone();
-// Hazır bantları sırasıyla yollar (en çok budget µs)
+// Hazır bantları sırasıyla yollar (en çok budget us)
 static bool bnPushReady(uint32_t budget) {
   BnCtx& c = *B;
   bool any = false;
@@ -551,19 +559,15 @@ static void bnStill() {
 #endif
 }
 
-static void bnStart() {
-  if (bnSt == BS_STILL) bnRelease();
+static void bnStartNow() {
   bnSt = BS_IDLE;
-  if (!bnCtxNew()) {
-    toast("Bellek yetersiz");
-    return;
-  }
   bnErr = "";
   if (!bnAllocSlots(&bnErr)) {
+    netHold &= ~HOLD_BENCH;
     alertBox("Başlatılamadı", bnErr);
+    bnDrawStrip(true);
     return;
   }
-  netHold |= HOLD_BENCH;  // ölçüm sırasında bulut akışı yok (bellek ve çekirdek 0 serbest)
   bnBuildLut(B->lut, bnCfg.pal, true);
   BnCtx& c = *B;
   c.r = BnRun();
@@ -577,6 +581,7 @@ static void bnStart() {
   r.lastTick = r.lastMon = r.winT = r.beatAt = r.t0;
   r.lastFrame = micros();
   r.freeStart = sysHeapFree();
+  r.workers = c.wmax, r.slots = c.nSlot, r.bh = c.bh;
   bnSt = BS_RUN;
 #ifndef HOST
   if (!bnSpawn(c.wmax == 2 ? 3 : 2)) {
@@ -587,8 +592,31 @@ static void bnStart() {
   bnDrawStrip(true);
 }
 
+// Başlat: önce bulut akışı duraklatılır (şifreli bağlantı on binlerce bayt tutar); en iyi düzen sığana dek
+// ya da en çok 3 sn beklenir, sonra sığan düzenle başlanır.
+static void bnStart() {
+  if (bnSt == BS_STILL) bnRelease();
+  bnSt = BS_IDLE;
+  if (!bnCtxNew()) {
+    toast("Bellek yetersiz");
+    return;
+  }
+  netHold |= HOLD_BENCH;  // ölçüm sırasında bulut akışı yok (bellek ve çekirdek 0 serbest)
+  if (bnPlanReady()) {
+    bnStartNow();
+    return;
+  }
+  bnSt = BS_PREP;
+  bnPrepUntil = millis() + 3000;
+  bnDrawStrip(true);
+}
+
 static void bnStopRun(uint8_t why) {
   if (bnSt == BS_RUN) bnFinish(why);
+  else if (bnSt == BS_PREP) {
+    bnSt = BS_IDLE;
+    netHold &= ~HOLD_BENCH;
+  }
 }
 
 // ============================================================================
@@ -772,7 +800,7 @@ static void bnRunReport() {
   bnKV("İterasyon ort / en çok", "%.2f / %.2f Mit/s (ö; en çok: 1 sn pencere)", r.iters / 1e6f / sec, r.maxMits);
   uint32_t b0 = c.bands[0], b1 = c.bands[1], bt = std::max<uint32_t>(1, b0 + b1);
   bnKV("Bant payı çekirdek 0 / 1", "%lu %% / %lu %% (ö)", (unsigned long)(b0 * 100 / bt), (unsigned long)(b1 * 100 / bt));
-  bnKV("İşçi", "%d görev · %d bant × %d satır", c.wmax, c.nSlot, c.bh);
+  bnKV("İşçi", "%u görev · %u bant × %u satır", (unsigned)r.workers, (unsigned)r.slots, (unsigned)r.bh);
   bnKV("En derin", "%s · %s", bnSpanX(r.minSpan).c_str(), BA_NAME[r.deepest < BA_N ? r.deepest : 0]);
   bnKV("Son hedef", "%s · %u hedef gezildi", BN_TARGETS[r.last.target].name, (unsigned)r.targets);
   bnKV("İterasyon sınırı", "%d → %d", r.itLo, r.itHi);
@@ -783,7 +811,7 @@ static void bnRunReport() {
   bnKV("Parçalanma en çok", "%lu %% (h)", (unsigned long)r.maxFrag);
   if (ex) {
     uint32_t ok = std::max<uint32_t>(1, c.ballAllocs - c.ballFails);
-    bnKV("Bellek baskısı", "%lu ayırma, %lu başarısız, ort %.1f µs, en çok %lu µs (ö)", (unsigned long)c.ballAllocs,
+    bnKV("Bellek baskısı", "%lu ayırma, %lu başarısız, ort %.1f us, en çok %lu us (ö)", (unsigned long)c.ballAllocs,
          (unsigned long)c.ballFails, (float)c.ballUs / ok, (unsigned long)c.ballMaxUs);
   }
   bnRepH("Kararlılık");
@@ -877,6 +905,7 @@ static void bnSuiteStart(uint8_t todo) {
     return;
   }
   netHold |= HOLD_BENCH;
+  bnPrepUntil = millis() + 3000;
   S->todo = todo;
   S->cur = (todo & SU_CPU) ? SU_CPU : (todo & SU_RAM) ? SU_RAM : SU_TFT;
   bnSt = BS_SUITE;
@@ -1166,7 +1195,7 @@ static void bnSuiteReport() {
       }
       if (r.us[2] && r.lat) {
         snprintf(k, sizeof k, "%s · eşzamanlama", BA_NAME[a]);
-        bnKV(k, "başlama %lu µs, bitiş farkı %.1f ms (ö)", (unsigned long)r.lat, r.imb / 1000.f);
+        bnKV(k, "başlama %lu us, bitiş farkı %.1f ms (ö)", (unsigned long)r.lat, r.imb / 1000.f);
       }
     }
     if (S->lockNs > 0) bnKV("Kilit (portMUX) giriş + çıkış", "%.0f ns (ö)", S->lockNs);
@@ -1186,10 +1215,10 @@ static void bnSuiteReport() {
     bnKV("Ayrılan", "%lu × 4 KB = %.0f KB · sonra boş %.1f KB (ö)", (unsigned long)S->blocks, S->blocks * 4.f, S->fb1 / 1024.f);
     if (S->blocks) {
       float mb = S->blocks * 4096 / 1048576.f;
-      bnKV("Ayırma süresi ort / en çok", "%.1f / %lu µs (ö)", (float)S->aUs / S->blocks, (unsigned long)S->aMax);
+      bnKV("Ayırma süresi ort / en çok", "%.1f / %lu us (ö)", (float)S->aUs / S->blocks, (unsigned long)S->aMax);
       bnKV("Yazma / okuma", "%.1f / %.1f MB/s (ö)", mb * 1e6f / std::max<uint64_t>(S->wUs, 1), mb * 1e6f / std::max<uint64_t>(S->rUs, 1));
       bnKV("Doğrulama", "%lu hatalı sözcük (ö)", (unsigned long)S->bad);
-      bnKV("Geri verme", "%.1f µs/blok · boş bellek farkı %ld bayt (ö)", (float)S->fUs / S->blocks, (long)((int32_t)(S->after - S->f0)));
+      bnKV("Geri verme", "%.1f us/blok · boş bellek farkı %ld bayt (ö)", (float)S->fUs / S->blocks, (long)((int32_t)(S->after - S->f0)));
     }
     if (S->fragN) {
       bnKV("Parçalama", "%lu × 1 KB, yarısı bırakıldı: en büyük blok %.1f KB, %lu boş blok (ö)", (unsigned long)S->fragN,
@@ -1210,7 +1239,7 @@ static void bnSuiteReport() {
     bnKV("Tek piksel (20000)", "%.3f Mpx/s (ö)", S->pix);
     bnKV("Görüntü, 320 genişlik bant", "%.2f Mpx/s · %.2f MB/s (ö)", S->push, S->push * 2);
     if (S->spiHz) bnKV("Aktarım verimi", "%d %% (h)", (int)lroundf(S->push * 16e8f / S->spiHz));
-    bnKV("Kısmi 64 genişlik parça", "%.2f Mpx/s · %.0f µs/adet (ö)", S->part, S->partUs);
+    bnKV("Kısmi 64 genişlik parça", "%.2f Mpx/s · %.0f us/adet (ö)", S->part, S->partUs);
     bnKV("DMA", "kullanılmıyor (gerekçe: docs/benchmark.md)");
   }
   bnRepCommon();
@@ -1254,6 +1283,7 @@ static void bnSuiteTick() {
   if (S->cur == SU_RAM) {
     if (B->nSlot) bnFreeSlots();
   } else if (!B->nSlot) {
+    if (!bnPlanReady() && (int32_t)(millis() - bnPrepUntil) < 0) return;  // bulut belleği bıraksın
     String why;
     if (!bnAllocSlots(&why)) {
       bnSuiteEnd(true);
@@ -1352,7 +1382,7 @@ static void bnDrawStrip(bool full) {
     for (int k = 0; k < 3; k++) text(BN_STRIP_L[pg][k], BN_COLX[k], BN_SY + 3, F_XS, C_TEXT3, C_BG);
     if (!(bnCfg.view & 1))  // şerit sayfası (dokununca değişir)
       for (int k = 0; k < 4; k++) tft.fillRect(240 + k * 4, BN_SY + 7, 2, 2, k == pg ? BN_ACC : C_LINE);
-    bnBtn(256, BN_SY + 4, 62, 28, run ? "DUR" : "BAŞLA", true);
+    bnBtn(256, BN_SY + 4, 62, 28, run || bnSt == BS_PREP ? "DUR" : "BAŞLA", true);
   }
   String v[3];
   bnStripVals(pg, v);
@@ -1618,7 +1648,7 @@ static void bnTap(int x, int y) {
     if (bnPage != BP_LIVE) return;
     int h = headerHit(x, y);
     if (h < 0) return;
-    if (bnSt == BS_RUN) bnStopRun(BST_USER);  // ayar değişirse ölçüm geçersiz: önce biter
+    if (bnSt == BS_RUN || bnSt == BS_PREP) bnStopRun(BST_USER);  // ayar değişirse ölçüm geçersiz: önce biter
     if (bnPage != BP_LIVE) return;
     if (h == 0) bnSettingsMenu();
     else if (h == 1) bnTestsMenu();
@@ -1646,7 +1676,7 @@ static void bnTap(int x, int y) {
   }
   if (y >= BN_SY) {
     if (x < 64) {
-      if (bnSt == BS_RUN) {
+      if (bnSt == BS_RUN || bnSt == BS_PREP) {
         toast("Mod, test durunca değişir");
         return;
       }
@@ -1654,15 +1684,19 @@ static void bnTap(int x, int y) {
       bnSave();
       bnRestartStill();
     } else if (x >= 256) {
-      if (bnSt == BS_RUN) bnStopRun(BST_USER);
-      else bnStart();
+      if (bnSt == BS_RUN || bnSt == BS_PREP) {
+        bnStopRun(BST_USER);
+        if (bnSt == BS_IDLE && bnPage == BP_LIVE) bnDrawStrip(true);
+      } else {
+        bnStart();
+      }
     } else if (!(bnCfg.view & 1)) {
       bnStripPg = (bnStripPg + 1) % 4;
       bnDrawStrip(true);
     }
     return;
   }
-  if (bnSt != BS_RUN && y < BN_FY + bnVh()) {  // fraktala dokun: tam ekran ↔ pano
+  if (bnSt != BS_RUN && bnSt != BS_PREP && y < BN_FY + bnVh()) {  // fraktala dokun: tam ekran ↔ pano
     bnCfg.view ^= 1;
     bnSave();
     bnRestartStill();
@@ -1684,6 +1718,10 @@ static void bnTick() {
   if (bnSt == BS_SUITE) {
     lastInteract = ms;
     bnSuiteTick();
+    return;
+  }
+  if (bnSt == BS_PREP) {
+    if (bnPlanReady() || (int32_t)(ms - bnPrepUntil) >= 0) bnStartNow();
     return;
   }
   if (bnSt == BS_IDLE) {

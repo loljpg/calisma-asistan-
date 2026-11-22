@@ -122,9 +122,10 @@ static int sysLight() { return g_ldr; }
 static int sysLightPct() { return 100 - g_ldr * 100 / 4095; }
 static void sysLed(uint8_t, uint8_t, uint8_t) {}
 static void sysCalibrate() {}
-static uint32_t sysHeapFree() { return 96 * 1024; }
+static uint32_t g_heapFree = 96 * 1024, g_heapMax = 52 * 1024;  // testler düşük belleği taklit edebilir
+static uint32_t sysHeapFree() { return g_heapFree; }
 static uint32_t sysHeapMin() { return 61 * 1024; }
-static uint32_t sysHeapMaxAlloc() { return 52 * 1024; }
+static uint32_t sysHeapMaxAlloc() { return g_heapMax; }
 static uint32_t sysSketchSize() { return 1858037; }
 static uint32_t sysSketchFree() { return 1966080; }
 static String sysChipText() { return "ESP32 rev3 · 240 MHz · 4 MB"; }

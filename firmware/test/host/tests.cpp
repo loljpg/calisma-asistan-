@@ -1692,6 +1692,32 @@ static void testBench() {
     CHECK(o.inside == 3 && o.iters == 0 && out[0] == 7 && out[5] == 7);  // kardioid testi: iterasyonsuz
   }
   CHECK(bnInterior(-0.5f, 0) && bnInterior(-1.f, 0.1f) && !bnInterior(0.3f, 0) && !bnInterior(-2.f, 0));
+  // float çekirdeği iki noktayı birlikte yürütür: sonuç nokta nokta tek yörüngeyle aynı (tek sayılı satır da)
+  {
+    bnBuildLut(lut, 1, false);
+    for (int n : {1, 7, 64}) {
+      for (bool inter : {false, true}) {
+        BnFrameGeo g{-0.7436, 0.1318, 0.02, n, 9};
+        for (int y = 0; y < g.rows; y++) {
+          uint16_t got[64], want[64];
+          BnRowArgs a{got, n, 1, 300, lut, 3, 5, inter};
+          BnRowOut o, ref;
+          bnRow(BA_FLOAT, a, g, 0, y, o);
+          uint32_t its = 0;
+          uint16_t* w = want;
+          for (int i = 0; i < n; i++) {
+            float c = (float)g.re(0) + (float)g.px() * (float)i, ci = (float)g.im(y), x = 0, yy = 0, m = 0;
+            int it = 0;
+            bool e = !(inter && bnInterior(c, ci)) && bnOrbitF(x, yy, c, ci, it, 300, m);
+            if (inter && bnInterior(c, ci)) it = 0;
+            its += it;
+            bnPut(a, w, e, it, m, ref);
+          }
+          CHECK(o.iters == its && o.esc == ref.esc && o.inside == ref.inside && !memcmp(got, want, n * 2));
+        }
+      }
+    }
+  }
   // üç aritmetik aynı ızgarada aynı sonucu verir (iterasyon toplamı ±%2)
   {
     BnFrameGeo g{-0.65, 0, 3.0, 64, 48};
@@ -1834,6 +1860,30 @@ static void testBench() {
   CHECK(bnSt == BS_IDLE && B->nBall == 0 && B->nSlot == 0);
   bnTap(40, 222);
   bnCfg.mode = 0;
+  // bellek azken: önce bulut bırakılır ve beklenir; en iyi düzen sığmazsa iki işçili küçük düzen
+  g_heapFree = 40 * 1024, g_heapMax = 30 * 1024;
+  bnTicks(2);
+  bnTap(288, 222);
+  CHECK(bnSt == BS_PREP && (netHold & HOLD_BENCH));
+  bnTap(288, 222);  // vazgeç
+  CHECK(bnSt == BS_IDLE && !(netHold & HOLD_BENCH));
+  bnTap(288, 222);
+  bnTicks(2);
+  CHECK(bnSt == BS_PREP);
+  g_ms += 3100;
+  bnTicks(1);
+  CHECK(bnSt == BS_RUN && B->r.workers == 2 && B->r.slots == 2 && B->nSlot == 2);
+  bnTicks(4);
+  CHECK(B->r.ft.n >= 3);
+  g_heapFree = 19 * 1024;  // bellek kritik: güvenle durur
+  B->r.lastMon -= 300;
+  bnTicks(1);
+  CHECK(bnSt == BS_IDLE && B->r.stop == BST_MEM && B->nSlot == 0 && !(netHold & HOLD_BENCH));
+  bool two = false;
+  for (auto& l : bnRep) two |= l == "İşçi\t2 görev · 2 bant × 8 satır";
+  CHECK(two);
+  bnTap(40, 222);
+  g_heapFree = 96 * 1024, g_heapMax = 52 * 1024;
   // ayarlar kalıcı
   bnCfg.cplx = 2, bnCfg.pal = 3;
   bnSave();
