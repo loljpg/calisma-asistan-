@@ -52,9 +52,10 @@ static bool bleHasToken = false;            // bir telefonla eşleşmiş mi
 RTC_NOINIT_ATTR uint32_t rtcMagic, rtcUpSec, rtcMinHeap;
 static String bootReason;
 static const char* volatile netPhase = "boşta";
-// Bulut bağlantısını geçici durduran kullanıcı işleri (bit: 1 ağ aracı, 2 web sunucusu). Canlı akışın
-// açık TLS bağlantısı on binlerce bayt tutar; kullanıcının başlattığı iş için bırakılır, iş bitince döner.
-enum : uint8_t { HOLD_NETTOOL = 1, HOLD_WEB = 2 };
+// Bulut bağlantısını geçici durduran kullanıcı işleri (bit: 1 ağ aracı, 2 web sunucusu, 4 kıyas testi).
+// Canlı akışın açık TLS bağlantısı on binlerce bayt tutar; kullanıcının başlattığı iş için bırakılır, iş
+// bitince döner.
+enum : uint8_t { HOLD_NETTOOL = 1, HOLD_WEB = 2, HOLD_BENCH = 4 };
 static volatile uint8_t netHold = 0;  // ağ görevi o an ne yapıyor (bellek günlüğü için)
 static String diagLastCrash;  // önceki çökmenin özeti (açılışta çekirdek dökümünden)
 

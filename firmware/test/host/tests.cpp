@@ -1,3 +1,4 @@
+#include <set>
 // DAXEN VANE · birim testleri (bilgisayarda, gerçek yazılım koduyla).
 // ./run.sh test bunları AddressSanitizer ve UndefinedBehaviorSanitizer ile derleyip çalıştırır.
 #include "host_sys.h"
@@ -823,7 +824,7 @@ static void testNet() {
   CHECK(at[AID_TRANSFER] == &APP_TRANSFER && at[AID_MEDIA] == &APP_MEDIA && at[AID_NOTIFS] == &APP_NOTIFS && at[AID_CALC] == &APP_CALC);
   CHECK(at[AID_CLOCK] == &APP_CLOCK && at[AID_WEATHER] == &APP_WEATHER && at[AID_TODO] == &APP_TODO && at[AID_GAMES] == &APP_GAMES);
   CHECK(at[AID_PHOTOS] == &APP_PHOTOS && at[AID_READER] == &APP_READER && at[AID_DRAW] == &APP_DRAW && at[AID_CARDS] == &APP_CARDS);
-  CHECK(at[AID_LIGHT] == &APP_LIGHT && at[AID_STORE] == &APP_STORE && appTableCount() == 22);
+  CHECK(at[AID_LIGHT] == &APP_LIGHT && at[AID_STORE] == &APP_STORE && at[AID_BENCH] == &APP_BENCH && appTableCount() == 23);
 
   group("terminal ağ komutları");
   ndConsented = false;
@@ -1661,6 +1662,227 @@ static void testBle() {
   CHECK(termExec("bluetooth devices").lines[0] == "Liste boş (önce: bluetooth scan)");
 }
 
+// CYD Infinity Engine: hesap çekirdekleri, yakınlaşma yolu, ölçüm ve uygulama akışı (apps/bench.h)
+static void bnTicks(int n) {
+  for (int i = 0; i < n; i++) {
+    g_ms += 16;
+    bnTick();
+  }
+}
+static void testBench() {
+  group("Infinity: hesap");
+  uint16_t lut[256];
+  for (int i = 0; i < 256; i++) lut[i] = i + 1;
+  uint16_t out[8];
+  // c = 0 içeride: 200 iterasyon, renk içerisi; c = 1 dördüncü adımda kaçar (0, 1, 2, 5, 26)
+  for (int ar = 0; ar < BA_N; ar++) {
+    BnRowArgs a{out, 1, 1, 200, lut, 0, 0, false};
+    BnRowOut o;
+    bnRow(ar, a, BnFrameGeo{0, 0, 1e-6, 1, 1}, 0, 0, o);
+    CHECK(o.inside == 1 && o.iters == 200 && out[0] == 0);
+    BnRowOut e;
+    bnRow(ar, a, BnFrameGeo{1, 0, 1e-6, 1, 1}, 0, 0, e);
+    CHECK(e.esc == 1 && e.iters == 4 && e.minIt == 4 && out[0] == lut[bnSmooth(4, 676.f, 0)]);
+  }
+  // yarım çözünürlük: her nokta iki kez yazılır
+  {
+    BnRowArgs a{out, 3, 2, 50, lut, 7, 0, true};
+    BnRowOut o;
+    bnRow(BA_FLOAT, a, BnFrameGeo{-0.5, 0, 1e-3, 3, 1}, 0, 0, o);
+    CHECK(o.inside == 3 && o.iters == 0 && out[0] == 7 && out[5] == 7);  // kardioid testi: iterasyonsuz
+  }
+  CHECK(bnInterior(-0.5f, 0) && bnInterior(-1.f, 0.1f) && !bnInterior(0.3f, 0) && !bnInterior(-2.f, 0));
+  // üç aritmetik aynı ızgarada aynı sonucu verir (iterasyon toplamı ±%2)
+  {
+    BnFrameGeo g{-0.65, 0, 3.0, 64, 48};
+    uint64_t it[BA_N] = {0, 0, 0};
+    uint32_t in[BA_N] = {0, 0, 0};
+    for (int ar = 0; ar < BA_N; ar++)
+      for (int y = 0; y < g.rows; y++) {
+        BnRowArgs a{nullptr, g.cols, 1, 128, nullptr, 0, 0, false};
+        BnRowOut o;
+        bnRow(ar, a, g, 0, y, o);
+        it[ar] += o.iters, in[ar] += o.inside;
+      }
+    CHECK(it[0] > 100000 && llabs((long long)it[0] - (long long)it[2]) * 50 < (long long)it[2]);
+    CHECK(llabs((long long)it[1] - (long long)it[2]) * 50 < (long long)it[2]);
+    CHECK(abs((int)in[0] - (int)in[2]) <= 3 && abs((int)in[1] - (int)in[2]) <= 3);
+  }
+  CHECK(bnSmooth(5, 300.f, 0) != bnSmooth(5, 60000.f, 0));
+  CHECK(fabsf(bnLog2(8.f) - 3) < 0.02f && fabsf(bnLog2(1000.f) - log2f(1000.f)) < 0.02f);
+  bnBuildLut(lut, 0, false);
+  uint16_t sw[256];
+  bnBuildLut(sw, 0, true);
+  CHECK(lut[0] == bnRgb(0x0A0C10) && sw[0] == (uint16_t)(lut[0] << 8 | lut[0] >> 8) && lut[128] != lut[0]);
+  // hassasiyet katmanları
+  CHECK(bnTier(1e-3, -0.74, 0.13, BA_FLOAT, false) == BA_FLOAT && bnTier(1e-3, -0.74, 0.13, BA_FIXED, false) == BA_FIXED);
+  CHECK(bnTier(1e-7, -0.74, 0.13, BA_FLOAT, false) == BA_FIXED && bnTier(1e-9, -0.74, 0.13, BA_FLOAT, false) == BA_END);
+  CHECK(bnTier(1e-9, -0.74, 0.13, BA_FLOAT, true) == BA_DOUBLE && bnTier(1e-14, -0.74, 0.13, BA_FLOAT, true) == BA_END);
+  CHECK(bnMaxIt(96, 1, 3.0) == 96 && bnMaxIt(96, 1, 3e-6) > 96 && bnMaxIt(384, 2, 1e-20) == 4096);
+  // yol: maks. performans sabit noktadan sonra yeni hedefe geçer; aşırı yük double'a iner
+  {
+    BnPathCfg pc{1, 1, BA_FLOAT, false, 160};
+    BnStep s = bnStepAt(pc, 0, 0);
+    CHECK(s.span == 3.0 && s.arith == BA_FLOAT && s.maxIt == 96);
+    int n = 0;
+    bool sawFixed = false;
+    while (s.target == 0 && n < 2000) {
+      sawFixed |= s.arith == BA_FIXED;
+      s = bnNext(pc, s, false), n++;
+    }
+    CHECK(sawFixed && s.target == 1 && s.k == 0 && n > 380 && n < 470);
+    BnStep f = bnNext(pc, bnStepAt(pc, 2, 30), true);  // tek renk: sonraki hedef
+    CHECK(f.target == 3 && f.k == 0);
+    CHECK(bnNext(pc, bnStepAt(pc, BN_NTARGET - 1, 0), true).target == 0);
+    BnPathCfg ex{2, 1, BA_FLOAT, true, 320};
+    BnStep d = bnStepAt(ex, 0, 0);
+    uint8_t last = d.arith;
+    bool mono = true, sawD = false;
+    int m = 0;
+    for (; m < 2000 && d.target == 0; m++) {
+      if (d.arith < last) mono = false;
+      last = d.arith, sawD |= d.arith == BA_DOUBLE;
+      d = bnNext(ex, d, false);
+    }
+    CHECK(mono && sawD && m > 380 && m < 440);  // float → sabit → double, ×1e11 büyütmeye kadar
+  }
+  {
+    BnRowOut f;
+    f.inside = 98, f.esc = 2, f.minIt = 3, f.maxEsc = 9;
+    CHECK(bnFlat(f));
+    f.inside = 10, f.esc = 90;
+    CHECK(!bnFlat(f));
+    f.inside = 0, f.minIt = 40, f.maxEsc = 41;
+    CHECK(bnFlat(f));
+  }
+  BnTimes tm;
+  tm.add(100000), tm.add(50000), tm.add(200000);
+  CHECK(tm.n == 3 && fabsf(tm.fpsMax() - 20) < 0.01f && fabsf(tm.fpsMin() - 5) < 0.01f && fabsf(tm.fpsCur() - 5) < 0.01f &&
+        fabsf(tm.msAvg() - 116.67f) < 0.1f);
+  CHECK(bnFragPct(40000, 30000) == 25 && bnFragPct(0, 0) == 0 && bnFragPct(1000, 2000) == 0);
+  char fb[16];
+  bnFmt(fb, sizeof fb, 3.14159f, 2);
+  CHECK(String(fb) == "3,14");
+
+  group("Infinity: uygulama");
+  webOn = g_ndBusy = g_bsBusy = false;
+  netHold = 0;
+  bnCfg = BnCfg();
+  bnSave();
+  appOpen(&APP_BENCH);
+  CHECK(curApp == &APP_BENCH && bnPage == BP_LIVE && bnWantStill);
+  bnTicks(2);  // durgun görüntü bir turda çizilir, bellek geri verilir
+  CHECK(bnSt == BS_IDLE && bnHaveFrame && B && B->nSlot == 0 && !bnWorkersAlive());
+  {
+    std::set<uint16_t> cols;
+    for (int y = BN_FY + 4; y < BN_FY + BN_VH[0]; y += 9)
+      for (int x = 3; x < 320; x += 13) cols.insert(tft.readPixel(x, y));
+    CHECK(cols.size() > 12);  // gerçekten hesaplanmış, renkli bir görüntü
+  }
+  // başlat: bulut duraklar, kareler sayılır
+  bnTap(288, 222);
+  CHECK(bnSt == BS_RUN && (netHold & HOLD_BENCH) && B->nSlot >= 2);
+  bnTicks(12);
+  CHECK(B->r.ft.n >= 10 && B->r.pxComp == (uint64_t)B->r.ft.n * 160 * 88 && B->r.iters > 0 && bnView.k >= 9);
+  CHECK(B->cg == B->pg || B->cg == B->pg + 1);
+  BnStep p1 = bnView;
+  bnTap(288, 222);  // durdur: rapor, sonuç sayfası, bellek ve bulut geri
+  CHECK(bnSt == BS_IDLE && bnPage == BP_RESULT && !bnRep.empty() && B->nSlot == 0 && !(netHold & HOLD_BENCH));
+  bool hasFrames = false;
+  for (auto& l : bnRep) hasFrames |= l.startsWith("Tamamlanan kare\t");
+  CHECK(hasFrames && (bnRepPath.length() == 0 || SD.exists(bnRepPath)));
+  bnTap(40, 222);  // kapat
+  CHECK(bnPage == BP_LIVE);
+  // aynı ayarlarla aynı kare dizisi (zamanlamadan bağımsız)
+  bnTicks(2);
+  bnTap(288, 222);
+  bnTicks(12);
+  CHECK(bnView.k == p1.k + 1 || bnView.k == p1.k);  // ikinci çalıştırma da aynı yoldan
+  BnStep p2 = bnView;
+  CHECK(p2.target == p1.target && p2.span == bnStepAt(bnPathCfg(), p2.target, p2.k).span);
+  // süre dolunca kendiliğinden biter (duraklama sayılmaz)
+  B->r.t0 -= 61000;
+  B->r.lastMon -= 300;
+  bnTicks(1);
+  CHECK(bnSt == BS_IDLE && B->r.stop == BST_TIME && bnPage == BP_RESULT);
+  bnTap(40, 222);
+  // menü açık kalan süre düşülür
+  bnTicks(2);
+  bnTap(288, 222);
+  bnTicks(3);
+  g_ms += 5000;
+  bnTicks(1);
+  CHECK(B->r.pauses == 1 && B->r.pausedMs >= 5000);
+  // ilerleme yoksa güvenlik durdurması
+  B->r.beatSeen[0] = B->beat[0], B->r.beatSeen[1] = B->beat[1];
+  B->r.beatAt = millis() - 21000;
+  B->r.lastMon = millis() - 300;
+  bnMonitor();
+  CHECK(bnSt == BS_IDLE && B->r.stop == BST_STALL);
+  bnTap(40, 222);
+  // aşırı yük: tam çözünürlük ve bellek baskısı; durunca hepsi bırakılır
+  bnTicks(2);
+  bnTap(30, 222);
+  CHECK(bnCfg.mode == 1);
+  bnTicks(2);
+  bnTap(288, 222);
+  bnTicks(6);
+  B->r.lastMon -= 300;
+  bnTicks(1);
+  CHECK(bnSt == BS_RUN && B->job[B->pg & 1].step == 1 && B->nBall > 0 && B->ballAllocs > 0);
+  bnTap(288, 222);
+  CHECK(bnSt == BS_IDLE && B->nBall == 0 && B->nSlot == 0);
+  bnTap(40, 222);
+  bnCfg.mode = 0;
+  // ayarlar kalıcı
+  bnCfg.cplx = 2, bnCfg.pal = 3;
+  bnSave();
+  bnLoaded = false;
+  bnCfg = BnCfg();
+  bnLoad();
+  CHECK(bnCfg.cplx == 2 && bnCfg.pal == 3 && bnCfg.mode == 0);
+  bnCfg = BnCfg();
+  bnSave();
+
+  group("Infinity: testler");
+  bnSuiteStart(SU_CPU);
+  CHECK(bnSt == BS_SUITE && bnPage == BP_SUITE && S);
+  for (int i = 0; i < 40 && S && S->cur == SU_CPU; i++) bnTicks(1);
+  CHECK(S && S->cur == 0);
+  for (int a = 0; a < BA_N; a++)  // bantlar çekirdeklere nasıl bölünürse bölünsün iş aynı
+    CHECK(S->cpu[a].it[0] > 0 && S->cpu[a].it[0] == S->cpu[a].it[1] && S->cpu[a].it[1] == S->cpu[a].it[2]);
+  bnTicks(1);
+  CHECK(!S && bnSt == BS_IDLE && bnPage == BP_RESULT && B->nSlot == 0 && !(netHold & HOLD_BENCH));
+  bool cpuLine = false;
+  for (auto& l : bnRep) cpuLine |= l.startsWith("float · iki çekirdek\t");
+  CHECK(cpuLine);
+  bnTap(40, 222);
+  bnSuiteStart(SU_CPU | SU_TFT | SU_RAM);
+  for (int i = 0; i < 400 && bnSt == BS_SUITE; i++) bnTicks(1);
+  CHECK(bnSt == BS_IDLE && bnPage == BP_RESULT && !S && B->nSlot == 0);
+  bool hasRam = false, hasTft = false, hasCpu = false;
+  for (auto& l : bnRep) {
+    hasRam |= l.startsWith("Doğrulama\t0 hatalı");
+    hasTft |= l.startsWith("Tam ekran doldurma\t");
+    hasCpu |= l.startsWith("sabit nokta · çekirdek 0\t");
+  }
+  CHECK(hasRam && hasTft && hasCpu && bnResPages() >= 3);
+  bnSwipe(SW_LEFT);
+  CHECK(bnResPg == 1);
+  CHECK(bnBack() && bnPage == BP_LIVE);
+  // test yarıda kesilir: bellek geri
+  bnSuiteStart(SU_RAM);
+  bnTicks(1);
+  bnTap(160, 222);
+  CHECK(!S && bnSt == BS_IDLE && bnPage == BP_LIVE && B->nSlot == 0);
+  // kapanınca bağlam da gider
+  bnTicks(1);
+  bnTap(288, 222);
+  bnTicks(2);
+  appExit();
+  CHECK(!B && bnSt == BS_IDLE && bnRep.empty() && !(netHold & HOLD_BENCH));
+}
+
 int main() {
   setupState();
   testCalib();
@@ -1684,6 +1906,7 @@ int main() {
   testStore();
   testShot();
   testSmac();
+  testBench();
   group("kalıcı ayarlar");
   CHECK(Preferences::misuse() == 0);  // her kullanım begin()/end() içinde
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);

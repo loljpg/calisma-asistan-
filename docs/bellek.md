@@ -39,6 +39,7 @@ Kendi yığını ya da büyük tamponu olan işler başlamadan önce bellek bek�
 | Ağ aracı (ping, dns, tcp, traceroute, test) | 6 KB yığın | 6 KB | Komut verilince, iş bitince kapanır |
 | Satranç motoru | 10 KB yığın | 10 KB | Yalnızca kart düşünürken |
 | Bluetooth taraması | cihaz listesi | liste boyu | Tarama başlarken |
+| Kıyas testi (Infinity) | 4 × 5 KB bant + 2 × 3 KB işçi yığını (yetmezse 3 bant, sonra tek işçi, sonra 2 × 2,5 KB) | 5 KB | Görüntü hesaplanırken ve test sürerken; boştayken hepsi geri verilir |
 
 Kurallar:
 

@@ -541,6 +541,50 @@ int main(int argc, char** argv) {
     calResult(7.9f, 4.2f, 11.5f, false);
     shot("f5-sonuc-kotu");
   }
+  if (want("kiyas")) {  // CYD Infinity Engine (apps/bench.h)
+    bnCfg = BnCfg();
+    appOpen(&APP_BENCH);
+    for (int i = 0; i < 2; i++) { g_ms += 16; bnTick(); }
+    shot("k0-infinity-durgun");
+    bnTap(288, 222);
+    for (int i = 0; i < 60; i++) { g_ms += 16; bnTick(); }
+    B->r.lastUi = 0;
+    g_ms += 600; B->r.lastTick = g_ms; bnTick();
+    shot("k1-infinity-calisiyor");
+    bnTap(160, 222);  // şerit sayfası: işlem
+    bnTap(160, 222);  // bellek
+    g_ms += 16; bnTick();
+    shot("k2-infinity-serit-bellek");
+    bnTap(288, 222);
+    shot("k3-infinity-sonuc");
+    bnTap(40, 222);
+    bnCfg.mode = 1; bnCfg.view = 1; bnCfg.pal = 1;
+    bnRestartStill();
+    for (int i = 0; i < 2; i++) { g_ms += 16; bnTick(); }
+    bnTap(288, 222);
+    for (int i = 0; i < 40; i++) { g_ms += 16; bnTick(); }
+    B->r.lastUi = 0; B->r.lastMon = 0;
+    g_ms += 600; B->r.lastTick = g_ms; bnTick();
+    shot("k4-infinity-pano-asiri");
+    bnTap(288, 222);
+    bnTap(40, 222);
+    bnSuiteStart(SU_CPU | SU_TFT | SU_RAM);
+    g_ms += 16; bnTick(); g_ms += 16; bnTick();
+    shot("k5-infinity-test");
+    for (int i = 0; i < 400 && bnSt == BS_SUITE; i++) { g_ms += 16; bnTick(); }
+    shot("k6-infinity-test-sonuc");
+    bnSwipe(SW_LEFT);
+    shot("k7-infinity-test-sonuc-2");
+    bnTap(40, 222);
+    bnSettingsMenu();
+    shot("k8-infinity-ayarlar");
+    ov = Overlay();
+    bnTestsMenu();
+    shot("k9-infinity-testler");
+    ov = Overlay();
+    bnCfg = BnCfg(); bnSave();
+    appExit();
+  }
   if (want("s6")) {
     // Çekirdek süreç tablosu (önizlemede kesme yok: istatistikler örnek)
     auto nop = []() {};

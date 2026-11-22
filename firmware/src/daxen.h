@@ -40,6 +40,7 @@
 #include "apps/taskman.h"
 #include "apps/terminal.h"
 #include "apps/network.h"
+#include "apps/bench.h"  // CYD Infinity Engine: işlemci, ekran ve bellek kıyası
 
 #include "os/membudget.h"  // ağır işlerin bellek bütçesi (uygulamaların durumunu okur)
 #include "os/home.h"

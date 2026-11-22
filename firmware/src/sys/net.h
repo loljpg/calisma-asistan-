@@ -1062,7 +1062,7 @@ static void netTask(void*) {
     } else if (netHold) {
       // Kullanıcının başlattığı ağ aracı ya da web sunucusu belleğe ihtiyaç duyuyor: bulut bekler
       if (live.c) liveClose();
-      setNet("Bulut duraklatıldı (ağ aracı açık)", true);
+      setNet(netHold & HOLD_BENCH ? "Bulut duraklatıldı (kıyas testi)" : "Bulut duraklatıldı (ağ aracı açık)", true);
     } else if (bleHasToken && millis() < NET_BLE_GRACE_MS) {
       // Eşleşmiş telefon açılıştan hemen sonra bağlanır; o arada buluta şifreli bağlantı açılıp telefon
       // gelince hemen kapatılmasın (her şifreli bağlantı on binlerce bayt bellek ister).

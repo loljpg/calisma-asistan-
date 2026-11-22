@@ -1,6 +1,6 @@
 #pragma once
 // DAXEN VANE · Bellek bütçesi (docs/bellek.md). Ağır işler — Lua uygulaması, web sunucusu
-// (Aktarım), ağ aracı, satranç motoru, Bluetooth taraması — başlamadan önce memAsk'e sorar:
+// (Aktarım), ağ aracı, satranç motoru, Bluetooth taraması, kıyas testi — başlamadan önce memAsk'e sorar:
 //  - gereksinim + 18 KB taban + 2 KB pay boş olmalı, en büyük blok işin yığınını almalı;
 //  - aynı anda en çok MEM_HEAVY_MAX ağır iş çalışır.
 // Reddedilen iş nedenini ve açık ağır işlerin adlarını söyler; kullanıcı birini kapatıp yeniden dener.
@@ -8,7 +8,7 @@
 #include "../core/memcalc.h"
 
 static const char* const MJ_NAME[MJ_N] = {"Lua uygulaması", "web sunucusu (Aktarım)", "ağ aracı", "satranç motoru",
-                                          "Bluetooth taraması"};
+                                          "Bluetooth taraması", "kıyas testi (Infinity)"};
 
 // Şu an çalışan ağır işler (bit)
 static uint8_t memRunning() {
@@ -22,6 +22,7 @@ static uint8_t memRunning() {
   if (ndBusy()) m |= 1 << MJ_NETTOOL;
   if (chAiBusy) m |= 1 << MJ_CHESS;
   if (bsBusy()) m |= 1 << MJ_BLESCAN;
+  if (bnBusy()) m |= 1 << MJ_BENCH;
   return m;
 }
 

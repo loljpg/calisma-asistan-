@@ -8,7 +8,7 @@
 #define MEM_HEAVY_MAX 3          // aynı anda en çok bu kadar ağır iş
 
 // Ağır işler: kendi yığını ya da büyük tamponu olanlar (her biri tektir)
-enum MemJob : uint8_t { MJ_LUA, MJ_WEB, MJ_NETTOOL, MJ_CHESS, MJ_BLESCAN, MJ_N };
+enum MemJob : uint8_t { MJ_LUA, MJ_WEB, MJ_NETTOOL, MJ_CHESS, MJ_BLESCAN, MJ_BENCH, MJ_N };
 enum MemVerdict : uint8_t { MV_OK, MV_BUSY, MV_LOW, MV_FRAG };
 
 // freeB: şu an boş bellek, maxBlk: en büyük boş blok, need: işin toplam gereksinimi,
