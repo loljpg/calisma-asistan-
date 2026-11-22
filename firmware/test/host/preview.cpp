@@ -481,6 +481,11 @@ int main(int argc, char** argv) {
     tap(220, 45); step(200);
     tap(280, 45); step(200);
     shot("h5-deneme-gecmis");
+    luaOpenOk(byName("Mayın Tarlası"));
+    step(200);
+    tap(28 + 11 + 5 * 22, 58 + 11 + 4 * 22); step(100);
+    tap(28 + 11, 58 + 11); step(100);
+    shot("h6-mayin");
     appExit();
     homeShow();
   }

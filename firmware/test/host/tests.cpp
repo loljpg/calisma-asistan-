@@ -1288,7 +1288,7 @@ static void testStore() {
   appExit();
 
   group("mağaza uygulamaları");
-  const char* names[] = {"Pong", "Nefes", "Deneme"};
+  const char* names[] = {"Pong", "Nefes", "Deneme", "Mayın Tarlası"};
   for (const char* nm : names) {
     int i = luaIndexOf(nm);
     CHECK(i >= 0);
@@ -1320,6 +1320,13 @@ static void testStore() {
       if (k.indexOf(";TYT;35,2") < 0) printf("    kayıt: %s\n", k.c_str());
       tap(280, 45);   // Geçmiş
       luaRunFrames(4);
+    } else if (!strcmp(nm, "Mayın Tarlası")) {
+      for (int t = 0; t < 30; t++) {  // rastgele hücreler: açılır, biter ya da kazanılır; hata olmamalı
+        tap(28 + 11 + (t * 7 % 12) * 22, 30 + 28 + 11 + (t * 5 % 8) * 22);
+        luaRunFrames(3);
+      }
+      tap(270, 40);  // Bayrak / Yeni oyun
+      luaRunFrames(3);
     } else {
       luaRunFrames(250, 60, 30, 150);
     }
