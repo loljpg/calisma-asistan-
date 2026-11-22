@@ -525,6 +525,33 @@ static void testLua() {
     printf("    satır yükseklikleri: %d %d %d %d %d\n", fontHeight(F_XS), fontHeight(F_SM), fontHeight(F_MD), fontHeight(F_LG), fontHeight(F_XL));
     CHECK(fontHeight(F_MD) > fontHeight(F_SM) && fontHeight(F_XL) > 40);
   }
+  // glif önbelleği: açıkken aynı çizim, SD'den okuma yok; dolunca baştan dolar; kapanınca bellek geri
+  {
+    auto snap = [](std::vector<uint16_t>& v) {
+      v.clear();
+      for (int y = 0; y < 60; y++)
+        for (int x = 0; x < 200; x++) v.push_back(tft.readPixel(x, y));
+    };
+    const char* sm = "12,34 ms ×1,7e+03 %44";
+    std::vector<uint16_t> a1, a2, a3;
+    tft.fillRect(0, 0, 320, 240, 0);
+    text(sm, 4, 4, F_SM, C_TEXT, 0), text(sm, 4, 30, F_XS, C_ACC, 0);
+    snap(a1);
+    fontCacheOn(3072);
+    CHECK(fontCache && fontCache->n == 0);
+    tft.fillRect(0, 0, 320, 240, 0);
+    text(sm, 4, 4, F_SM, C_TEXT, 0), text(sm, 4, 30, F_XS, C_ACC, 0);
+    snap(a2);
+    int n = fontCache->n;
+    tft.fillRect(0, 0, 320, 240, 0);
+    text(sm, 4, 4, F_SM, C_TEXT, 0), text(sm, 4, 30, F_XS, C_ACC, 0);  // hepsi önbellekten
+    snap(a3);
+    CHECK(n > 20 && fontCache->n == n && a1 == a2 && a2 == a3);
+    for (int i = 0; i < 6; i++) text("abcçdefgğhıijklmnoöprsştuüvyzABCÇDEFGĞHIİJKLMNOÖPRSŞTUÜVYZ", 0, 100, F_MD, C_TEXT, 0);
+    CHECK(fontCache->n <= FONT_CACHE_N && fontCache->used <= fontCache->cap);
+    fontCacheOff();
+    CHECK(!fontCache);
+  }
   // paket yoksa ya da bozuksa: yerleşik yazı (yalnız ASCII), çizim çökmez
   {
     std::vector<uint8_t> keep;
@@ -579,6 +606,10 @@ static void testKernel() {
   CHECK(p && p->kind == PK_SERVICE && p->period == 10);
   int t = kSpawn("test-görev", [](Proc* pr) { kAddBusy(pr, 1500); }, 4096, true);
   CHECK(t > 0 && !kAlive(t));  // önizlemede eşzamanlı çalışır ve biter
+  kSetPeriod("test", 4);  // geçici hızlandırma, 0 ile kayıttaki değere döner
+  CHECK(p->period == 4 && p->period0 == 10);
+  kSetPeriod("test", 0);
+  CHECK(p->period == 10);
   kKill(pid);                  // servisler sonlandırılamaz
   CHECK(!kFind(pid)->killReq);
   p->used = false;  // temizlik
@@ -1811,8 +1842,10 @@ static void testBench() {
   bnTicks(12);
   CHECK(B->r.ft.n >= 10 && B->r.pxComp == (uint64_t)B->r.ft.n * 160 * 88 && B->r.iters > 0 && bnView.k >= 9);
   CHECK(B->cg == B->pg || B->cg == B->pg + 1);
+  CHECK(fontCache != nullptr);  // çalışırken pano rakamları önbellekten
   BnStep p1 = bnView;
   bnTap(288, 222);  // durdur: rapor, sonuç sayfası, bellek ve bulut geri
+  CHECK(!fontCache);
   CHECK(bnSt == BS_IDLE && bnPage == BP_RESULT && !bnRep.empty() && B->nSlot == 0 && !(netHold & HOLD_BENCH));
   bool hasFrames = false;
   for (auto& l : bnRep) hasFrames |= l.startsWith("Tamamlanan kare\t");
@@ -1872,7 +1905,7 @@ static void testBench() {
   CHECK(bnSt == BS_PREP);
   g_ms += 3100;
   bnTicks(1);
-  CHECK(bnSt == BS_RUN && B->r.workers == 2 && B->r.slots == 2 && B->nSlot == 2);
+  CHECK(bnSt == BS_RUN && B->r.workers == 2 && B->r.slots == 4 && B->r.bh == 4 && B->nSlot == 4);
   bnTicks(4);
   CHECK(B->r.ft.n >= 3);
   g_heapFree = 19 * 1024;  // bellek kritik: güvenle durur
@@ -1880,7 +1913,7 @@ static void testBench() {
   bnTicks(1);
   CHECK(bnSt == BS_IDLE && B->r.stop == BST_MEM && B->nSlot == 0 && !(netHold & HOLD_BENCH));
   bool two = false;
-  for (auto& l : bnRep) two |= l == "İşçi\t2 görev · 2 bant × 8 satır";
+  for (auto& l : bnRep) two |= l == "İşçi\t2 görev · 4 bant × 4 satır";
   CHECK(two);
   bnTap(40, 222);
   g_heapFree = 96 * 1024, g_heapMax = 52 * 1024;

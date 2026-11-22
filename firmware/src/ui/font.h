@@ -152,11 +152,56 @@ struct FontRt {
 };
 static FontRt fontRt[5];
 
+// İsteğe bağlı glif önbelleği: sık yenilenen sayılar (kıyas panosu) her harfte SD'ye inmesin. Kapalıyken
+// bellek tutmaz; açan kapatır. Dolunca boşaltılıp yeniden dolar. Erişim paket kilidinde.
+struct FontCacheEnt {
+  uint8_t font, h, len;
+  int8_t asc;
+  uint16_t gi, off;
+};
+static const int FONT_CACHE_N = 64;
+struct FontCache {
+  uint16_t cap = 0, used = 0;
+  uint8_t n = 0;
+  FontCacheEnt e[FONT_CACHE_N];
+};
+static FontCache* fontCache = nullptr;
+static uint8_t* fontCachePool() { return (uint8_t*)(fontCache + 1); }
+static void fontCacheOn(uint16_t bytes) {
+  if (fontCache) return;
+  void* m = malloc(sizeof(FontCache) + bytes);
+  if (!m) return;
+  fontCache = new (m) FontCache();
+  fontCache->cap = bytes;
+}
+static void fontCacheOff() {
+  PackLock l;
+  free(fontCache);
+  fontCache = nullptr;
+}
+static const FontCacheEnt* fontCacheGet(uint8_t font, uint16_t gi) {
+  if (!fontCache) return nullptr;
+  for (int i = 0; i < fontCache->n; i++)
+    if (fontCache->e[i].gi == gi && fontCache->e[i].font == font) return &fontCache->e[i];
+  return nullptr;
+}
+static const FontCacheEnt* fontCachePut(uint8_t font, uint16_t gi, int h, int asc, const uint8_t* d, int len) {
+  FontCache* c = fontCache;
+  if (!c || len > 255 || len > c->cap) return nullptr;
+  if (c->n >= FONT_CACHE_N || c->used + len > c->cap) c->n = 0, c->used = 0;
+  FontCacheEnt& e = c->e[c->n++];
+  e.font = font, e.gi = gi, e.h = h, e.asc = asc, e.len = len, e.off = c->used;
+  memcpy(fontCachePool() + c->used, d, len);
+  c->used += len;
+  return &e;
+}
+
 static void fontsReset() {
   for (auto& r : fontRt) {
     free(r.blk);
     r = FontRt();
   }
+  if (fontCache) fontCache->n = 0, fontCache->used = 0;
 }
 
 static FontRt* fontGet(Font f) {
@@ -337,13 +382,19 @@ static void fontDraw(G& g, Font f, const String& str, int x, int y, uint16_t fg,
     if (cx == 0) cx -= dx;
     uint32_t at0 = r->base + rd16(r->blk + 2 * r->n + 2 * gi);
     uint8_t hd[2];
-    if (w && w <= 128 && packRead(at0, hd, 2)) {
-      int h = hd[0], gx = cx + dx, gy = y + r->asc - (int8_t)hd[1], rb = (w + 1) / 2, per = sizeof buf / rb;
+    const FontCacheEnt* ce = w && w <= 128 ? fontCacheGet(f->id, gi) : nullptr;
+    const int rb = (w + 1) / 2;
+    if (ce) hd[0] = ce->h, hd[1] = (uint8_t)ce->asc;
+    if (w && w <= 128 && (ce || packRead(at0, hd, 2))) {
+      int h = hd[0], gx = cx + dx, gy = y + r->asc - (int8_t)hd[1], per = sizeof buf / rb;
+      if (!ce && fontCache && h * rb <= (int)sizeof buf && packRead(at0 + 2, buf, h * rb))
+        ce = fontCachePut(f->id, gi, h, (int8_t)hd[1], buf, h * rb);
       for (int y0 = 0; y0 < h; y0 += per) {
         int k = std::min(per, h - y0);
-        if (!packRead(at0 + 2 + y0 * rb, buf, k * rb)) break;
+        const uint8_t* src = ce ? fontCachePool() + ce->off + y0 * rb : buf;
+        if (!ce && !packRead(at0 + 2 + y0 * rb, buf, k * rb)) break;
         for (int j = 0; j < k; j++) {
-          const uint8_t* row = buf + j * rb;
+          const uint8_t* row = src + j * rb;
           int run = 0, rs = 0;
           for (int i = 0; i <= w; i++) {
             uint8_t a = i < w ? (i & 1 ? row[i / 2] & 15 : row[i / 2] >> 4) : 0;

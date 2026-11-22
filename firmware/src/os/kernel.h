@@ -34,6 +34,7 @@ struct Proc {
   uint8_t prio = 0;      // servis: sıra (küçük önce); görev: FreeRTOS önceliği
   uint8_t core = 1;      // işlemci çekirdeği
   uint16_t period = 0;   // ms, servis
+  uint16_t period0 = 0;  // kayıttaki periyot (kSetPeriod 0 ile döner)
   void (*svc)() = nullptr;
   void (*entry)(Proc*) = nullptr;
   uint32_t due = 0;      // çekirdek saati, servis
@@ -141,12 +142,26 @@ static int kService(const char* name, uint16_t periodMs, void (*fn)()) {
   Proc* p = kAlloc(name);
   if (!p) return -1;
   p->kind = PK_SERVICE;
-  p->period = periodMs ? periodMs : 1;
+  p->period = p->period0 = periodMs ? periodMs : 1;
   p->svc = fn;
   p->prio = kServiceCount++;
   p->core = 1;
   p->due = kNow() + p->prio;  // aynı tike yığılmasınlar
   return p->pid;
+}
+
+// Servisin periyodunu geçici değiştirir (ms = 0: kayıttaki değere döner). Kıyas testi ekran
+// aktarımını sık yapsın diye kabuğu hızlandırır, bitince geri alır.
+static void kSetPeriod(const char* name, uint16_t ms) {
+  for (auto& p : kProcs)
+    if (p.used && p.kind == PK_SERVICE && p.name == name) {
+      uint16_t v = ms ? ms : p.period0;
+      if (v == p.period) return;
+      p.period = v;
+      if ((int32_t)(p.due - (kNow() + v)) > 0) p.due = kNow() + v;
+      if ((int32_t)(kWakeAt - p.due) > 0) kWakeAt = p.due;
+      return;
+    }
 }
 
 #ifndef HOST

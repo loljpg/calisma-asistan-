@@ -47,9 +47,11 @@ SPI saati ve bellek çalışırken ölçülür ve raporda yazar.
   bekçisi ve silinen görevlerin belleği). Bekleme süresi hesap süresinden düşülür.
 - Bellek yalnızca hesap sürerken ayrılır. Boştayken ve uygulama kapanınca bantlar, işçi yığınları ve
   bağlam geri verilir. BAŞLA'ya basınca önce bulut akışı bırakılır; en iyi düzen (4 bant, 2 işçi) sığana
-  dek en çok 3 sn beklenir. Yine sığmazsa küçülür: 3 bant, 2 bant, 4 satırlık bantlar; iki işçi (iki
-  çekirdek) her zaman tek işçiden önce gelir (`docs/bellek.md`, ağır işler). Raporda "İşçi" satırı
-  kullanılan düzeni yazar.
+  dek en çok 3 sn beklenir. Yine sığmazsa bantlar incelir (4 × 4 satır), sayısı azalmaz: iki işçi
+  hesaplarken iki bant gönderilmeyi bekleyebilsin. İki işçi (iki çekirdek) her zaman tek işçiden önce
+  gelir (`docs/bellek.md`, ağır işler). Raporda "İşçi" satırı kullanılan düzeni yazar.
+- Hesap sürerken kabuk turu 16 ms yerine 4 ms'dir (`kSetPeriod`): hazır bant en geç 4 ms'de gönderilir,
+  işçiler boş yuva beklemez. Bitince 16 ms'ye döner.
 - Test sürerken bulutun canlı akışı duraklatılır (`netHold`), test bitince kendiliğinden döner: hem şifreli
   bağlantının tuttuğu bellek boşalır hem çekirdek 0 ölçüme karışmaz.
 
@@ -89,8 +91,9 @@ Alt şerit (tam ekran görünümünde dokunarak sayfa değişir): **kare** (FPS 
 süresi), **işlem** (Mpx/s, Mit/s, iterasyon sınırı), **bellek** (boş, en az, en büyük blok), **derinlik**
 (süre, büyütme, aritmetik). Fraktala dokunmak pano görünümüne geçer (fraktal 320×112, altında 12 değer:
 FPS anlık/ort/aralık, kare/hesap/aktarım süresi, Mpx/s, Mit/s, ekran Mpx/s, boş/en az/en büyük blok ve
-parçalanma). Değerler yarım saniyede bir, titremeden (ara bellekte) yazılır; bu çizimin süresi de ölçülür
-ve rapora "Arayüz çizimi" olarak girer.
+parçalanma). Şerit saniyede 2, pano 1 kez yenilenir; yalnız değişen değer, titremeden (ara bellekte)
+yazılır. Test sürerken rakamların glifleri bellekte tutulur (`fontCacheOn`), her harf için SD karta
+inilmez. Bu çizimin süresi de ölçülür ve rapora "Arayüz çizimi" olarak girer.
 
 Dokunmalar: alt solda mod (MAKS / AŞIRI), alt sağda BAŞLA / DUR; başlıkta Ayarlar (karmaşıklık,
 yakınlaşma hızı, palet, süre; Gelişmiş: sığ katman aritmetiği, bellek testi sınırı, varsayılanlar) ve
@@ -196,3 +199,7 @@ Yeni bağımlılık yok. Her zamanki gibi: `pio run -e cyd` (ya da `-e cyd_st778
 - İlk kart ölçümü (fw-v72, ST7789, Aşırı yük, Orta): bellek tek işçiye yetmişti (çekirdek 0 boşta kaldı),
   2,79 FPS, 4,67 Mit/s, aktarım 25,6 ms/kare (2,2 Mpx/s, 40 MHz yolun %88'i). Bu yüzden başlarken
   bulut belleği bekleniyor ve iki işçili küçük düzenler eklendi.
+- İkinci ölçüm (fw-v74, Aşırı yük, Pano): iki işçi (%52 / %47), 4,07 FPS, 6,51 Mit/s; ama yalnız 2 yuva
+  vardı ve kabuk 16 ms'de bir gönderdiği için işçiler zamanın yarısında boş bekledi; pano çizimi de
+  248 ms/sn tuttu (her harf SD'den). fw-v76: 4 ince yuva, 4 ms tur, glif önbelleği, seyrek ve yalnız
+  değişen pano.

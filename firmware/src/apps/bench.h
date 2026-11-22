@@ -29,6 +29,7 @@ static void openInReader(const String& path);  // os/registry.h
 static const int BN_W = 320, BN_FY = HDR_H, BN_SY = 206;
 static const int BN_VH[2] = {176, 112};  // fraktal yüksekliği: tam ekran, pano
 static const int BN_NSLOT = 4, BN_STACK = 3072, BN_SEG = 32, BN_BALLN = 64;
+static const uint16_t BN_TICK_MS = 4;  // hesap sürerken kabuk turu (normalde 16 ms)
 static const uint16_t BN_ACC = rgbn(0x2E, 0xD3, 0xE0);  // tek vurgu: turkuaz
 static const uint16_t BN_WARN = rgbn(0xE0, 0x8A, 0x3C);
 
@@ -87,7 +88,7 @@ struct BnRun {  // fraktal testi ölçümleri
   uint32_t freeStart = 0, minFree = 0xFFFFFFFF, minBlk = 0xFFFFFFFF, maxFrag = 0, clipped = 0, uiUs = 0;
   float maxMits = 0;
   uint64_t winIters = 0;
-  uint32_t winT = 0, lastMon = 0, lastUi = 0, beatSeen[2] = {0, 0}, beatAt = 0;
+  uint32_t winT = 0, lastMon = 0, lastUi = 0, uiTurn = 0, beatSeen[2] = {0, 0}, beatAt = 0;
   int itLo = 0, itHi = 0;
   uint8_t stop = BST_NONE, deepest = 0, targets = 1, workers = 0, slots = 0, bh = 0;
   BnStep last;
@@ -196,8 +197,9 @@ static BnPathCfg bnPathCfg() {
 struct BnPlan {
   int slots, bh, workers;
 };
-// İki işçi (iki çekirdek) her zaman önce gelir: bant sayısı azalır ama ikinci çekirdek boşta kalmaz
-static const BnPlan BN_PLANS[] = {{4, 8, 2}, {3, 8, 2}, {2, 8, 2}, {2, 4, 2}, {2, 8, 1}, {2, 4, 1}};
+// İki işçi (iki çekirdek) her zaman önce gelir. Bellek azsa bantlar incelir, sayısı azalmaz: aktarımı
+// bekleyen işçi boşta kalmasın diye en az 4 yuva (2 işçi hesaplarken 2 bant gönderilmeyi bekleyebilir).
+static const BnPlan BN_PLANS[] = {{4, 8, 2}, {4, 4, 2}, {2, 4, 2}, {2, 4, 1}};
 static uint32_t bnPlanNeed(const BnPlan& p) { return (uint32_t)p.slots * BN_W * p.bh * 2 + p.workers * (BN_STACK + 400); }
 
 static void bnFreeSlots() {
@@ -417,6 +419,8 @@ static void bnRelease() {
   for (int i = 0; i < B->nBall; i++) free(B->ball[i]);
   B->nBall = 0;
   bnFreeSlots();
+  fontCacheOff();
+  kSetPeriod("kabuk", 0);
   netHold &= ~HOLD_BENCH;
 }
 
@@ -551,6 +555,7 @@ static void bnStill() {
   bnPipeReset(s);
   B->oneShot = false;
   bnSt = BS_STILL;
+  kSetPeriod("kabuk", BN_TICK_MS);
 #ifndef HOST
   if (!bnSpawn(B->wmax == 2 ? 3 : 2)) {
     bnSt = BS_IDLE;
@@ -582,6 +587,9 @@ static void bnStartNow() {
   r.lastFrame = micros();
   r.freeStart = sysHeapFree();
   r.workers = c.wmax, r.slots = c.nSlot, r.bh = c.bh;
+  // Pano rakamları her yenilemede SD'den okunmasın (glif önbelleği; bellek yeterse)
+  if (sysHeapFree() > MEM_FLOOR + 16 * 1024) fontCacheOn(3072);
+  kSetPeriod("kabuk", BN_TICK_MS);  // hazır bantlar en geç 4 ms'de gönderilir
   bnSt = BS_RUN;
 #ifndef HOST
   if (!bnSpawn(c.wmax == 2 ? 3 : 2)) {
@@ -1342,6 +1350,16 @@ static String bnS(const char* fmt, ...) {
     if (*p == '.' && p[-1] >= '0' && p[-1] <= '9') *p = ',';
   return String(b);
 }
+// Yalnız değişen değer çizilsin: hücre başına son yazının özeti (tam çizimde sıfırlanır)
+static uint32_t bnCellH[15];
+static bool bnCellChanged(int i, const String& v) {
+  uint32_t h = 2166136261u;
+  for (const char* p = v.c_str(); *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
+  if (!h) h = 1;
+  if (bnCellH[i] == h) return false;
+  bnCellH[i] = h;
+  return true;
+}
 static float bnSec(const BnRun& r) { return std::max<uint32_t>(1, millis() - r.t0 - r.pausedMs) / 1000.f; }
 
 // Alt şerit değerleri (sayfa: 0 kare, 1 işlem, 2 bellek, 3 derinlik)
@@ -1378,6 +1396,7 @@ static void bnDrawStrip(bool full) {
   if (full) {
     fillBg(0, BN_SY, SCR_W, SCR_H - BN_SY);
     hline(0, BN_SY, SCR_W);
+    for (int k = 0; k < 3; k++) bnCellH[12 + k] = 0;
     bnBtn(4, BN_SY + 4, 56, 28, BN_MODE_S[bnCfg.mode & 1], bnExtreme());
     for (int k = 0; k < 3; k++) text(BN_STRIP_L[pg][k], BN_COLX[k], BN_SY + 3, F_XS, C_TEXT3, C_BG);
     if (!(bnCfg.view & 1))  // şerit sayfası (dokununca değişir)
@@ -1386,7 +1405,9 @@ static void bnDrawStrip(bool full) {
   }
   String v[3];
   bnStripVals(pg, v);
-  for (int k = 0; k < 3; k++) bnText(v[k], BN_COLX[k], BN_SY + 16, 62, 17, F_SM, k == 0 && run ? BN_ACC : C_TEXT, C_BG, ML_DATUM);
+  for (int k = 0; k < 3; k++)
+    if (bnCellChanged(12 + k, v[k] + (run ? "*" : "")))
+      bnText(v[k], BN_COLX[k], BN_SY + 16, 62, 17, F_SM, k == 0 && run ? BN_ACC : C_TEXT, C_BG, ML_DATUM);
   if (B && run) B->r.uiUs += micros() - t0;
 }
 
@@ -1399,6 +1420,7 @@ static void bnDrawPano(bool full) {
                                     "Mpx/s", "Mit/s", "ekran", "boş", "en az", "blok"};
   if (full) {
     fillBg(0, y0, SCR_W, BN_SY - y0);
+    for (int i = 0; i < 12; i++) bnCellH[i] = 0;
     for (int i = 0; i < 12; i++) text(L[i], 4 + (i % 3) * 106, y0 + 9 + (i / 3) * 15, F_XS, C_TEXT3, C_BG, ML_DATUM);
     for (int k = 1; k < 3; k++) tft.drawFastVLine(k * 106 + 1, y0 + 3, 58, C_LINE);
   }
@@ -1424,7 +1446,8 @@ static void bnDrawPano(bool full) {
   v[9] = bnS("%.1fK", fr / 1024.f);
   v[10] = bnS("%.1fK", (r && r->minFree != 0xFFFFFFFF ? r->minFree : sysHeapMin()) / 1024.f);
   v[11] = bnS("%luK·%%%d", (unsigned long)(mb / 1024), bnFragPct(fr, mb));
-  for (int i = 0; i < 12; i++) bnText(v[i], 46 + (i % 3) * 106, y0 + 2 + (i / 3) * 15, 58, 14, F_XS, C_TEXT, C_BG, MR_DATUM);
+  for (int i = 0; i < 12; i++)
+    if (bnCellChanged(i, v[i])) bnText(v[i], 46 + (i % 3) * 106, y0 + 2 + (i / 3) * 15, 58, 14, F_XS, C_TEXT, C_BG, MR_DATUM);
   if (run) B->r.uiUs += micros() - t0;
 }
 
@@ -1755,7 +1778,7 @@ static void bnTick() {
     }
   }
 #else
-  bnPushReady(12000);
+  bnPushReady(3000);
 #endif
   if (bnSt == BS_STILL) {
     if (B->pg >= 1) {
@@ -1768,10 +1791,10 @@ static void bnTick() {
   bnPrepNext();
   bnMonitor();
   if (bnSt != BS_RUN) return;
-  if (ms - B->r.lastUi >= 500 && !toastUntil) {
+  if (ms - B->r.lastUi >= 500 && !toastUntil) {  // şerit 2, pano 1 kez/sn; yalnız değişen değer çizilir
     B->r.lastUi = ms;
     bnDrawStrip(false);
-    bnDrawPano(false);
+    if ((B->r.uiTurn++ & 1) == 0) bnDrawPano(false);
   }
 }
 
