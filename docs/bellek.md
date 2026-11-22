@@ -17,7 +17,7 @@ karşılaştırılır; her 1 KB düşüşte günlüğe yazılır (`/daxen/sys/gu
 | --- | --- | --- |
 | Durağan değişkenler (.data + .bss) | 67 KB | ESP-IDF, Wi-Fi, NimBLE ve yazılım birlikte |
 | Çekirdek görevi (arayüz, servisler) | 8 KB yığın | Arduino döngü görevi |
-| Ağ görevi | 16 KB yığın | Şifreli bağlantı el sıkışması burada |
+| Ağ görevi | 12 KB yığın | Şifreli bağlantı el sıkışması burada (açılıştaki güncelleme denetimi dahil; ölçülen 6,4 KB) |
 | Ara bellek (büyük rakamlar, kedi) | 6,9 KB | 4 bit, 16 renkli palet; 16 bit olsaydı 27,5 KB |
 | Yazı tiplerinin karakter dizinleri | yaklaşık 4 KB | İlk kullanımda; harf görüntüleri SD'den okunur |
 | Günlük halkası | 2 KB | Son satırlar, SD yokken de |
@@ -73,8 +73,14 @@ Görevlerin yığın boşluğu Görevler'de ve `tasks` komutunda görünür. Bir
 altına inerse günlüğe bir kez yazılır (`yığın azaldı: … · açık: <uygulama>`). Yığın boyları bu
 kayıtlara göre ayarlanır; ölçmeden küçültülmez (taşan yığın kartı çökertir).
 
-Ölçümler (fw-v76, kart): çekirdek görevinde 608 B boş kalmıştı. Sebep: açılıştaki güncelleme
-denetimi şifreli bağlantıyı çekirdek görevinin içinde açıyordu. fw-v78'den beri açılıştaki şifreli
-işler (güncelleme denetimi, varlık paketi) kendi 12 KB yığınlı geçici görevinde çalışır ve
-kullandıkları yığın günlüğe yazılır (`güncelleme denetimi: yığının N B'ı kullanıldı`). Ağ görevinin
-16 KB'ı bulut bağlıyken ölçülünce küçültülecek (o ölçümde 13 KB boştu ama şifreli bağlantı açılmamıştı).
+Ölçümler (kart):
+- fw-v76: çekirdek görevinde 608 B boş kalmıştı. Sebep: açılıştaki güncelleme denetimi şifreli
+  bağlantıyı çekirdek görevinin içinde açıyordu.
+- fw-v78: bu işler ayrı görevde çalıştı; güncelleme denetimi 6400 B yığın kullandı, çekirdek
+  görevinde 4,3 KB boş kaldı. Ağ görevinde şifreli bağlantı olmadan 13 KB / 16 KB boştu.
+- fw-v80: ağ görevi açılışta erkenden kurulur ve açılıştaki şifreli işleri kendisi yapar (ayrı geçici
+  görev yok, açılışta belleği parçalayan 12 KB'lık delik de yok); yığını 16 → 12 KB (4 KB açılır,
+  ~5 KB pay). Açılışta `güncelleme denetimi: ağ görevinde yığının N B'ı kullanıldı` yazılır; bulut
+  bağlıyken `yığın azaldı: ağ` görülürse büyütülür.
+- Uyarı eşiği 1,5 KB, küçük sistem yığınlarında yığının dörtte biri (tcp/ip 2,5 KB'ın 1,4 KB'ı boş
+  kalıyor, olağan).

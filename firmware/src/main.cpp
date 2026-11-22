@@ -71,30 +71,31 @@ static const char FW_MARKER[] = "CSFW:" FW_VARIANT ":" STR(FW_BUILD) ";";
 // Daha önce çökerse ESP32 açılışta bir önceki sürüme döner (kart USB'siz kurtulur).
 extern "C" bool verifyRollbackLater() { return true; }
 
-// Açılıştaki şifreli bağlantılar (güncelleme denetimi, varlık paketi) çekirdek görevinin 8 KB yığınında
-// açılınca yığında 608 B kalıyordu (Görevler, fw-v76). Kendi yığını olan geçici bir görevde çalışır,
-// çekirdek bitmesini bekler; görevin ne kadar yığın kullandığı günlüğe yazılır (ağ görevinin yığın boyu
-// bu ölçümle ayarlanır).
-static const uint32_t BOOT_TLS_STACK = 12288;
-static void bootTlsRun(void (*fn)(), const char* what) {
-  struct Job {
-    void (*fn)();
-    volatile bool done;
-    uint32_t used;
-  } j{fn, false, 0};
-  auto body = [](void* a) {
-    Job* j = (Job*)a;
-    j->fn();
-    j->used = BOOT_TLS_STACK - uxTaskGetStackHighWaterMark(nullptr);
-    j->done = true;
-    vTaskDelete(nullptr);
-  };
-  if (xTaskCreatePinnedToCore(body, "acilis-tls", BOOT_TLS_STACK, &j, 1, nullptr, 1) != pdPASS) {
-    fn();  // görev açılamadı: eskisi gibi burada
-    return;
+// Ağ görevi açılışta erkenden kurulur ve açılıştaki şifreli işleri (güncelleme denetimi, varlık paketi)
+// o yapar; kurulum bitmesini bekler, sonra ağ görevi asıl döngüsüne geçer.
+//  - fw-v76'da bu işler çekirdek görevinin 8 KB yığınında açılıyordu: 608 B boş kalmıştı.
+//  - fw-v78 ölçümü (ayrı görevde): güncelleme denetimi 6400 B yığın kullandı; ağ görevinin kendi işleri
+//    şifreli bağlantı olmadan ~3 KB. 16 KB → 12 KB: ~5 KB pay kalır, 4 KB bellek açılır. Geçici ayrı görev
+//    de yok (açılışta 12 KB'lık delik bırakıp belleği parçalıyordu).
+static const uint32_t NET_STACK = 12288;
+static void (*volatile netBootJob)() = nullptr;
+static volatile bool netGo = false;
+static void netTaskEntry(void* a) {
+  while (!netGo) {
+    if (void (*f)() = netBootJob) {
+      f();
+      netBootJob = nullptr;
+    }
+    vTaskDelay(pdMS_TO_TICKS(5));
   }
-  while (!j.done) delay(10);
-  sysLog("bellek", String(what) + ": yığının " + String(j.used) + " B'ı kullanıldı (" + String(BOOT_TLS_STACK / 1024) + " KB)");
+  netTask(a);
+}
+static void netBootRun(void (*fn)(), const char* what) {
+  netBootJob = fn;
+  while (netBootJob) delay(10);
+  sysLog("bellek", String(what) + ": ağ görevinde yığının " +
+                       String(NET_STACK - uxTaskGetStackHighWaterMark(xTaskGetHandle("net"))) + " B'ı kullanıldı (" +
+                       String(NET_STACK / 1024) + " KB)");
 }
 
 // Açılışta, Bluetooth başlamadan güncelleme denetimi: bellek bol, şifreli bağlantı rahat açılır.
@@ -270,12 +271,12 @@ void setup() {
     WiFi.begin();  // son bağlanılan ağ; olmazsa ağ görevi kayıtlı ağlardan görüneni seçer
   }
   configTzTime("<+03>-3", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
-  if (haveWifi) bootTlsRun(bootOtaCheck, "güncelleme denetimi");
-  if (haveWifi && !rcSafe && !packOk && sdOk) bootTlsRun(assetsBoot, "varlık paketi");  // eksikse (sys/assets.h)
-  bleBegin();
-
   TaskHandle_t netH = nullptr;
-  xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, &netH, 0);
+  xTaskCreatePinnedToCore(netTaskEntry, "net", NET_STACK, nullptr, 1, &netH, 0);
+  if (haveWifi) netBootRun(bootOtaCheck, "güncelleme denetimi");
+  if (haveWifi && !rcSafe && !packOk && sdOk) netBootRun(assetsBoot, "varlık paketi");  // eksikse (sys/assets.h)
+  bleBegin();
+  netGo = true;  // ağ görevi asıl döngüsüne geçer
   lastInteract = millis();
   homeShow();
   if (cfg.lockOn && authHasPin()) lockActive = true;  // ekran kilidi: açılışta kilitli
@@ -289,7 +290,7 @@ void setup() {
   kService("bluetooth", 10, svcBle);
   kService("saat", 200, svcClock);
   kService("ışık", 50, svcLight);
-  kAdopt("ağ", netH, 1, 0, 16384, "çoğunlukla ağı bekler");
+  kAdopt("ağ", netH, 1, 0, NET_STACK, "çoğunlukla ağı bekler");
   diagAdoptSystemTasks();  // Wi-Fi, TCP/IP ve Bluetooth görevleri Görevler'de görünsün (sys/diag.h)
 }
 

@@ -74,7 +74,8 @@ static void diagStackTick() {
     const Proc& p = kProcs[i];
     if (!p.used || p.kind != PK_TASK || p.done || !p.task || warned[i] == p.pid) continue;
     uint32_t fr = kStackFree(p);
-    if (fr >= 1536) continue;
+    // eşik: 1,5 KB ya da küçük yığınlarda dörtte biri (tcp/ip'nin 2,5 KB'ı olağan kullanımda 1,4 KB boş)
+    if (fr >= (p.stack ? std::min<uint32_t>(1536, p.stack / 4) : 1024u)) continue;
     warned[i] = p.pid;
     sysLog("bellek", "yığın azaldı: " + p.name + " " + String(fr) + " B boş (" + String(p.stack / 1024) + " KB) · açık: " +
                          String(shScreen == SH_APP && curApp ? curApp->name : "ana ekran"));
