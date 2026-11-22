@@ -76,7 +76,8 @@ static void diagStackTick() {
     uint32_t fr = kStackFree(p);
     if (fr >= 1536) continue;
     warned[i] = p.pid;
-    sysLog("bellek", "yığın azaldı: " + p.name + " " + String(fr) + " B boş (" + String(p.stack / 1024) + " KB)");
+    sysLog("bellek", "yığın azaldı: " + p.name + " " + String(fr) + " B boş (" + String(p.stack / 1024) + " KB) · açık: " +
+                         String(shScreen == SH_APP && curApp ? curApp->name : "ana ekran"));
   }
 }
 

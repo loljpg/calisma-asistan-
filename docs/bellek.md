@@ -70,5 +70,11 @@ Kurallar:
 ## Yığın boyları
 
 Görevlerin yığın boşluğu Görevler'de ve `tasks` komutunda görünür. Bir görevin boşluğu 1,5 KB'ın
-altına inerse günlüğe bir kez yazılır (`yığın azaldı: …`). Yığın boyları bu kayıtlara göre
-ayarlanır; ölçmeden küçültülmez (taşan yığın kartı çökertir).
+altına inerse günlüğe bir kez yazılır (`yığın azaldı: … · açık: <uygulama>`). Yığın boyları bu
+kayıtlara göre ayarlanır; ölçmeden küçültülmez (taşan yığın kartı çökertir).
+
+Ölçümler (fw-v76, kart): çekirdek görevinde 608 B boş kalmıştı. Sebep: açılıştaki güncelleme
+denetimi şifreli bağlantıyı çekirdek görevinin içinde açıyordu. fw-v78'den beri açılıştaki şifreli
+işler (güncelleme denetimi, varlık paketi) kendi 12 KB yığınlı geçici görevinde çalışır ve
+kullandıkları yığın günlüğe yazılır (`güncelleme denetimi: yığının N B'ı kullanıldı`). Ağ görevinin
+16 KB'ı bulut bağlıyken ölçülünce küçültülecek (o ölçümde 13 KB boştu ama şifreli bağlantı açılmamıştı).

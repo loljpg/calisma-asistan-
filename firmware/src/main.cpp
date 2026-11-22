@@ -71,6 +71,32 @@ static const char FW_MARKER[] = "CSFW:" FW_VARIANT ":" STR(FW_BUILD) ";";
 // Daha önce çökerse ESP32 açılışta bir önceki sürüme döner (kart USB'siz kurtulur).
 extern "C" bool verifyRollbackLater() { return true; }
 
+// Açılıştaki şifreli bağlantılar (güncelleme denetimi, varlık paketi) çekirdek görevinin 8 KB yığınında
+// açılınca yığında 608 B kalıyordu (Görevler, fw-v76). Kendi yığını olan geçici bir görevde çalışır,
+// çekirdek bitmesini bekler; görevin ne kadar yığın kullandığı günlüğe yazılır (ağ görevinin yığın boyu
+// bu ölçümle ayarlanır).
+static const uint32_t BOOT_TLS_STACK = 12288;
+static void bootTlsRun(void (*fn)(), const char* what) {
+  struct Job {
+    void (*fn)();
+    volatile bool done;
+    uint32_t used;
+  } j{fn, false, 0};
+  auto body = [](void* a) {
+    Job* j = (Job*)a;
+    j->fn();
+    j->used = BOOT_TLS_STACK - uxTaskGetStackHighWaterMark(nullptr);
+    j->done = true;
+    vTaskDelete(nullptr);
+  };
+  if (xTaskCreatePinnedToCore(body, "acilis-tls", BOOT_TLS_STACK, &j, 1, nullptr, 1) != pdPASS) {
+    fn();  // görev açılamadı: eskisi gibi burada
+    return;
+  }
+  while (!j.done) delay(10);
+  sysLog("bellek", String(what) + ": yığının " + String(j.used) + " B'ı kullanıldı (" + String(BOOT_TLS_STACK / 1024) + " KB)");
+}
+
 // Açılışta, Bluetooth başlamadan güncelleme denetimi: bellek bol, şifreli bağlantı rahat açılır.
 static void bootOtaCheck() {
   bool manual;
@@ -244,8 +270,8 @@ void setup() {
     WiFi.begin();  // son bağlanılan ağ; olmazsa ağ görevi kayıtlı ağlardan görüneni seçer
   }
   configTzTime("<+03>-3", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
-  if (haveWifi) bootOtaCheck();
-  if (haveWifi && !rcSafe) assetsBoot();  // varlık paketi eksikse (sys/assets.h)
+  if (haveWifi) bootTlsRun(bootOtaCheck, "güncelleme denetimi");
+  if (haveWifi && !rcSafe && !packOk && sdOk) bootTlsRun(assetsBoot, "varlık paketi");  // eksikse (sys/assets.h)
   bleBegin();
 
   TaskHandle_t netH = nullptr;

@@ -587,8 +587,8 @@ static void bnStartNow() {
   r.lastFrame = micros();
   r.freeStart = sysHeapFree();
   r.workers = c.wmax, r.slots = c.nSlot, r.bh = c.bh;
-  // Pano rakamları her yenilemede SD'den okunmasın (glif önbelleği; bellek yeterse)
-  if (sysHeapFree() > MEM_FLOOR + 16 * 1024) fontCacheOn(3072);
+  // Pano rakamları her yenilemede SD'den okunmasın (glif önbelleği, ~3 KB; tabana 10 KB pay kalırsa)
+  if (sysHeapFree() > MEM_FLOOR + 10 * 1024 + 3072) fontCacheOn(2560);
   kSetPeriod("kabuk", BN_TICK_MS);  // hazır bantlar en geç 4 ms'de gönderilir
   bnSt = BS_RUN;
 #ifndef HOST
