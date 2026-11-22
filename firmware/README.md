@@ -96,7 +96,7 @@ Oyunlar açılmaz; 3 saat sonra kendiliğinden biter. Sistem alanında "Odak" g�
 
 **Soru sayacı** (YKS → Soru): +1/+5/+10/+20 ve −1 düzeltme; ders seçici (kronometredeki ders varsayılan).
 Sayılar NVS'de; her değişiklik birkaç saniye sonra `soru` olayı olarak buluta ve SD'deki kalıcı kayda
-gider (telefondaki uygulama bu olayı şimdilik yok sayar). Çalışma geçmişi SD'deki aylık kalıcı
+gider; telefondaki uygulama İstatistik ekranında "Çözülen soru" olarak gösterir. Çalışma geçmişi SD'deki aylık kalıcı
 kayıttaki kronometre oturumlarından hesaplanır (telefonda tutulan süreler dahil değildir).
 
 ## Ses
