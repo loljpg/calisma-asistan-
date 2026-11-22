@@ -26,6 +26,8 @@ export function defaults() {
     tests: [],
     plans: {},
     sessions: [],
+    // Kartın soru sayacından: { tarih, ders, n } (gün ve derse göre toplam, son 120 gün)
+    questions: [],
     timer: null,
     notifIds: [],
     processedEvents: []
@@ -46,7 +48,7 @@ function migrate(s) {
   };
   const hours = s.hours || {};
   for (let i = 0; i < 7; i++) if (hours[i] && typeof hours[i] === 'object') out.hours[i] = { ...d.hours[i], ...hours[i] };
-  for (const k of ['tasks', 'exams', 'tests', 'sessions', 'notifIds', 'processedEvents']) out[k] = asArray(s[k]);
+  for (const k of ['tasks', 'exams', 'tests', 'sessions', 'questions', 'notifIds', 'processedEvents']) out[k] = asArray(s[k]);
   out.exams = out.exams.map((e) => ({ ...e, dersler: asArray(e.dersler) }));
   out.plans = {};
   for (const [date, p] of Object.entries(s.plans || {})) {

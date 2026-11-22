@@ -146,6 +146,30 @@ export function streak(sessions, today) {
   }
   return n;
 }
+// Kartın soru sayacından gelen sayılar (olay başına artış ya da düzeltme): gün ve derse göre toplanır.
+export function addQuestions(state, date, ders, n) {
+  if (!Array.isArray(state.questions)) state.questions = [];
+  let q = state.questions.find((x) => x.tarih === date && x.ders === ders);
+  if (!q) {
+    q = { tarih: date, ders, n: 0 };
+    state.questions.push(q);
+  }
+  q.n = Math.max(0, Math.min(9999, q.n + n));
+  const from = addDays(date, -120);
+  state.questions = state.questions.filter((x) => x.n > 0 && x.tarih >= from);
+}
+export function questionsOn(questions, date) {
+  return (questions || []).filter((q) => q.tarih === date).reduce((a, q) => a + q.n, 0);
+}
+export function questionDays(questions, today, n = 7) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const date = addDays(today, -i);
+    out.push({ date, label: GUN_KISA[parseDate(date).getDay()], n: questionsOn(questions, date) });
+  }
+  return out;
+}
+
 export function lastDays(sessions, today, n = 7) {
   const out = [];
   for (let i = n - 1; i >= 0; i--) {
@@ -386,6 +410,12 @@ export function applyDeviceEvents(state, events, now = new Date()) {
       it.durum = 'ertelendi';
       if (state.timer?.itemId === it.id) state.timer = null;
       applied++;
+    } else if (e.type === 'soru') {
+      const n = Math.round(Number(e.n));
+      if (Number.isFinite(n) && n !== 0 && Math.abs(n) <= 1000) {
+        addQuestions(state, date, String(e.ders || 'Diğer').slice(0, 40), n);
+        applied++;
+      }
     } else if (e.type === 'session') {
       const sec = Math.round(Number(e.sec));
       if (sec >= 60 && sec <= 6 * 3600) {

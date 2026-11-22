@@ -103,6 +103,28 @@ test('cihaz olayları bir kez uygulanır', () => {
   assert.equal(L.findItem(s, d, 'a').durum, 'bekliyor');
 });
 
+test('kartın soru sayacı: olaylar gün ve derse göre toplanır, düzeltme sıfırın altına inmez', () => {
+  const s = defaults();
+  const d = '2026-11-22';
+  assert.equal(L.applyDeviceEvents(s, {
+    q1: { type: 'soru', date: d, ders: 'Matematik', n: 16, at: 1 },
+    q2: { type: 'soru', date: d, ders: 'Fizik', n: 20, at: 2 },
+    q3: { type: 'soru', date: d, ders: 'Matematik', n: -1, at: 3 },
+    q4: { type: 'soru', date: d, ders: 'Kimya', n: 'x', at: 4 },
+    q5: { type: 'soru', date: '2026-11-21', ders: 'Kimya', n: -5, at: 5 }
+  }), 4);
+  assert.equal(L.questionsOn(s.questions, d), 35);
+  assert.equal(s.questions.find((q) => q.ders === 'Matematik').n, 15);
+  assert.equal(L.questionsOn(s.questions, '2026-11-21'), 0);
+  assert.equal(s.questions.length, 2);
+  const days = L.questionDays(s.questions, d, 7);
+  assert.equal(days.length, 7);
+  assert.equal(days[6].n, 35);
+  // eski kayıtlar 120 günden sonra atılır
+  L.addQuestions(s, '2027-04-01', 'Fizik', 3);
+  assert.equal(s.questions.length, 1);
+});
+
 test('cihazdan erteleme gelir, kronometre o oturumdaysa durur', () => {
   const s = defaults();
   const d = '2026-11-19';

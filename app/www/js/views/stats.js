@@ -21,6 +21,12 @@ export function render(app) {
     }
   }
   const tasksDone = s.tasks.filter((t) => t.done).length;
+  const qDays = L.questionDays(s.questions, today, 7);
+  const qTotal = qDays.reduce((a, d) => a + d.n, 0);
+  const qMax = Math.max(10, ...qDays.map((d) => d.n));
+  const qBy = {};
+  for (const q of s.questions || []) if (q.tarih >= L.addDays(today, -6)) qBy[q.ders] = (qBy[q.ders] || 0) + q.n;
+  const qSub = Object.entries(qBy).sort((a, b) => b[1] - a[1]).slice(0, 4);
 
   return `
   ${pageHead('İstatistik', 'Son 7 gün')}
@@ -39,6 +45,18 @@ export function render(app) {
     ${subjects.length
       ? subjects.map((x) => `<div class="hbar"><span>${esc(x.ders)}</span><div class="progress"><i style="width:${Math.round((x.min / sMax) * 100)}%;background:${L.dersRenk(x.ders)}"></i></div><span>${L.fmtMin(x.min)}</span></div>`).join('')
       : '<p class="muted small">Bu hafta henüz kayıtlı çalışma yok. Bir oturumu tamamladığında ya da kronometreyi bitirdiğinde burada görünür.</p>'}
+  </section>
+  <section class="card surface" aria-label="Çözülen soru">
+    <div class="spread">
+      <span class="eyebrow">Çözülen soru</span>
+      <span class="chip">bugün ${L.questionsOn(s.questions, today)}</span>
+    </div>
+    ${qTotal
+      ? `<div class="big-row"><span class="big">${qTotal}</span><span class="muted">7 günde${qSub.length ? ' · ' + qSub.map(([d, n]) => `${esc(d)} ${n}`).join(' · ') : ''}</span></div>
+    <div class="bars" style="--n:7">
+      ${qDays.map((d) => `<div class="bar-col${d.date === today ? ' hot' : ''}"><em>${d.n || ''}</em><i style="height:${Math.round((d.n / qMax) * 90)}px"></i><span>${d.label}</span></div>`).join('')}
+    </div>`
+      : '<p class="muted small">Masa saatinde YKS → Soru ekranından girdiğin sorular burada görünür.</p>'}
   </section>
   <div class="grid2">
     <div class="card tight surface">
