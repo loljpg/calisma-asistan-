@@ -278,6 +278,22 @@ static bool phBack() {
   return false;
 }
 
+// --- BMP yazma (24 bit, aşağıdan yukarı; ekran görüntüsü ve Çizim'in "Resim olarak kaydet"i) ---
+static bool bmpHeader(File& f, int W, int H) {
+  uint8_t h[54] = {'B', 'M'};
+  auto put32 = [&](int o, uint32_t v) {
+    for (int i = 0; i < 4; i++) h[o + i] = v >> (8 * i);
+  };
+  uint32_t img = W * 3 * H;  // satır boyu 4'ün katı olmalı (320 × 3 öyle)
+  put32(2, 54 + img), put32(10, 54), put32(14, 40), put32(18, W), put32(22, H), put32(34, img), put32(38, 2835), put32(42, 2835);
+  h[26] = 1, h[28] = 24;
+  return f.write(h, 54) == 54;
+}
+static void bmpPut565(uint8_t* row, int x, uint16_t c) {
+  uint8_t r5 = c >> 11, g6 = (c >> 5) & 63, b5 = c & 31;
+  row[x * 3] = b5 << 3 | b5 >> 2, row[x * 3 + 1] = g6 << 2 | g6 >> 4, row[x * 3 + 2] = r5 << 3 | r5 >> 2;
+}
+
 // --- Ekran görüntüsü: ekran satır satır okunur, /daxen/foto/ekran-*.bmp (24 bit, aşağıdan yukarı) ---
 // Sistem menüsünden ya da Terminal'deki screenshot komutundan (çizim bitsin diye kısa bir gecikmeyle).
 // Ekranın veri çıkışı bağlı değilse okunan her piksel aynı çıkar: o zaman dosya silinir.
@@ -293,14 +309,7 @@ static String phScreenshot() {
   if (!px || !row) return "";
   File f = SD.open(nm, FILE_WRITE);
   if (!f) return "";
-  uint8_t h[54] = {'B', 'M'};
-  auto put32 = [&](int o, uint32_t v) {
-    for (int i = 0; i < 4; i++) h[o + i] = v >> (8 * i);
-  };
-  put32(2, 54 + W * 3 * H), put32(10, 54), put32(14, 40), put32(18, W), put32(22, H), put32(34, W * 3 * H);
-  put32(38, 2835), put32(42, 2835);
-  h[26] = 1, h[28] = 24;
-  bool ok = f.write(h, 54) == 54, same = true;
+  bool ok = bmpHeader(f, W, H), same = true;
   uint16_t first = 0;
   {
     Gfx g;
@@ -310,8 +319,7 @@ static String phScreenshot() {
         uint16_t c = px[x] >> 8 | px[x] << 8;  // readRect bayt sırası ters verir
         if (y == H - 1 && x == 0) first = c;
         same &= c == first;
-        uint8_t r5 = c >> 11, g6 = (c >> 5) & 63, b5 = c & 31;
-        row[x * 3] = b5 << 3 | b5 >> 2, row[x * 3 + 1] = g6 << 2 | g6 >> 4, row[x * 3 + 2] = r5 << 3 | r5 >> 2;
+        bmpPut565(row.get(), x, c);
       }
       ok = f.write(row.get(), W * 3) == (size_t)W * 3;
     }

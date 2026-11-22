@@ -275,8 +275,7 @@ static void yksDrawSoruChart() {
   // gün adları: her ikinci gün
   for (int i = SQ_DAYS - 1; i >= 0; i -= 2) {
     int d = SQ_DAYS - 1 - i, wd = sqWeekday((int32_t)sq.day - d);
-    static const char* const G[] = {"Pt", "Sa", "Ça", "Pe", "Cu", "Ct", "Pz"};
-    text(d == 0 ? "bugün" : G[wd], x0 + i * (bw + gap) + bw / 2, top + 20 + h, F_XS, d == 0 ? C_ACC : C_TEXT3, C_BG, TC_DATUM);
+    text(d == 0 ? "bugün" : GUN_KISA[(wd + 1) % 7], x0 + i * (bw + gap) + bw / 2, top + 20 + h, F_XS, d == 0 ? C_ACC : C_TEXT3, C_BG, TC_DATUM);
   }
 }
 
@@ -404,8 +403,7 @@ static void yksDrawHist() {
       tft.fillRect(x, y, cs, cs, lv[histLevel(hm[ago])]);
       if (ago == 0) tft.drawRect(x - 1, y - 1, cs + 2, cs + 2, C_TEXT);
     }
-  static const char* const G[] = {"Pt", "", "Ça", "", "Cu", "", "Pz"};
-  for (int d = 0; d < 7; d++) text(G[d], 12, gy + d * (cs + gp) + cs / 2, F_XS, C_TEXT3, C_BG, ML_DATUM);
+  for (int d = 0; d < 7; d += 2) text(GUN_KISA[(d + 1) % 7], 8, gy + d * (cs + gp) + cs / 2, F_XS, C_TEXT3, C_BG, ML_DATUM);
   int w7 = 0, w28 = 0, cur, best;
   for (int i = 0; i < 28; i++) (i < 7 ? w7 : w28) += hm[i];
   w28 += w7;

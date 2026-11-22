@@ -53,9 +53,8 @@ static String alarmDays(uint8_t d) {
   if (d == 0x1F) return "Hafta içi";
   if (d == 0x60) return "Hafta sonu";
   String s;
-  const char* k[] = {"Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"};
-  for (int i = 0; i < 7; i++)
-    if (d & (1 << i)) s += String(s.length() ? " " : "") + k[i];
+  for (int i = 0; i < 7; i++)  // bit 0 pazartesi
+    if (d & (1 << i)) s += String(s.length() ? " " : "") + GUN_KISA[(i + 1) % 7];
   return s;
 }
 

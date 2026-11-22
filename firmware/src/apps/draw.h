@@ -757,17 +757,7 @@ static bool drExport(const DrDoc& d, const String& stem, String& out) {
   if (!band.createSprite(W, B)) return false;
   std::unique_ptr<uint8_t[]> row(new (std::nothrow) uint8_t[W * 3]);
   File f = SD.open(out, FILE_WRITE);
-  bool ok = row && f;
-  if (ok) {
-    uint32_t img = W * 3 * H, fsz = 54 + img;
-    uint8_t h[54] = {'B', 'M'};
-    auto put32 = [&](int o, uint32_t v) {
-      for (int i = 0; i < 4; i++) h[o + i] = v >> (8 * i);
-    };
-    put32(2, fsz), put32(10, 54), put32(14, 40), put32(18, W), put32(22, H), put32(34, img), put32(38, 2835), put32(42, 2835);
-    h[26] = 1, h[28] = 24;
-    ok = f.write(h, 54) == 54;
-  }
+  bool ok = row && f && bmpHeader(f, W, H);
   for (int b = (H + B - 1) / B - 1; b >= 0 && ok; b--) {  // BMP aşağıdan yukarı
     int top = DR_CY + b * B, rows = std::min(B, H - b * B);
     band.fillSprite(d.paper);
@@ -779,11 +769,7 @@ static bool drExport(const DrDoc& d, const String& stem, String& out) {
       drItemDraw(band, &band, it, drP(d, it), 1, 0, -top, d.paper);
     }
     for (int r = rows - 1; r >= 0 && ok; r--) {
-      for (int x = 0; x < W; x++) {
-        uint16_t c = band.readPixel(x, r);
-        uint8_t r5 = c >> 11, g6 = (c >> 5) & 63, b5 = c & 31;
-        row[x * 3] = b5 << 3 | b5 >> 2, row[x * 3 + 1] = g6 << 2 | g6 >> 4, row[x * 3 + 2] = r5 << 3 | r5 >> 2;
-      }
+      for (int x = 0; x < W; x++) bmpPut565(row.get(), x, band.readPixel(x, r));
       ok = f.write(row.get(), W * 3) == (size_t)W * 3;
     }
   }
