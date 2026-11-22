@@ -205,8 +205,13 @@ static uint32_t sqToday() {
 static void sqLoad() {
   if (sqLoaded) return;
   sqLoaded = true;
-  if (prefs.getBytesLength("soru") == sizeof sq) prefs.getBytes("soru", &sq, sizeof sq);
-  sqDers = std::min<uint8_t>(prefs.getUChar("soruDers", 1), SQ_DERS - 1);
+  {
+    Lock l;
+    prefs.begin("soru", true);
+    if (prefs.getBytesLength("g") == sizeof sq) prefs.getBytes("g", &sq, sizeof sq);
+    sqDers = std::min<uint8_t>(prefs.getUChar("ders", 1), SQ_DERS - 1);
+    prefs.end();
+  }
   if (sq.goal == 0 || sq.goal > 2000) sq.goal = 100;
   uint32_t d = sqToday();
   if (d) sqRoll(sq, d);
@@ -215,8 +220,13 @@ static void sqLoad() {
 static void sqFlush() {
   if (!sqChangedAt) return;
   sqChangedAt = 0;
-  prefs.putBytes("soru", &sq, sizeof sq);
-  prefs.putUChar("soruDers", sqDers);
+  {
+    Lock l;
+    prefs.begin("soru", false);
+    prefs.putBytes("g", &sq, sizeof sq);
+    prefs.putUChar("ders", sqDers);
+    prefs.end();
+  }
   for (int i = 0; i < SQ_DERS; i++)
     if (sqPend[i]) {
       enqueueSoru(SQ_DERS_AD[i], sqPend[i]);

@@ -1212,7 +1212,9 @@ static void testSoru() {
   CHECK(g_soru.size() == 1 && g_soru[0].first == "Kimya" && g_soru[0].second == 9);
   {
     SoruLog back;
-    CHECK(prefs.getBytes("soru", &back, sizeof back) == sizeof back && back.last[0] == sq.last[0]);
+    prefs.begin("soru", true);
+    CHECK(prefs.getBytes("g", &back, sizeof back) == sizeof back && back.last[0] == sq.last[0]);
+    prefs.end();
   }
   yksSoruTap(250, 44);  // ders seçici
   CHECK(sqPick);
@@ -1569,6 +1571,8 @@ int main() {
   testDraw();
   testSoru();
   testStore();
+  group("kalıcı ayarlar");
+  CHECK(Preferences::misuse() == 0);  // her kullanım begin()/end() içinde
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

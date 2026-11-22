@@ -101,6 +101,24 @@ static bool webSysDir(const String& d) {  // bu klasöre yazmak yasak mı
 
 static void webRedirect(const String& to);
 
+// Tarayıcıda düzenlenebilen metin dosyaları (en çok 64 KB; sistem klasörleri hariç)
+static bool webTextExt(const String& n) {
+  String e = extOf(n);
+  return e == "txt" || e == "md" || e == "lua" || e == "csv" || e == "json" || e == "ini";
+}
+// JavaScript dizgisi olarak (tırnak, ters eğik çizgi, satır sonu, </ kaçışlı)
+static String webJs(const String& s) {
+  String o = "\"";
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '"' || c == '\\') o += '\\', o += c;
+    else if (c == '\n') o += "\\n";
+    else if (c == '<') o += "\\x3c";
+    else if ((uint8_t)c >= 0x20) o += c;
+  }
+  return o + "\"";
+}
+
 // Oturum çerezi geçerli mi (sabit süreli karşılaştırma)
 static bool webAuthed() {
   webLastReq = millis();
@@ -217,23 +235,98 @@ static void webPage() {
   }
   for (auto& e : files) {
     String p = joinPath(dir, e.first);
+    bool editable = !webSysPath(p) && webTextExt(e.first) && e.second <= 65536;
     web->sendContent("<div class=row><span><a href='/dl?f=" + webUrlEnc(p) + "'>" + webEsc(e.first) + "</a></span><span class=mut style='flex:none'>" +
                      fmtBytes(e.second) + "</span>" +
+                     (editable ? "<a class=mut style='flex:none' href='/duzenle?f=" + webUrlEnc(p) + "'>Düzenle</a>" : String("")) +
                      (webSysPath(p) ? String("")
                                     : "<form class=inl method=post action='/del?f=" + webUrlEnc(p) +
                                           "' onsubmit='return confirm(\"Silinsin mi?\")'><button class=del>Sil</button></form>") +
                      "</div>");
   }
   if (dirs.empty() && files.empty()) web->sendContent("<p class=mut>Klasör boş.</p>");
+  if (!webSysDir(dir))
+    web->sendContent("<div class=box><form onsubmit=\"let v=nv.value.trim();if(v){if(v.indexOf('.')<0)v+='.txt';"
+                     "location='/duzenle?f='+encodeURIComponent(" + webEsc(webJs(dir == "/" ? String("") : dir)) +
+                     "+'/'+v)}return false\"><b>Yeni metin dosyası</b><input type=text id=nv placeholder='not.txt'>"
+                     "<button>Oluştur</button></form></div>");
   web->sendContent("<div class=box><form method=post action='/mkdir?d=" + webUrlEnc(dir) +
                    "'><b>Yeni klasör</b><input type=text name=n placeholder='Klasör adı'><button>Oluştur</button></form></div>"
-                   "<p class=mut><a href='/hesap'>Bulut hesabı bilgileri &#8594;</a></p></main></body></html>");
+                   "<p class=mut><a href='/yapilacak'>Yapılacaklar &#8594;</a> &nbsp; <a href='/hesap'>Bulut hesabı bilgileri &#8594;</a></p>"
+                   "</main></body></html>");
   web->sendContent("");
 }
 
 static void webRedirect(const String& to) {
   web->sendHeader("Location", to);
   web->send(303, "text/plain", "");
+}
+
+// Metin düzenleyici: içerik /dl ile okunur, /put ile yazılır (yükleme yolu: önce .part, sonra ad değişir)
+static void webEditPage() {
+  if (!webGatePage()) return;
+  String p = webSafePath(web->arg("f")), dir = dirName(p), name = baseName(p);
+  if (webSysDir(dir) || !name.length() || !webTextExt(name)) {
+    web->send(403, "text/plain; charset=utf-8", "Bu dosya düzenlenemez");
+    return;
+  }
+  web->send(200, "text/html; charset=utf-8",
+            String(FPSTR(WEB_HEAD)) + "<h2>" + webEsc(name) + "</h2><p class=mut>" + webEsc(dir) + "</p>"
+            "<textarea id=t spellcheck=false style='width:100%;height:60vh;box-sizing:border-box;font:14px/1.4 monospace;"
+            "background:#101010;color:#C5C9CE;border:1px solid #30353A;border-radius:3px;padding:8px'></textarea>"
+            "<p><button id=k>Kaydet</button> &nbsp; <a href='/?d=" + webUrlEnc(dir) + "'>&#8592; Klasöre dön</a> &nbsp; <span id=m class=mut></span></p>"
+            "<script>const f=" + webJs(p) + ",d=" + webJs(dir) + ",n=" + webJs(name) + ";"
+            "fetch('/dl?f='+encodeURIComponent(f)).then(r=>r.ok?r.text():'').then(s=>{t.value=s;m.textContent=s?'':'Yeni dosya'});"
+            "k.onclick=async()=>{if(new Blob([t.value]).size>65536){m.textContent='En çok 64 KB';return}"
+            "k.disabled=true;m.textContent='Kaydediliyor…';let ok=false;try{const r=await fetch('/put?d='+encodeURIComponent(d)+'&n='+"
+            "encodeURIComponent(n),{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:new Blob([t.value||'\\n'])});ok=r.ok}catch(e){}"
+            "m.textContent=ok?'Kaydedildi':'Kaydedilemedi. Kart Aktarım ekranında mı?';k.disabled=false}</script></main></body></html>");
+}
+
+// Yapılacaklar (apps/todo.h; NVS'de). Liste ekran kilidi tutularak değiştirilir: arayüz o sırada okumaz.
+static void webTodoPage() {
+  if (!webGatePage()) return;
+  String h = String(FPSTR(WEB_HEAD)) + "<h2>Yapılacaklar</h2>";
+  {
+    Gfx g;
+    if (!todoLoaded) todoLoad();
+    for (size_t i = 0; i < todos.size(); i++) {
+      const TodoItem& t = todos[i];
+      String f = "<form class=inl method=post action='/yapilacak'><input type=hidden name=i value=" + String(i) + "><input type=hidden name=a value=";
+      h += "<div class=row>" + f + "t><button class=del style='color:#C5C9CE;font-size:18px'>" + String(t.done ? "&#9745;" : "&#9744;") +
+           "</button></form><span" + (t.done ? String(" class=mut style='text-decoration:line-through'") : String("")) + ">" + webEsc(t.text) +
+           "</span>" + f + "s><button class=del>Sil</button></form></div>";
+    }
+    if (todos.empty()) h += "<p class=mut>Liste boş.</p>";
+    if (todos.size() < (size_t)TD_MAX)
+      h += "<div class=box><form method=post action='/yapilacak'><input type=hidden name=a value=e><b>Ekle</b>"
+           "<input type=text name=s maxlength=120 autofocus placeholder='Yeni iş'><button>Ekle</button></form></div>";
+  }
+  web->send(200, "text/html; charset=utf-8", h + "<p class=mut><a href='/'>&#8592; Dosyalar</a></p></main></body></html>");
+}
+static void webTodoPost() {
+  if (!webGate()) return;
+  String a = web->arg("a");
+  int i = web->arg("i").toInt();
+  {
+    Gfx g;
+    if (!todoLoaded) todoLoad();
+    if (a == "t" && i >= 0 && i < (int)todos.size()) {
+      todos[i].done = !todos[i].done;
+    } else if (a == "s" && i >= 0 && i < (int)todos.size()) {
+      todos.erase(todos.begin() + i);
+    } else if (a == "e" && todos.size() < (size_t)TD_MAX) {
+      String s = web->arg("s");
+      s.replace("\n", " ");
+      s.replace("\r", " ");
+      s.trim();
+      if (s.length() > 120) s = s.substring(0, 120);
+      if (s.length()) todos.push_back({s, false});
+    }
+    todoSave();
+  }
+  dataDirty = true;  // açıksa Yapılacaklar ekranı yeniden çizilir
+  webRedirect("/yapilacak");
 }
 
 static void webSetMsg(const String& m) {
@@ -439,6 +532,9 @@ static bool webStart() {
     if (n.length() && !webSysDir(d)) SD.mkdir(joinPath(d, n));
     webRedirect("/?d=" + webUrlEnc(d));
   });
+  web->on("/duzenle", HTTP_GET, webEditPage);
+  web->on("/yapilacak", HTTP_GET, webTodoPage);
+  web->on("/yapilacak", HTTP_POST, webTodoPost);
   web->on("/hesap", HTTP_GET, webAccountPage);
   web->on("/hesap", HTTP_POST, []() {
     if (!webGate()) return;

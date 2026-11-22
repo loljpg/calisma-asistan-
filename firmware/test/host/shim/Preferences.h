@@ -5,8 +5,10 @@
 // Ev önizlemesi: kalıcı ayarlar bellekte.
 class Preferences {
  public:
-  bool begin(const char* ns, bool = false) { _ns = ns; return true; }
-  void end() {}
+  bool begin(const char* ns, bool = false) { _ns = ns; _open = true; return true; }
+  void end() { _open = false; }
+  // begin() olmadan okuma/yazma kartta sessizce başarısız olur: burada sayılır, testler 0 bekler
+  static int& misuse() { static int n = 0; return n; }
   bool remove(const char* k) { db()[key(k)].clear(); db().erase(key(k)); return true; }
   bool clear() {  // yalnızca bu ad alanının anahtarları
     std::string pre = _ns + "/";
@@ -34,7 +36,11 @@ class Preferences {
   size_t getBytesLength(const char* k) { auto it = db().find(key(k)); return it == db().end() ? 0 : it->second.size(); }
   size_t getBytes(const char* k, void* buf, size_t n) { auto it = db().find(key(k)); if (it == db().end()) return 0; size_t m = std::min(n, it->second.size()); memcpy(buf, it->second.data(), m); return m; }
  private:
-  std::string key(const char* k) { return _ns + "/" + k; }
+  std::string key(const char* k) {
+    if (!_open) misuse()++;
+    return _ns + "/" + k;
+  }
   static std::map<std::string, std::string>& db() { static std::map<std::string, std::string> m; return m; }
   std::string _ns;
+  bool _open = false;
 };
