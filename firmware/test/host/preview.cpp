@@ -305,6 +305,31 @@ int main(int argc, char** argv) {
   if (want("s4")) {
     appOpen(&APP_GAMES);
     shot("a0-oyunlar");
+    appOpenChild(&APP_SMAC);
+    shot("a8-smac");
+    smRaw(TE_DOWN, 160, 150);
+    smRaw(TE_MOVE, 120, 200);
+    smTick();
+    shot("a8b-smac-nisan");
+    {
+      bool ok = false;
+      for (int dx = -80; dx <= 0 && !ok; dx += 4)
+        for (int dy = 20; dy <= 90 && !ok; dy += 4) {
+          smNew();
+          smRaw(TE_DOWN, 160, 150); smRaw(TE_MOVE, 160 + dx, 150 + dy); smRaw(TE_UP, 160 + dx, 150 + dy);
+          for (int i = 0; i < 400 && smSt != SM_READY && smSt != SM_OVER; i++) { g_ms += 16; smTick(); }
+          ok = smScore > 0;
+        }
+      smDraw(true);
+      smSetPop("Mükemmel +2", smH[smCur].x, smH[smCur].y - 46, SM_RIM, 2000);
+      smPerfect = 3;
+      smFlush();
+      shot("a8c-smac-skor");
+      smOver();
+      shot("a8d-smac-bitti");
+    }
+    appExit();
+    appOpen(&APP_GAMES);
     appOpenChild(&APP_SNAKE);
     snDraw(true);
     for (int i = 0; i < 6; i++) { snPaused = false; snStep(); }

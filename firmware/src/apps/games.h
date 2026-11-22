@@ -6,6 +6,7 @@
 #include "games/mines.h"
 #include "games/sudoku.h"
 #include "games/chess.h"
+#include "games/smac.h"
 
 struct GameDef {
   const App* app;
@@ -13,15 +14,18 @@ struct GameDef {
   const char* bestNs;  // en iyi skorun saklandığı ad alanı (yoksa boş)
 };
 static const GameDef GAMES[] = {
-    {&APP_BLOKPATLAT, "Parçaları yerleştir, satırları patlat", "bp"},
-    {&APP_SNAKE, "Kaydırarak yön ver, yemi ye", "snake"},
-    {&APP_2048, "Aynı sayıları birleştir", "g2048"},
-    {&APP_MINES, "Mayınlara basmadan tarlayı aç", ""},
-    {&APP_SUDOKU, "Kolay, orta ve zor bulmacalar", ""},
-    {&APP_CHESS, "DAXEN'e karşı oyna", ""},
+    {&APP_SMAC, "Potadan potaya at", "smac"},
+    {&APP_BLOKPATLAT, "Satırları patlat", "bp"},
+    {&APP_SNAKE, "Yemi ye, uza", "snake"},
+    {&APP_2048, "Sayıları birleştir", "g2048"},
+    {&APP_MINES, "Mayınlardan kaç", ""},
+    {&APP_SUDOKU, "Üç zorluk", ""},
+    {&APP_CHESS, "DAXEN'e karşı", ""},
 };
 static const int GAME_N = sizeof(GAMES) / sizeof(GAMES[0]);
-static const int GM_ROW = 35;
+// İki sütunlu döşeme (en çok 8 oyun)
+static const int GM_W = 152, GM_H = 48, GM_GAP = 4;
+static void gmCell(int i, int& x, int& y) { x = 6 + (i % 2) * (GM_W + GM_GAP), y = HDR_H + 4 + (i / 2) * (GM_H + GM_GAP); }
 
 static uint32_t gameBest(const char* ns) {
   if (!ns || !*ns) return 0;
@@ -36,14 +40,25 @@ static void gmDraw(bool full) {
   if (full) header("Oyunlar");
   fillBg(0, HDR_H, SCR_W, SCR_H - HDR_H);
   for (int i = 0; i < GAME_N; i++) {
+    int x, y;
+    gmCell(i, x, y);
+    panel(x, y, GM_W, GM_H, C_SURF, C_LINE);
+    drawIcon(GAMES[i].app->icon, x + 8, y + 14, 20, C_TEXT2, C_SURF);
     uint32_t b = gameBest(GAMES[i].bestNs);
-    listRow(HDR_H + i * GM_ROW, GM_ROW, GAMES[i].app->icon, GAMES[i].app->name, GAMES[i].desc, b ? String(b) : String(""), true);
+    String bs = b ? String(b) : String("");
+    int bw = bs.length() ? textW(bs, F_XS) + 6 : 0;
+    text(fit(GAMES[i].app->name, F_SM, GM_W - 44 - bw), x + 36, y + 6, F_SM, C_TEXT, C_SURF);
+    if (bw) text(bs, x + GM_W - 6, y + 9, F_XS, C_TEXT3, C_SURF, TR_DATUM);
+    text(fit(GAMES[i].desc, F_XS, GM_W - 42), x + 36, y + 28, F_XS, C_TEXT2, C_SURF);
   }
 }
 
 static void gmTap(int x, int y) {
-  int i = (y - HDR_H) / GM_ROW;
-  if (y >= HDR_H && i < GAME_N) appOpenChild(GAMES[i].app);
+  for (int i = 0; i < GAME_N; i++) {
+    int cx, cy;
+    gmCell(i, cx, cy);
+    if (inRect(x, y, cx, cy, GM_W, GM_H)) appOpenChild(GAMES[i].app);
+  }
 }
 
 static const App APP_GAMES = {"Oyunlar", "Oyunlar", I_GAMEPAD, nullptr, gmDraw, gmTap, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};

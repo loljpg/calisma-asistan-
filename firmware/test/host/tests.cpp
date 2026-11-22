@@ -1367,6 +1367,79 @@ static void testShot() {
   CHECK(n == 1);
 }
 
+// Smaç: bir atışı baştan sona oynatır (dokun, sürükle, bırak; potaya girene ya da düşene kadar)
+static void smShot(int dx, int dy) {
+  smRaw(TE_DOWN, 160, 150);
+  smRaw(TE_MOVE, 160 + dx / 2, 150 + dy / 2);
+  smRaw(TE_UP, 160 + dx, 150 + dy);
+  for (int i = 0; i < 400 && smSt != SM_READY && smSt != SM_OVER; i++) {
+    g_ms += 16;
+    smTick();
+  }
+}
+static void testSmac() {
+  group("Smaç");
+  appOpen(&APP_GAMES);
+  appOpenChild(&APP_SMAC);
+  CHECK(smLoaded && smSt == SM_READY && smH[smCur].used && smH[smNext].used && smH[smNext].y < smH[smCur].y);
+  // kısa sürükleme atış değildir
+  smRaw(TE_DOWN, 160, 150);
+  smRaw(TE_UP, 163, 154);
+  CHECK(smSt == SM_READY);
+  // aşağı doğru nişan atış değildir
+  smRaw(TE_DOWN, 160, 150);
+  smRaw(TE_MOVE, 160, 100);
+  CHECK(smNDots == 0);
+  smRaw(TE_UP, 160, 100);
+  CHECK(smSt == SM_READY);
+  // nişan: noktalar ve pota dönüşü
+  smRaw(TE_DOWN, 160, 150);
+  smRaw(TE_MOVE, 190, 200);
+  CHECK(smSt == SM_AIM && smNDots > 5 && smH[smCur].ang < -0.1f);
+  smRaw(TE_UP, 160, 151);  // geri bırakınca iptal
+  CHECK(smSt == SM_READY && smH[smCur].ang == 0);
+  // potaya giren bir atış bulunur (sıradaki pota sağda)
+  int found = 0;
+  for (int dx = -80; dx <= 0 && !found; dx += 4)
+    for (int dy = 20; dy <= 90 && !found; dy += 4) {
+      smNew();
+      smShot(dx, dy);
+      if (smScore >= 1) found = 1;
+    }
+  CHECK(found && smSt == SM_READY && smH[smCur].used && smH[smNext].used);
+  CHECK(smSY(smH[smCur].y) > 180 && smSY(smH[smCur].y) < 192);  // kamera kaydı
+  int used = 0;
+  for (auto& h : smH) used += h.used;
+  CHECK(used == 2);  // ekrandan çıkan eski pota bırakıldı
+  // ıska: top aşağı düşer, oyun biter, en iyi skor kaydedilir
+  uint32_t sc = smScore;
+  smRaw(TE_DOWN, 160, 150);
+  smRaw(TE_MOVE, 100, 160);
+  smRaw(TE_UP, 60, 155);  // sağa doğru yatık, zayıf: duvara çarpıp düşer ya da geri gelir
+  for (int i = 0; i < 400 && smSt != SM_OVER && smSt != SM_READY; i++) {
+    g_ms += 16;
+    smTick();
+  }
+  if (smSt == SM_READY) {  // geri potaya düştüyse bir daha: bu kez kesin aşağı
+    smSt = SM_FLY;
+    smVx = 0, smVy = 300;
+    smBy = smH[smCur].y + 40;
+    for (int i = 0; i < 100 && smSt != SM_OVER; i++) {
+      g_ms += 16;
+      smTick();
+    }
+  }
+  CHECK(smSt == SM_OVER && smScore == sc && smBest >= sc);
+  {
+    prefs.begin("smac", true);
+    CHECK(prefs.getUInt("best", 0) == smBest);
+    prefs.end();
+  }
+  smRaw(TE_DOWN, 160, 155);  // Yeniden
+  CHECK(smSt == SM_READY && smScore == 0);
+  appExit();
+}
+
 static void testGizli() {
   group("gizli özellikler");
   homeShow();
@@ -1610,6 +1683,7 @@ int main() {
   testSoru();
   testStore();
   testShot();
+  testSmac();
   group("kalıcı ayarlar");
   CHECK(Preferences::misuse() == 0);  // her kullanım begin()/end() içinde
   printf("\n%d denetim geçti, %d hata\n", g_pass, g_fail);

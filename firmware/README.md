@@ -46,7 +46,7 @@ satıra dokununca ya da BOOT'a basınca kapanır. Menü açıkken alttaki uygula
 | **Saat** | Alarm (günler, erteleme), geri sayım, kronometre (turlar), dünya saatleri |
 | **Hava** | Şimdi, 24 saatlik grafik, 7 günlük tahmin, şehir arama (Open-Meteo) |
 | **Yapılacaklar** | Basit yapılacaklar listesi |
-| **Oyunlar** | Blok Patlat, Yılan, 2048, Mayın Tarlası, Sudoku, Satranç (3 zorluk) |
+| **Oyunlar** | Smaç (sapanla potadan potaya: geri çek, bırak; Mükemmel ve Bant bonusları, kayan potalar), Blok Patlat, Yılan, 2048, Mayın Tarlası, Sudoku, Satranç (3 zorluk) |
 | **Fotoğraflar** | SD'deki JPEG ve BMP resimleri (`/daxen/foto`, `/DCIM`, `/Resimler`, `/Pictures`) |
 | **Okuyucu** | Metin kitapları, kaldığı sayfayı hatırlar (`/daxen/kitaplar`) |
 | **Çizim** | Vektör çizim: kalem (titreme sabitleyicili), çizgi, dikdörtgen, elips (boş/dolu), yazı, silgi, damlalık; 20 renk, 1-20 px; geri al/yinele; ayna, kılavuz (şekiller ızgaraya yaslanır), kağıt rengi; resim olarak kaydetme (`/daxen/foto/*.bmp`); küçük resimli liste (`/daxen/cizim`) |
